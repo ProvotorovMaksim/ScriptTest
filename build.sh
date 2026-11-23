@@ -24,11 +24,14 @@ PROJECTS=(
   "services/consumer/consumer.csproj"
   "apps/amn/amn.csproj"
   "apps/sample/sample.csproj"
-  "apps/ship-link/ship-link.csproj"
 )
 
 for proj in "${PROJECTS[@]}"; do
   proj_path="$ROOT_DIR/$proj"
+  if [ ! -f "$proj_path" ]; then
+    echo "Warning: $proj_path not found, skipping"
+    continue
+  fi
   name=$(basename "$proj" .csproj)
   echo "--- Building $name ---"
   dotnet build "$proj_path" -c Release -o "$OUTPUT_DIR" 2>&1 | tail -3
