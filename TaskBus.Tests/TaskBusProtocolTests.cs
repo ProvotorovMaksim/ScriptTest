@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Xunit;
-using SpaceEngineers.CommonLibs;
+using SpaceEngineers.Libs.IgcCore;
 
 namespace TaskBus.Tests
 {
