@@ -1,6 +1,6 @@
 using System;
 
-namespace SpaceEngineers.CommonLibs
+namespace SpaceEngineers.Libs.IgcCore
 {
     /// <summary>
     /// Callback used by <see cref="TaskBusProducer"/> to send an IGC message.

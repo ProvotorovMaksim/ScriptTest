@@ -2,7 +2,7 @@ using System;
 using Sandbox.ModAPI.Ingame;
 using VRageMath;
 
-namespace SpaceEngineers.CommonLibs
+namespace SpaceEngineers.Libs.IgcCore
 {
     /// <summary>
     /// Wraps physical information from an <see cref="IMyRemoteControl"/> block.

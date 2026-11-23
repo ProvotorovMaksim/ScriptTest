@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using SpaceEngineers.CommonLibs;
 
-namespace SpaceEngineers.UWBlockPrograms.TaskBrokerNs
+namespace SpaceEngineers.Services.Broker
 {
     public sealed class Program : MyGridProgram
     {

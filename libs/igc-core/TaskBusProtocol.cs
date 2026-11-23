@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 
-namespace SpaceEngineers.CommonLibs
+namespace SpaceEngineers.Libs.IgcCore
 {
     /// <summary>
     /// Represents a parsed TaskBus JSON envelope exchanged over IGC between programmable blocks.

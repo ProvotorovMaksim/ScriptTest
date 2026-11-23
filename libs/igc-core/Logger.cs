@@ -1,6 +1,6 @@
 using Sandbox.ModAPI.Ingame;
 
-namespace SpaceEngineers.CommonLibs
+namespace SpaceEngineers.Libs.IgcCore
 {
     /// <summary>
     /// Simple logger that writes trace, warning, and error messages to a terminal block's CustomData.

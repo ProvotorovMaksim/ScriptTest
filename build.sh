@@ -24,6 +24,7 @@ PROJECTS=(
   "services/consumer/consumer.csproj"
   "apps/amn/amn.csproj"
   "apps/sample/sample.csproj"
+  "apps/ship-link/ship-link.csproj"
 )
 
 for proj in "${PROJECTS[@]}"; do

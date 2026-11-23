@@ -1,9 +1,9 @@
 using System;
 using System.Globalization;
 using System.Text;
-using SpaceEngineers.CommonLibs;
+using SpaceEngineers.Libs.IgcCore;
 
-namespace SpaceEngineers.CommonLibs
+namespace SpaceEngineers.Libs.IgcCore
 {
     /// <summary>
     /// Shared helper for Space Engineers programmable blocks that communicate via TaskBus IGC messages.

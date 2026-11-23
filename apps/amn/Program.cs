@@ -12,7 +12,7 @@ using SpaceEngineers.CommonLibs;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
-namespace SpaceEngineers.UWBlockPrograms.SampleMainNs
+namespace SpaceEngineers.Apps.Amn
 {
     public sealed class Program : MyGridProgram
     {

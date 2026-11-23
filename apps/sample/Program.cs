@@ -7,7 +7,7 @@ using VRageMath;
 using System.Text;
 using SpaceEngineers.CommonLibs;
 
-namespace SpaceEngineers.UWBlockPrograms.SampleMainNs
+namespace SpaceEngineers.Apps.Sample
 {
     public sealed class Program : MyGridProgram
     {
