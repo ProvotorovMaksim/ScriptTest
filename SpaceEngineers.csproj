@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <SpaceEngineers Condition="'$(SpaceEngineers)' == ''">$(SPACE_ENGINEERS_BIN64)</SpaceEngineers>
+    <SpaceEngineers Condition="'$(SpaceEngineers)' == ''">/Users/twist_sz/Library/Application Support/SpaceEngineersDedicatedServer/SE-Libraries/DedicatedServer64</SpaceEngineers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Sandbox.Common">
+      <HintPath>$(SpaceEngineers)/Sandbox.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="Sandbox.Game">
+      <HintPath>$(SpaceEngineers)/Sandbox.Game.dll</HintPath>
+    </Reference>
+    <Reference Include="SpaceEngineers.Game">
+      <HintPath>$(SpaceEngineers)/SpaceEngineers.Game.dll</HintPath>
+    </Reference>
+    <Reference Include="SpaceEngineers.ObjectBuilders">
+      <HintPath>$(SpaceEngineers)/SpaceEngineers.ObjectBuilders.dll</HintPath>
+    </Reference>
+    <Reference Include="VRage">
+      <HintPath>$(SpaceEngineers)/VRage.dll</HintPath>
+    </Reference>
+    <Reference Include="VRage.Game">
+      <HintPath>$(SpaceEngineers)/VRage.Game.dll</HintPath>
+    </Reference>
+    <Reference Include="VRage.Library">
+      <HintPath>$(SpaceEngineers)/VRage.Library.dll</HintPath>
+    </Reference>
+    <Reference Include="VRage.Math">
+      <HintPath>$(SpaceEngineers)/VRage.Math.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Scripts/**/*.cs" />
+    <Compile Remove="Scripts/igc.cs;Scripts/SampleMainFile.cs;Scripts/TaskBroker.cs;Scripts/TaskConsumer.cs" />
+  </ItemGroup>
+
+  <Target Name="ValidateSpaceEngineersAssemblies" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(SpaceEngineers)/Sandbox.Common.dll') Or !Exists('$(SpaceEngineers)/Sandbox.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.ObjectBuilders.dll') Or !Exists('$(SpaceEngineers)/VRage.dll') Or !Exists('$(SpaceEngineers)/VRage.Game.dll') Or !Exists('$(SpaceEngineers)/VRage.Library.dll') Or !Exists('$(SpaceEngineers)/VRage.Math.dll')"
+           Text="Required Space Engineers assemblies were not found in '$(SpaceEngineers)'. Set SPACE_ENGINEERS_BIN64 to the DedicatedServer64 directory." />
+  </Target>
+</Project>

@@ -1,0 +1,41 @@
+## IDE
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.ide/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Build / publish
+bin/
+obj/
+out/
+build/
+*.userprefs
+publish/
+
+## .NET / dotnet
+[Bb]in/
+[Oo]bj/
+[Rr]elease/
+x64/
+x86/
+*.dll
+*.exe
+*.app
+*.nupkg
+*.snk
+*.cache
+*.csproj.user
+*.publish.xml
+
+## Local / temporary
+*.log
+*.tmp
+*.temp
+venv/
+.env

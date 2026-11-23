@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Scripts/Common/TaskBusProtocol.cs" />
+    <Compile Include="Scripts/Common/TaskBusProducer.cs" />
+    <Compile Include="Scripts/Common/TaskBusIgcHelper.cs" />
+  </ItemGroup>
+
+</Project>
