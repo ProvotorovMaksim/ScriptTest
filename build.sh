@@ -22,6 +22,7 @@ mkdir -p "$OUTPUT_DIR"
 PROJECTS=(
   "services/broker/broker.csproj"
   "services/consumer/consumer.csproj"
+  "services/producer/producer.csproj"
   "apps/amn/amn.csproj"
   "apps/sample/sample.csproj"
 )

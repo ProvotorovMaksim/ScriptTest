@@ -14,7 +14,11 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="../../libs/igc-core/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../libs/taskbus-consumer/taskbus-consumer.csproj" />
+    <ProjectReference Include="../../libs/igc-core/igc-core.csproj" />
   </ItemGroup>
 
 </Project>

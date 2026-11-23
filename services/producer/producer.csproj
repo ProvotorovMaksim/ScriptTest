@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../../spaceengineers.props" />
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>SpaceEngineers.Services.Producer</RootNamespace>
+    <AssemblyName>TaskProducer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../libs/taskbus-producer/taskbus-producer.csproj" />
+    <ProjectReference Include="../../libs/igc-core/igc-core.csproj" />
+  </ItemGroup>
+
+</Project>

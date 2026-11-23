@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>SpaceEngineers.Libs.TaskBusProducer</RootNamespace>
+    <AssemblyName>TaskBus.Producer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="TaskBusProducer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../igc-core/igc-core.csproj" />
+  </ItemGroup>
+
+</Project>
