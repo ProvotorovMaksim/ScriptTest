@@ -24,6 +24,7 @@ PROJECTS=(
   "services/consumer/consumer.csproj"
   "services/producer/producer.csproj"
   "apps/amn/amn.csproj"
+  "apps/ship-link/ship-link.csproj"
   "apps/sample/sample.csproj"
 )
 

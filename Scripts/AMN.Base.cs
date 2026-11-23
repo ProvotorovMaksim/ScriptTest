@@ -8,7 +8,8 @@ using VRageMath;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using System.Text;
-using SpaceEngineers.CommonLibs;
+using SpaceEngineers.Libs.IgcCore;
+using SpaceEngineers.Libs.TaskBusProducer;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
