@@ -97,10 +97,16 @@ its cockpit is occupied. Reports expire after about five seconds without an
 update at normal simulation speed. Run `fleet off` to disable the roster and
 stop transmitting status. The setting persists in block Storage.
 
+Assign `assist on` and `assist off` to ShipLink toolbar actions to send or
+clear a manual assistance request. Wingmates see reporting ships marked
+`[ASSIST]` at the top of the roster until the request is cleared or reports
+expire. Changing fleets or restarting ShipLink clears the local request.
+
 Fleet names are display filters on the fleet IGC broadcast. Other listeners
 in range can receive the reports. For an in-game check, compare the displays
 on two ships, enter and leave a cockpit, then power down one antenna and
-confirm the other display drops that ship after the timeout.
+confirm the other display drops that ship after the timeout. Test both
+assistance commands and confirm the other display adds and removes the marker.
 
 ### Flight control PB
 

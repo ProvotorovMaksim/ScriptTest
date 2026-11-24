@@ -26,10 +26,12 @@ namespace SpaceEngineers.Apps.ShipLink
             public string Name;
             public string Speed;
             public bool Piloted;
+            public bool NeedsAssistance;
             public int SeenTick;
         }
 
         private string _fleetName;
+        private bool _needsAssistance;
         private readonly Dictionary<long, FleetStatus> _fleetPeers = new Dictionary<long, FleetStatus>();
 
         private string _shipName;
@@ -75,6 +77,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 var name = command.Substring(6).Trim();
                 _fleetName = string.Equals(name, "off", StringComparison.OrdinalIgnoreCase) ? "" : name;
                 SaveSettings();
+                _needsAssistance = false;
                 _fleetPeers.Clear();
             }
 
@@ -89,6 +92,18 @@ namespace SpaceEngineers.Apps.ShipLink
                     _connectedToBase = false;
                     ClearTask();
                     SaveSettings();
+                }
+            }
+
+            else if (string.Equals(command, "assist on", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(command, "assist off", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(_fleetName))
+                    Echo("Join a fleet before requesting assistance.");
+                else
+                {
+                    _needsAssistance = string.Equals(command, "assist on", StringComparison.OrdinalIgnoreCase);
+                    _displayTick = DisplayUpdateIntervalTicks;
                 }
             }
 
@@ -167,7 +182,8 @@ namespace SpaceEngineers.Apps.ShipLink
             var payload = "{\"fleet\":" + TaskBusIgcHelper.ToJsonString(_fleetName) +
                 ",\"name\":" + TaskBusIgcHelper.ToJsonString(_shipName.Substring(0, Math.Min(_shipName.Length, 64))) +
                 ",\"speed\":" + TaskBusIgcHelper.ToJsonString(speed) +
-                ",\"piloted\":" + (cockpit != null && cockpit.IsUnderControl ? "true" : "false") + "}";
+                ",\"piloted\":" + (cockpit != null && cockpit.IsUnderControl ? "true" : "false") +
+                ",\"needs_assistance\":" + (_needsAssistance ? "true" : "false") + "}";
             IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload),
                 TransmissionDistance.TransmissionDistanceMax);
         }
@@ -202,6 +218,8 @@ namespace SpaceEngineers.Apps.ShipLink
             status.Name = name;
             status.Speed = speed;
             status.Piloted = value == "true";
+            status.NeedsAssistance = TaskBusIgcHelper.TryGetJsonProperty(payload, "needs_assistance", out value) &&
+                value == "true";
             status.SeenTick = _tick;
         }
 
@@ -322,12 +340,17 @@ namespace SpaceEngineers.Apps.ShipLink
             if (!string.IsNullOrEmpty(_fleetName))
             {
                 display.AppendLine("=== FLEET " + _fleetName + " ===");
+                if (_needsAssistance)
+                    display.AppendLine(_antennas.Count > 0 ? "ASSISTANCE REQUEST ACTIVE" :
+                        "ASSISTANCE REQUEST WAITING FOR ANTENNA");
                 if (_fleetPeers.Count == 0)
                     display.AppendLine("No recent wingmate reports.");
-                foreach (var peer in _fleetPeers.OrderBy(entry => entry.Value.Name))
+                foreach (var peer in _fleetPeers.OrderByDescending(entry => entry.Value.NeedsAssistance)
+                    .ThenBy(entry => entry.Value.Name))
                 {
                     var status = peer.Value;
-                    display.AppendLine(status.Name + " | " + status.Speed + " m/s | " +
+                    display.AppendLine((status.NeedsAssistance ? "[ASSIST] " : "") +
+                        status.Name + " | " + status.Speed + " m/s | " +
                         (status.Piloted ? "piloted" : "unoccupied"));
                 }
             }
