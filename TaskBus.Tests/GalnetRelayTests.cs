@@ -344,6 +344,21 @@ namespace TaskBus.Tests
                 Tick();
             Assert.Contains(baseReplies, envelope => envelope.Contains("TASK_PUBLISHED_ACK") &&
                 envelope.Contains("\"state\":\"DONE\""));
+            baseReplies.Clear();
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"replenish\",\"group_id\":\"MiningPoints\",\"minimum\":100}", targetId: 1), 1);
+            for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
+                Tick();
+            Assert.Contains(baseReplies, envelope => envelope.Contains("\"request_id\":\"replenish\""));
+            Assert.EndsWith("|0", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))));
+
+            baseReplies.Clear();
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"replenish\",\"stock\":100}", targetId: 1), 1);
+            for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
+                Tick();
+            Assert.Contains(baseReplies, envelope => envelope.Contains("\"request_id\":\"replenish\""));
+            Assert.EndsWith("|1", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))));
             Assert.Empty(broker.IGC.Outbox);
         }
 

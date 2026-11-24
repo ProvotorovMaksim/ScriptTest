@@ -211,6 +211,11 @@ available. A mining point forwards it to the survey assignment, where it
 appears as a GPS hint. A site with both saved waypoints still goes straight
 to the mining stage.
 
+In mining-point dispatch mode, AMN.Base reports replenishment as soon as
+its inventory scan first reaches the requested minimum. It repeats stock
+checks while the parent request is open, so a temporary loss of Galnet
+does not prevent the broker from later recording a qualifying reading.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both

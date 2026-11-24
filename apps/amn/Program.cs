@@ -569,7 +569,7 @@ namespace SpaceEngineers.Apps.Amn
 
                     if (_dispatchToPoint)
                     {
-                        if (_tickCount % 60 == 1)
+                        if (_lowResources.Contains(minimum.Key) || _tickCount % 60 == 1)
                             SendMessage("TASK_QUERY", "{\"request_id\":" +
                                 TaskBusIgcHelper.ToJsonString(requestId) + ",\"stock\":" +
                                 current.ToString("R", CultureInfo.InvariantCulture) + "}", _brokerId);
