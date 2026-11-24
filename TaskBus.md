@@ -222,7 +222,11 @@ checkpoint survives a recompile. Resume delivery after broker lease
 confirmation. To check the actual load at pickup, set
 `HaulerCargo=<local cargo container name>` in the hauler PB Custom Data
 and recompile. Confirming pickup then requires the requested resource
-and amount in that container.
+and amount in that container. The hauler saves the measured pickup amount
+and checks that the requested quantity has left the same container before
+accepting `stage deliver`. Base stock confirmation is still required to close
+the parent request. Assignments picked up without a recorded measurement
+can still be confirmed manually.
 
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions

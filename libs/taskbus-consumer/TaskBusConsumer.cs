@@ -71,6 +71,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private readonly Func<string> _getGridPositionJson;
         private readonly Func<string, double?> _readHaulerCargo;
+        private double? _pickupCargo;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -378,6 +379,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _surveyAttempt = 0;
                 _childSurveyReport = null;
                 _childState = null;
+                _pickupCargo = null;
                 _oreSite = null;
                 _oreApproach = null;
                 _activeTaskJson = taskJson;
@@ -689,7 +691,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            if (_consumerGroup == "Haulers" && expected == "pickup" && _readHaulerCargo != null && !CheckPickupCargo())
+            if (_consumerGroup == "Haulers" &&
+                ((expected == "pickup" && _readHaulerCargo != null) || (expected == "deliver" && _pickupCargo.HasValue)) &&
+                !CheckHaulerCargo(expected == "pickup"))
                 return;
 
             if (IsAutomaticPoint && _completedChildRequest != CurrentChildRequestId())
@@ -735,7 +739,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private bool CheckPickupCargo()
+        private bool CheckHaulerCargo(bool pickup)
         {
             string details;
             double amount;
@@ -744,17 +748,35 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
                 !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
             {
-                _echo("The pickup assignment has no valid resource amount.");
+                _echo("The transport assignment has no valid resource amount.");
                 return false;
             }
 
-            double? loaded = _readHaulerCargo(resource);
-            if (!(loaded >= amount))
+            double? loaded = _readHaulerCargo == null ? null : _readHaulerCargo(resource);
+            if (!loaded.HasValue || !(loaded.Value >= 0) || double.IsInfinity(loaded.Value))
             {
-                _echo("Pickup requires " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
-                    " in the configured cargo container. Measured: " +
-                    (loaded.HasValue ? loaded.Value.ToString("G", CultureInfo.InvariantCulture) : "unavailable"));
+                _echo("Cargo measurement unavailable. Check the configured hauler container.");
                 return false;
+            }
+
+            if (pickup)
+            {
+                if (loaded.Value < amount)
+                {
+                    _echo("Load at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource + ".");
+                    return false;
+                }
+                _pickupCargo = loaded.Value;
+            }
+            else
+            {
+                double unloaded = _pickupCargo.Value - loaded.Value;
+                if (unloaded + 0.0000001 < amount)
+                {
+                    _echo("Unload at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
+                        ". Measured decrease: " + unloaded.ToString("G", CultureInfo.InvariantCulture));
+                    return false;
+                }
             }
             return true;
         }
@@ -988,6 +1010,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                                 _knownSites[resource] = points;
                         }
                     }
+                    else if (key == "PICKUP_CARGO")
+                    {
+                        double cargo;
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out cargo) &&
+                            cargo >= 0 && !double.IsInfinity(cargo))
+                            _pickupCargo = cargo;
+                    }
                     else if (key == "ORE_SITE") _oreSite = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "ORE_APPROACH") _oreApproach = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
@@ -1034,6 +1063,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
                 if (_completedChildRequest != null) storage.AppendLine("CHILD_COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_completedChildRequest));
                 if (_childSurveyReport != null) storage.AppendLine("CHILD_SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_childSurveyReport));
+                if (_pickupCargo.HasValue)
+                    storage.AppendLine("PICKUP_CARGO|" + _pickupCargo.Value.ToString("R", CultureInfo.InvariantCulture));
                 if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
