@@ -114,6 +114,11 @@ backup must fit in one text panel.
 
 ### Galnet routing core
 
+While the local Galnet relay is busy, the broker keeps only the latest
+queued assignment for each worker, task and lease epoch. It drops
+assignments whose lease deadline has already passed before handing
+replies to the relay.
+
 `GalnetTopology` computes next hops from current, reciprocal neighbor
 advertisements. The shortest path wins, with node ID as the tie-breaker. Route computation
 skips locally unavailable next hops and excludes the previous hop during

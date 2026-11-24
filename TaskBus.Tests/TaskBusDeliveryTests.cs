@@ -565,15 +565,49 @@ namespace TaskBus.Tests
             Assert.Equal(42L, envelope.TargetId);
         }
 
+        [Fact]
+        public void BrokerKeepsTheLatestAssignmentWhenTheRelayIsBusy()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            var relay = new RecordingRelay { Busy = true };
+            broker.GridTerminalSystem.Relay = relay;
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"default\"}", targetId: 1);
+            for (int i = 0; i < 40; i++)
+            {
+                broker.Main("galnet recv 73 1:1 taskbus 42 " + poll);
+                broker.Main("");
+            }
+            broker.Main("galnet recv 74 1:2 taskbus 43 " + poll);
+            Assert.Empty(relay.Commands);
+            var latestDeadline = broker.Storage.Split('\n').Single(line => line.StartsWith("TASK|")).Split('|')[12];
+
+            relay.Busy = false;
+            broker.Main("");
+            broker.Main("");
+            broker.Main("");
+            Assert.Equal(2, relay.Commands.Count);
+            Assert.StartsWith("app 73 taskbus 1 ", relay.Commands[0]);
+            Assert.True(TaskBusProtocol.TryParseEnvelope(relay.Commands[0].Substring("app 73 taskbus 1 ".Length), out var assignment));
+            Assert.Equal("TASK_ASSIGN", assignment.EventType);
+            Assert.Contains("\"lease_expires_utc_ticks\":" + latestDeadline + ",", assignment.PayloadJson);
+            Assert.StartsWith("app 74 taskbus 1 ", relay.Commands[1]);
+        }
+
         private sealed class RecordingRelay : IMyProgrammableBlock
         {
             public long EntityId => 100;
+            public bool Busy;
             public long CubeGrid => 1;
             public bool IsWorking => true;
             public readonly System.Collections.Generic.List<string> Commands = new();
 
             public bool TryRun(string command)
             {
+                if (Busy)
+                    return false;
                 Commands.Add(command);
                 return true;
             }

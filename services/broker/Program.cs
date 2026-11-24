@@ -18,7 +18,7 @@ namespace SpaceEngineers.Services.Broker
         private const string HandoffVersion = "TASKBUS-BACKUP-2|";
         private const string GalnetRelayName = "[GALNET RELAY]";
         private readonly Dictionary<long, long> _galnetRoutes = new Dictionary<long, long>();
-        private readonly Queue<string> _galnetReplies = new Queue<string>();
+        private readonly List<GalnetReply> _galnetReplies = new List<GalnetReply>();
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int MaxTasks = 100;
         private const int RetainedRequestCount = 500;
@@ -38,6 +38,14 @@ namespace SpaceEngineers.Services.Broker
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private IMyBroadcastListener _listener;
         private TaskBusProducer _producer;
+
+        private sealed class GalnetReply
+        {
+            public string Command;
+            public long Target;
+            public string AssignmentId;
+            public long Deadline;
+        }
 
         private sealed class TaskRecord
         {
@@ -235,8 +243,26 @@ namespace SpaceEngineers.Services.Broker
             if (_galnetRoutes.TryGetValue(targetId, out relayId))
             {
                 var command = "app " + relayId + " taskbus " + Me.EntityId + " " + envelope;
-                if (_galnetReplies.Count < 32 && !_galnetReplies.Contains(command))
-                    _galnetReplies.Enqueue(command);
+                var reply = new GalnetReply { Command = command, Target = targetId };
+                TaskBusEnvelope parsed;
+                string rawDeadline;
+                if (TaskBusProtocol.TryParseEnvelope(envelope, out parsed) && parsed.EventType == "TASK_ASSIGN" &&
+                    TaskBusIgcHelper.TryGetJsonProperty(parsed.PayloadJson, "lease_expires_utc_ticks", out rawDeadline) &&
+                    long.TryParse(rawDeadline, NumberStyles.Integer, CultureInfo.InvariantCulture, out reply.Deadline))
+                    reply.AssignmentId = parsed.MessageId;
+
+                if (reply.AssignmentId != null)
+                {
+                    int pending = _galnetReplies.FindIndex(entry =>
+                        entry.Target == reply.Target && entry.AssignmentId == reply.AssignmentId);
+                    if (pending >= 0)
+                    {
+                        _galnetReplies[pending] = reply;
+                        return;
+                    }
+                }
+                if (_galnetReplies.Count < 32 && !_galnetReplies.Any(entry => entry.Command == command))
+                    _galnetReplies.Add(reply);
                 return;
             }
             IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax);
@@ -246,9 +272,14 @@ namespace SpaceEngineers.Services.Broker
         {
             if (_galnetReplies.Count == 0)
                 return;
+            long now = DateTime.UtcNow.Ticks;
+            _galnetReplies.RemoveAll(entry => entry.Deadline > 0 && entry.Deadline <= now);
+            if (_galnetReplies.Count == 0)
+                return;
+
             var relay = FindGalnetRelay();
-            if (relay != null && relay.TryRun(_galnetReplies.Peek()))
-                _galnetReplies.Dequeue();
+            if (relay != null && relay.TryRun(_galnetReplies[0].Command))
+                _galnetReplies.RemoveAt(0);
         }
 
         private void HandleMessage(long sourceId, string eventType, string payloadJson)
