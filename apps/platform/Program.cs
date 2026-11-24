@@ -47,6 +47,8 @@ namespace SpaceEngineers.Apps.Platform
         private readonly bool _autoMiningPass;
         private bool _platformMiningApproach;
         private string _armedMiningCruiseLease;
+        private readonly bool _autoMiningDepart;
+        private int _miningDepartureUpdates;
         private long _armedMiningCruiseRemote;
         private readonly List<MyWaypointInfo> _armedMiningCruiseWaypoints = new List<MyWaypointInfo>();
         private string _pendingPassLease;
@@ -171,6 +173,7 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Use SurveyAutoAsteroid=<scan metres> <stand-off metres> <spacing metres>.");
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoMiningDepart = string.Equals(ReadSetting("MiningAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningPass = string.Equals(ReadSetting("MiningAutoPass="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningDock = string.Equals(ReadSetting("MiningAutoDock="), "true", StringComparison.OrdinalIgnoreCase);
@@ -389,7 +392,8 @@ namespace SpaceEngineers.Apps.Platform
                 online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
             if (_armedMiningCruiseLease != null)
-                Echo("Mining cruise armed. Waiting for an undocked, settled platform.");
+                Echo(_autoMiningDepart ? "Mining cruise armed. Waiting for charge and departure." :
+                    "Mining cruise armed. Waiting for an undocked, settled platform.");
             if (_autoMiningUnload)
                 Echo("Automatic mining unload active.");
             else if (_pendingUnloadDockLease != null)
@@ -1443,7 +1447,7 @@ namespace SpaceEngineers.Apps.Platform
             StartPlatformFlight(remote, "Survey leg", true);
         }
 
-        private bool CanStartPlatformFlight(bool describeBlocker = true)
+        private bool CanStartPlatformFlight(bool describeBlocker = true, bool allowDocked = false)
         {
             _surveyControllers.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyControllers, controller => controller.CubeGrid == Me.CubeGrid);
@@ -1460,7 +1464,7 @@ namespace SpaceEngineers.Apps.Platform
             _surveyConnectors.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
                 connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
-            if (_surveyConnectors.Count != 0)
+            if (!allowDocked && _surveyConnectors.Count != 0)
             {
                 if (describeBlocker)
                     Echo("Undock before starting autopilot.");
@@ -1484,6 +1488,7 @@ namespace SpaceEngineers.Apps.Platform
                 _armedMiningCruiseWaypoints.Clear();
                 remote.GetWaypointInfo(_armedMiningCruiseWaypoints);
                 _armedMiningCruiseRemote = remote.EntityId;
+                _miningDepartureUpdates = 0;
                 _armedMiningCruiseLease = _worker.ConfirmedLeaseIdentity;
             });
         }
@@ -1507,14 +1512,19 @@ namespace SpaceEngineers.Apps.Platform
                 _lastProbe = "Armed mining cruise cancelled: the reviewed controller is unavailable.";
                 return;
             }
-            if (remote.GetShipSpeed() > 0.25 || !CanStartPlatformFlight(describeBlocker: false))
+            if (remote.GetShipSpeed() > 0.25 ||
+                !CanStartPlatformFlight(describeBlocker: false, allowDocked: _autoMiningDepart))
                 return;
 
-            _armedMiningCruiseLease = null;
+            bool docked = _surveyConnectors.Count != 0;
+            if (docked && ++_miningDepartureUpdates < 12)
+                return;
+            _miningDepartureUpdates = 0;
             _surveyWaypoints.Clear();
             remote.GetWaypointInfo(_surveyWaypoints);
             if (_surveyWaypoints.Count != _armedMiningCruiseWaypoints.Count)
             {
+                _armedMiningCruiseLease = null;
                 _lastProbe = "Armed mining cruise cancelled: the reviewed route changed.";
                 return;
             }
@@ -1523,17 +1533,36 @@ namespace SpaceEngineers.Apps.Platform
                 if (_surveyWaypoints[i].Name != _armedMiningCruiseWaypoints[i].Name ||
                     _surveyWaypoints[i].Coords != _armedMiningCruiseWaypoints[i].Coords)
                 {
+                    _armedMiningCruiseLease = null;
                     _lastProbe = "Armed mining cruise cancelled: the reviewed route changed.";
                     return;
                 }
             }
+            bool verified = false;
             _routes.LoadMiningApproach(current =>
             {
-                if (current.EntityId == remote.EntityId)
-                    StartMiningApproachFlight(current);
-                else
-                    _lastProbe = "Armed mining cruise cancelled: the reviewed controller changed.";
+                if (current.EntityId != remote.EntityId)
+                    return;
+                verified = true;
+                if (docked)
+                {
+                    long pointGrid;
+                    if (_surveyConnectors.Count == 1 && _worker.TryGetMiningPoint(out pointGrid) &&
+                        IsDockedAtMiningPoint(pointGrid))
+                        TryRunMiningFcs("dock depart ready");
+                    else
+                        _lastProbe = "Automatic departure waits for a single connection to the assigned mining point.";
+                    return;
+                }
+
+                _armedMiningCruiseLease = null;
+                StartMiningApproachFlight(current);
             });
+            if (!verified)
+            {
+                _armedMiningCruiseLease = null;
+                _lastProbe = "Armed mining cruise cancelled: the reviewed controller or approach changed.";
+            }
         }
 
         private void StartMiningCruise(bool returning)

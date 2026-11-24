@@ -253,8 +253,11 @@ Use `ore stop` to cancel the supervised flight. After reviewing the
 outbound waypoints, use `mine cruise arm` to start that route once the
 platform is settled and undocked. It works while waiting at the port.
 It cancels if the lease or route changes, or on `ore stop` or a PB
-restart. The FCS departure procedure still controls charging and
-disconnect.
+restart. With `MiningAutoDepart=true`, an armed platform at its assigned
+mining point requests `dock depart ready` periodically while the lease,
+reviewed route and single connector still match. FCS waits for the charge
+threshold and sets the batteries to Auto before disconnecting. The
+platform launches only after the connection has released.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This
