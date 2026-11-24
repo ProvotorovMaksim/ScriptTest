@@ -19,6 +19,10 @@ namespace SpaceEngineers.Apps.Amn
     {
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
+        private const string SurveyProperty = "Survey.DetectedOre";
+        private const int MaxOreObservations = 256;
+        private readonly HashSet<string> _oreObservations = new HashSet<string>();
+        private readonly List<IMyOreDetector> _oreDetectors = new List<IMyOreDetector>();
         private string _gridName;
         private int _tickCount = 0;
         private int _requestSequence;
@@ -50,6 +54,18 @@ namespace SpaceEngineers.Apps.Amn
         {
             _tickCount++;
             var command = args ?? string.Empty;
+            if (string.Equals(command, "survey", StringComparison.OrdinalIgnoreCase))
+            {
+                ScanOreDetectors();
+                return;
+            }
+            if (string.Equals(command, "survey list", StringComparison.OrdinalIgnoreCase))
+            {
+                Echo("Ore observations: " + _oreObservations.Count);
+                foreach (var observation in _oreObservations.OrderBy(value => value).Take(15))
+                    Echo(observation);
+                return;
+            }
             if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
             {
                 long brokerId;
@@ -252,6 +268,55 @@ namespace SpaceEngineers.Apps.Amn
             Echo("Example: set Component/SteelPlate 500");
         }
 
+        private void ScanOreDetectors()
+        {
+            _oreDetectors.Clear();
+            GridTerminalSystem.GetBlocksOfType(_oreDetectors,
+                detector => detector.IsWorking && detector.IsSameConstructAs(Me));
+            int available = 0;
+            int added = 0;
+            foreach (var detector in _oreDetectors)
+            {
+                var property = detector.GetProperty(SurveyProperty)
+                    as Sandbox.ModAPI.Interfaces.ITerminalProperty<string>;
+                if (property == null)
+                    continue;
+                try
+                {
+                    string reports = property.GetValue(detector);
+                    available++;
+                    if (string.IsNullOrEmpty(reports))
+                        continue;
+                    foreach (var report in reports.Split('\n'))
+                        if (AddOreObservation(report))
+                            added++;
+                }
+                catch (Exception error)
+                {
+                    Echo("Ore detector read failed: " + error.Message);
+                }
+            }
+            if (added > 0)
+                SaveMinimums();
+            Echo(available == 0 ? "No working detector exposes " + SurveyProperty + "." :
+                "New observations: " + added + ". Catalog: " + _oreObservations.Count + "/" + MaxOreObservations + ".");
+        }
+
+        private bool AddOreObservation(string report)
+        {
+            string ore;
+            double x;
+            double y;
+            double z;
+            if (_oreObservations.Count >= MaxOreObservations ||
+                !TaskBusIgcHelper.TryReadOreGps(report, out ore, out x, out y, out z) || ore.Length > 64)
+                return false;
+
+            var culture = CultureInfo.InvariantCulture;
+            return _oreObservations.Add("GPS:" + ore + ":" + x.ToString("R", culture) + ":" +
+                y.ToString("R", culture) + ":" + z.ToString("R", culture) + ":");
+        }
+
         private void LoadMinimums()
         {
             _minimums.Clear();
@@ -265,6 +330,12 @@ namespace SpaceEngineers.Apps.Amn
             var lines = Storage.Split('\n');
             foreach (var line in lines)
             {
+                if (line.StartsWith("ORE|", StringComparison.Ordinal))
+                {
+                    try { AddOreObservation(TaskBusIgcHelper.DecodeStorage(line.Substring(4))); }
+                    catch (FormatException) { }
+                    continue;
+                }
                 if (line.StartsWith("BROKER|", StringComparison.Ordinal))
                 {
                     long.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
@@ -326,6 +397,8 @@ namespace SpaceEngineers.Apps.Amn
                 storage.AppendLine("LOW|" + resource);
             foreach (var resource in _pendingResourceClears.OrderBy(key => key))
                 storage.AppendLine("CLEAR_PENDING|" + resource);
+            foreach (var observation in _oreObservations.OrderBy(value => value))
+                storage.AppendLine("ORE|" + TaskBusIgcHelper.EncodeStorage(observation));
             Storage = storage.ToString();
         }
 

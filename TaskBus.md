@@ -52,7 +52,9 @@ documents the string terminal property `Survey.DetectedOre`. It returns
 one GPS record per line with the ore name and world coordinates.
 `TaskBusIgcHelper.TryReadOreGps` parses these records for a survey adapter.
 Workshop availability and runtime behavior still need a check in the target
-world. A survey hit is a catalog observation. Route planning should use a
+world. Run `survey` on AMN to read working detectors on its construct and
+persist up to 256 distinct GPS observations. `survey list` shows the count
+and the first 15 records. A survey hit is a catalog observation. Route planning should use a
 separate approach point outside the voxel.
 
 ### Select a broker
