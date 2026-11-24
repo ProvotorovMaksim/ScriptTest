@@ -191,6 +191,26 @@ namespace TaskBus.Tests
             TakeResponse(broker, "QUEUE_EMPTY", 43);
         }
 
+        [Fact]
+        public void RequestStatusQueryIsReadOnlyAndScopedToRequester()
+        {
+            var broker = StartBroker("");
+            var query = TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"parent\"}", targetId: 1);
+            Dispatch(broker, 9, query);
+            Assert.Contains("\"state\":\"UNKNOWN\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.DoesNotContain("TASK|", broker.Storage);
+
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 10, query);
+            Assert.Contains("\"state\":\"UNKNOWN\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 10).PayloadJson);
+            Dispatch(broker, 9, query);
+            Assert.Contains("\"state\":\"QUEUED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|")));
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

@@ -95,6 +95,12 @@ children, saves their cancellation records and revokes current assignments.
 A worker that misses the notification receives the revocation when polling
 with its old assignment.
 
+Once base stock reaches its minimum in point mode, AMN queries the
+existing request instead of cancelling a known task. The point can then
+finish transport and commit it. The base clears its local request when
+the broker reports a terminal state. A request never seen by the broker
+is retired through the existing cancellation exchange.
+
 Name a text panel on the point consumer's grid exactly `[AMN STATUS]`
 to show the parent task, current stage, lease and last broker state for the
 child request. The panel also shows when the local radio is unavailable.

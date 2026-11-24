@@ -167,16 +167,19 @@ namespace SpaceEngineers.Apps.Amn
                         TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
                     {
                         string stateJson;
-                        string requestState;
-                        var isDone = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "state", out stateJson) &&
-                            TaskBusIgcHelper.TryReadJsonString(stateJson, out requestState) && requestState == "DONE";
-                        var isCancelled = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "state", out stateJson) &&
-                            TaskBusIgcHelper.TryReadJsonString(stateJson, out requestState) && requestState == "CANCELLED";
+                        string requestState = null;
+                        bool hasState = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "state", out stateJson) &&
+                            TaskBusIgcHelper.TryReadJsonString(stateJson, out requestState);
                         var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
-                        if ((isDone || isCancelled) && !string.IsNullOrEmpty(resource) && !_pendingResourceClears.Contains(resource))
+                        if (hasState && !string.IsNullOrEmpty(resource) && !_pendingResourceClears.Contains(resource))
                         {
-                            _requestIds.Remove(resource);
-                            _lowResources.Remove(resource);
+                            if (requestState == "DONE" || requestState == "CANCELLED")
+                            {
+                                _requestIds.Remove(resource);
+                                _lowResources.Remove(resource);
+                            }
+                            else if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
+                                QueueResourceClear(resource);
                         }
                         SaveMinimums();
                     }
@@ -608,10 +611,24 @@ namespace SpaceEngineers.Apps.Amn
                     if (createdRequest || _tickCount % 60 == 1)
                         SendResourceRequest(minimum.Key, current, minimum.Value, requestId);
                 }
-                else if (_requestIds.ContainsKey(minimum.Key) && _pendingResourceClears.Add(minimum.Key))
+                else
                 {
-                    newClears.Add(minimum.Key);
-                    stateChanged = true;
+                    string requestId;
+                    if (!_requestIds.TryGetValue(minimum.Key, out requestId) || _pendingResourceClears.Contains(minimum.Key))
+                        continue;
+
+                    if (_dispatchToPoint)
+                    {
+                        if (_tickCount % 60 == 1)
+                            SendMessage("TASK_QUERY", "{\"request_id\":" +
+                                TaskBusIgcHelper.ToJsonString(requestId) + "}", _brokerId);
+                    }
+                    else
+                    {
+                        _pendingResourceClears.Add(minimum.Key);
+                        newClears.Add(minimum.Key);
+                        stateChanged = true;
+                    }
                 }
             }
 

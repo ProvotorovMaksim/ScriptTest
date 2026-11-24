@@ -108,6 +108,17 @@ namespace SpaceEngineers.Services.Broker
                 return;
             }
 
+            if (eventType == "TASK_QUERY")
+            {
+                string raw;
+                string requestId;
+                if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out requestId) &&
+                    !string.IsNullOrWhiteSpace(requestId) && !ReportKnownRequest(sourceId, requestId))
+                    SendRequestStatus(sourceId, requestId, "UNKNOWN");
+                return;
+            }
+
             if (eventType == "TASK_CANCEL")
             {
                 CancelTask(sourceId, payloadJson);
@@ -157,23 +168,8 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "key", out keyJson) || !TaskBusIgcHelper.TryReadJsonString(keyJson, out taskKey))
                 taskKey = "";
 
-            var scopedRequestId = GetScopedRequestId(requesterId, requestId);
-            var existing = _tasks.FirstOrDefault(task => task.RequesterId == requesterId && task.RequestId == requestId);
-            if (existing != null)
-            {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(existing.Id) + ",\"state\":" + TaskBusIgcHelper.ToJsonString(existing.State == "CLEARED" ? "CANCELLED" : existing.State) + "}", requesterId, "ack:" + requestId);
+            if (ReportKnownRequest(requesterId, requestId))
                 return;
-            }
-            if (_completedRequestIds.Contains(scopedRequestId))
-            {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"state\":\"DONE\"}", requesterId, "ack:" + requestId);
-                return;
-            }
-            if (_cancelledRequestIds.Contains(scopedRequestId))
-            {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"state\":\"CANCELLED\"}", requesterId, "ack:" + requestId);
-                return;
-            }
             if (!HasParentLease(requesterId, requestJson))
             {
                 SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) +
@@ -207,6 +203,33 @@ namespace SpaceEngineers.Services.Broker
             SaveQueue();
             SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(id) + ",\"state\":\"QUEUED\"}", requesterId, "ack:" + requestId);
             Echo("Queued " + id + " (" + taskKey + ")");
+        }
+
+        private bool ReportKnownRequest(long requesterId, string requestId)
+        {
+            var existing = _tasks.FirstOrDefault(task => task.RequesterId == requesterId && task.RequestId == requestId);
+            if (existing != null)
+            {
+                SendRequestStatus(requesterId, requestId,
+                    existing.State == "CLEARED" ? "CANCELLED" : existing.State, existing.Id);
+                return true;
+            }
+            var scopedId = GetScopedRequestId(requesterId, requestId);
+            var state = _completedRequestIds.Contains(scopedId) ? "DONE" :
+                _cancelledRequestIds.Contains(scopedId) ? "CANCELLED" : null;
+            if (state == null)
+                return false;
+            SendRequestStatus(requesterId, requestId, state);
+            return true;
+        }
+
+        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null)
+        {
+            var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId);
+            if (taskId != null)
+                payload += ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId);
+            payload += ",\"state\":" + TaskBusIgcHelper.ToJsonString(state) + "}";
+            SendMessage("TASK_PUBLISHED_ACK", payload, requesterId, "ack:" + requestId);
         }
 
         private bool HasParentLease(long requesterId, string requestJson)
