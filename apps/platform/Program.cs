@@ -42,6 +42,7 @@ namespace SpaceEngineers.Apps.Platform
         private string _pendingRetreatLease;
         private int _retreatSettleUpdates;
         private const string MiningRetreatRemoteName = "[AMN MINE RETREAT]";
+        private const string MiningRetreatWaypointName = "AMN assigned retreat";
         private const int MiningProgressCheckUpdates = 60;
         private const double MinimumMiningProgress = 0.5;
         private int _miningProgressTicks;
@@ -214,6 +215,8 @@ namespace SpaceEngineers.Apps.Platform
                 LoadAssignedMiningEndpoint();
             else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
                 StartMiningPass();
+            else if (string.Equals(command, "mine retreat plan", StringComparison.OrdinalIgnoreCase))
+                LoadAssignedMiningRetreat();
             else if (string.Equals(command, "mine retreat", StringComparison.OrdinalIgnoreCase))
             {
                 _pendingRetreatLease = null;
@@ -800,7 +803,7 @@ namespace SpaceEngineers.Apps.Platform
 
         private IMyShipController FindSurveyPlanningController()
         {
-            if (_surveySweep || _platformFlightLease != null || _sampleDetector != null ||
+            if (_surveySweep || _sampleDetector != null ||
                 _worker.SupervisedCruiseRemote != 0 || _surveyLease == null || !SurveyLeaseIsCurrent())
             {
                 Echo("Stop the current flight or sample and start a confirmed task survey before planning.");
@@ -1177,6 +1180,62 @@ namespace SpaceEngineers.Apps.Platform
             }
         }
 
+        private IMyRemoteControl FindMiningRetreatController()
+        {
+            var remote = GridTerminalSystem.GetBlockWithName(MiningRetreatRemoteName) as IMyRemoteControl;
+            if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking && !remote.IsAutoPilotEnabled &&
+                remote.Direction == Base6Directions.Direction.Backward && remote.FlightMode == FlightMode.OneWay &&
+                remote.SpeedLimit > 0 && remote.SpeedLimit <= 1 && remote.GetShipSpeed() <= 0.25)
+                return remote;
+
+            Echo("Use an idle local One Way " + MiningRetreatRemoteName + " facing Backward at no more than 1 m/s.");
+            return null;
+        }
+
+        private bool TryGetMiningRetreatEndpoint(IMyRemoteControl retreat, Vector3D approach, out Vector3D endpoint)
+        {
+            endpoint = approach;
+            var pass = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
+            if (pass == null || pass.CubeGrid != Me.CubeGrid || !pass.IsWorking)
+            {
+                Echo("The generated retreat requires a working local " + MiningPassRemoteName + ".");
+                return false;
+            }
+            endpoint += retreat.GetPosition() - pass.GetPosition();
+            return true;
+        }
+
+        private void LoadAssignedMiningRetreat()
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (!_miningLaneRadius.HasValue || _drillingLease != null || _worker.SupervisedCruiseRemote != 0 ||
+                !_worker.TryGetMiningApproach(out taskId, out x, out y, out z) || !CheckMiningLane(x, y, z))
+            {
+                Echo("Stop the drills and settle inside the assigned mining lane under a confirmed lease.");
+                return;
+            }
+
+            var remote = FindMiningRetreatController();
+            Vector3D endpoint;
+            if (remote == null || !TryGetMiningRetreatEndpoint(remote, new Vector3D(x, y, z), out endpoint))
+                return;
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count > 1 ||
+                (_surveyWaypoints.Count == 1 && _surveyWaypoints[0].Name != MiningRetreatWaypointName))
+            {
+                Echo("The retreat controller has a manually prepared route. Clear it before generating an endpoint.");
+                return;
+            }
+            remote.ClearWaypoints();
+            remote.AddWaypoint(endpoint, MiningRetreatWaypointName);
+            Echo(FormatSurveyGps(MiningRetreatWaypointName, endpoint));
+            Echo("Review the retreat path and alignment before running mine retreat.");
+        }
+
         private void StartMiningRetreat()
         {
             string taskId;
@@ -1191,28 +1250,32 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            var remote = GridTerminalSystem.GetBlockWithName(MiningRetreatRemoteName) as IMyRemoteControl;
-            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking ||
-                remote.Direction != Base6Directions.Direction.Backward || remote.FlightMode != FlightMode.OneWay ||
-                !(remote.SpeedLimit > 0 && remote.SpeedLimit <= 1) || remote.GetShipSpeed() > 0.25)
+            var remote = FindMiningRetreatController();
+            if (remote == null)
+                return;
+
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count != 1)
             {
-                Echo("Use a local One Way " + MiningRetreatRemoteName + " facing Backward at no more than 1 m/s.");
+                Echo("Configure exactly one reviewed retreat waypoint.");
                 return;
             }
-
+            var waypoint = _surveyWaypoints[0];
             var approach = new Vector3D(x, y, z);
-            var toApproach = approach - remote.GetPosition();
+            var expected = approach;
+            if (waypoint.Name == MiningRetreatWaypointName && !TryGetMiningRetreatEndpoint(remote, approach, out expected))
+                return;
+            if (Vector3D.DistanceSquared(waypoint.Coords, expected) > 1)
+            {
+                Echo("The retreat waypoint does not match the assigned approach and current alignment.");
+                return;
+            }
+            var toApproach = waypoint.Coords - remote.GetPosition();
             if (toApproach.LengthSquared() <= 4 ||
                 Vector3D.Dot(Vector3D.Normalize(toApproach), remote.WorldMatrix.Backward) < 0.996)
             {
-                Echo("Align the rear of the retreat controller with the assigned approach before starting.");
-                return;
-            }
-            _surveyWaypoints.Clear();
-            remote.GetWaypointInfo(_surveyWaypoints);
-            if (_surveyWaypoints.Count != 1 || Vector3D.DistanceSquared(_surveyWaypoints[0].Coords, approach) > 1)
-            {
-                Echo("Configure exactly one reviewed retreat waypoint at the assigned approach.");
+                Echo("Align the rear of the retreat controller with the retreat waypoint before starting.");
                 return;
             }
 

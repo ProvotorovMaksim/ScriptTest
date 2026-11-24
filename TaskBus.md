@@ -395,8 +395,11 @@ Use `mine drills off` to stop the drills and the supervised pass.
 Review ship alignment, drill coverage and controller collision settings
 before starting. To back out along a reviewed lane, set up
 `[AMN MINE RETREAT]` in One Way and Backward mode with one waypoint at the
-assigned approach and a speed limit at or below 1 m/s. Stop the drills,
-align the controller's rear with the approach and run `mine retreat`.
+assigned approach and a speed limit at or below 1 m/s. Alternatively,
+run `mine retreat plan` inside the assigned lane to load a waypoint
+adjusted for the offset between the pass and retreat controllers.
+Planning leaves the controller idle and preserves manually loaded routes.
+Stop the drills, align the controller's rear with the approach and run `mine retreat`.
 Supervision stops retreat on lease loss, lane exit, excessive speed or
 lack of progress. Use `ore stop` to cancel the supervised flight.
 Set `MiningAutoRetreat=true` to attempt the reviewed retreat once when
