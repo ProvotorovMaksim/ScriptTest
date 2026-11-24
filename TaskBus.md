@@ -470,6 +470,12 @@ previous sample or another planned point are omitted. The generated
 route is saved. Review it before running `ore sweep`; the usual lease,
 clearance and detector refresh checks still apply.
 
+Use `ore samples` to list the detector GPS positions in acquisition
+order, with the result of each completed sample. A position marked
+`no report` means the detector did not list the requested ore during that
+sample. Earlier saves retain their aggregate count and list individual
+positions as `unknown`. New results survive a recompile.
+
 Use `ore perimeter` to list the convex outline of the reported ore GPS
 positions and their vertical span. The outline uses the local gravity
 plane or, in space, the ship plane at the time of the command. Vertices

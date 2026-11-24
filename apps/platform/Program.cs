@@ -63,7 +63,19 @@ namespace SpaceEngineers.Apps.Platform
         private const string SurveyStorageMarker = "\nAMN_SURVEY_V1\n";
         private string _workerStorage;
         private string _surveyStorage = "";
-        private readonly List<Vector3D> _surveyViews = new List<Vector3D>();
+        private readonly List<SurveyView> _surveyViews = new List<SurveyView>();
+
+        private sealed class SurveyView
+        {
+            public readonly Vector3D Position;
+            public readonly bool? FoundOre;
+
+            public SurveyView(Vector3D position, bool? foundOre)
+            {
+                Position = position;
+                FoundOre = foundOre;
+            }
+        }
         private readonly HashSet<Vector3D> _oreHits = new HashSet<Vector3D>();
         private IMyOreDetector _sampleDetector;
         private string _surveyOre;
@@ -170,6 +182,8 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
                 ScheduleOreSample();
+            else if (string.Equals(command, "ore samples", StringComparison.OrdinalIgnoreCase))
+                ShowSurveySamples();
             else if (string.Equals(command, "ore report", StringComparison.OrdinalIgnoreCase))
                 SubmitOreSurvey();
             else if (command.StartsWith("ore plan ", StringComparison.OrdinalIgnoreCase))
@@ -641,8 +655,12 @@ namespace SpaceEngineers.Apps.Platform
                 double z;
                 if (!TaskBusIgcHelper.TryReadOreGps(rows[i], out kind, out x, out y, out z))
                     continue;
-                if (kind == "view" && _surveyViews.Count < MaxSurveyViews)
-                    _surveyViews.Add(new Vector3D(x, y, z));
+                if ((kind == "view" || kind == "viewOre" || kind == "viewNoReport") &&
+                    _surveyViews.Count < MaxSurveyViews)
+                {
+                    bool? foundOre = kind == "view" ? (bool?)null : kind == "viewOre";
+                    _surveyViews.Add(new SurveyView(new Vector3D(x, y, z), foundOre));
+                }
                 else if (kind == "hit" && _oreHits.Count < MaxOreHits)
                     _oreHits.Add(new Vector3D(x, y, z));
                 else if (kind == "plan" && _surveyPlan.Count < MaxSurveyPlanPoints)
@@ -668,7 +686,9 @@ namespace SpaceEngineers.Apps.Platform
             foreach (var point in _surveyPlan)
                 saved.AppendLine(FormatSurveyGps("plan", point));
             foreach (var view in _surveyViews)
-                saved.AppendLine(FormatSurveyGps("view", view));
+                saved.AppendLine(FormatSurveyGps(
+                    !view.FoundOre.HasValue ? "view" : view.FoundOre.Value ? "viewOre" : "viewNoReport",
+                    view.Position));
             foreach (var hit in _oreHits)
                 saved.AppendLine(FormatSurveyGps("hit", hit));
             if (_reportOre.HasValue && _reportView.HasValue)
@@ -678,6 +698,24 @@ namespace SpaceEngineers.Apps.Platform
             }
             _surveyStorage = saved.ToString();
             Storage = _workerStorage + _surveyStorage;
+        }
+
+        private void ShowSurveySamples()
+        {
+            if (_surveyViews.Count == 0)
+            {
+                Echo("No completed ore detector samples.");
+                return;
+            }
+
+            Echo(_surveyOre + " detector samples (" + _positiveViews + "/" + _surveyViews.Count + " reported ore):");
+            for (int i = 0; i < _surveyViews.Count; i++)
+            {
+                var view = _surveyViews[i];
+                var result = !view.FoundOre.HasValue ? "unknown" :
+                    view.FoundOre.Value ? "reported" : "no report";
+                Echo(FormatSurveyGps("Sample " + (i + 1) + " " + result, view.Position));
+            }
         }
 
         private void SubmitOreSurvey()
@@ -1291,7 +1329,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             foreach (var view in _surveyViews)
             {
-                if (Vector3D.DistanceSquared(view, position) < MinimumViewSeparation * MinimumViewSeparation)
+                if (Vector3D.DistanceSquared(view.Position, position) < MinimumViewSeparation * MinimumViewSeparation)
                     return false;
             }
             return true;
@@ -1531,7 +1569,7 @@ namespace SpaceEngineers.Apps.Platform
                         }
                     }
                 }
-                _surveyViews.Add(_samplePosition);
+                _surveyViews.Add(new SurveyView(_samplePosition, hit));
                 CompletePlannedSurveyPosition();
                 if (hit)
                     _positiveViews++;
