@@ -178,6 +178,14 @@ path. Pilot movement or rotation input, `dock off`, loss of control, leaving
 the corridor or a timeout releases FCS. Record the berth again after this
 update so the saved pose includes the port ID.
 
+For a first uncrewed test, name exactly one working cockpit or remote
+control on the drone grid `[FCS DRONE]`. Use the same recorded berth and
+alignment limits. Once the existing mining script has brought the drone
+into the final corridor and disabled its remote autopilot, it can run the
+FCS block with `dock drone`. This mode starts from FCS off with no player
+controlling the grid. It releases control if a player takes over or the
+remote autopilot restarts. It covers the final approach only.
+
 To investigate an automatic approach that stalls near the port, record a
 successful connected pose and compare the guide readings at the stall with
 the same ship, berth and cargo load in a copy of the world without the

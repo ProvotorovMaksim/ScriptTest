@@ -10,6 +10,9 @@ namespace SpaceEngineers.Apps.FlightControl
     {
         // PB BODY START
         private readonly FlightController flight = new FlightController();
+        private readonly List<IMyShipController> controllers = new List<IMyShipController>();
+        private const string DroneControllerName = "[FCS DRONE]";
+        private bool droneDock;
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
         private const string DockConnectorName = "[FCS DOCK]";
         private IMyShipConnector dockConnector;
@@ -25,7 +28,7 @@ namespace SpaceEngineers.Apps.FlightControl
         private const double MaximumBrakingDistance = 500;
         private IMyTextPanel statusPanel;
         private int statusPanelTicks;
-        private IMyCockpit cockpit;
+        private IMyShipController cockpit;
         private bool previousThrusterControl;
         private bool previousDampeners;
         private Mode mode;
@@ -67,7 +70,8 @@ namespace SpaceEngineers.Apps.FlightControl
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
                     return;
                 case "dock record": RecordDockPose(); break;
-                case "dock approach": BeginDockApproach(); break;
+                case "dock approach": BeginDockApproach(false); break;
+                case "dock drone": BeginDockApproach(true); break;
                 case "dock guide":
                     dockConnector = FindDockConnector();
                     showDockGuide = dockConnector != null && dockPosition.HasValue;
@@ -90,8 +94,12 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 try
                 {
-                    if (cockpit.CubeGrid != Me.CubeGrid || !cockpit.IsWorking || !cockpit.IsUnderControl)
-                        Release("FCS off: cockpit unavailable or pilot absent.");
+                    if (cockpit.CubeGrid != Me.CubeGrid || !cockpit.IsWorking)
+                        Release("FCS off: flight controller unavailable.");
+                    else if (droneDock && PilotHasControl())
+                        Release("FCS off: player took control of the drone.");
+                    else if (!droneDock && !cockpit.IsUnderControl)
+                        Release("FCS off: pilot absent.");
                     else if (RemoteAutopilotEnabled())
                         Release("FCS off: remote autopilot took control.");
                     else if (mode == Mode.Dock)
@@ -156,10 +164,16 @@ namespace SpaceEngineers.Apps.FlightControl
             Echo("Recorded the connected ship pose for this berth.");
         }
 
-        private void BeginDockApproach()
+        private void BeginDockApproach(bool uncrewed)
         {
             if (mode == Mode.Dock)
                 return;
+
+            if (uncrewed && mode != Mode.Off)
+            {
+                Echo("Turn FCS off before starting an uncrewed approach.");
+                return;
+            }
 
             dockConnector = FindDockConnector();
             if (!dockPosition.HasValue || dockPortId == 0 || dockConnector == null)
@@ -168,7 +182,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             }
 
-            Activate(Mode.Dock);
+            Activate(Mode.Dock, uncrewed);
             if (mode == Mode.Dock)
             {
                 dockTicks = 0;
@@ -240,7 +254,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 desiredVelocity = Vector3D.Zero;
 
             flight.Approach(cockpit, velocity.LinearVelocity, velocity.AngularVelocity, desiredVelocity);
-            status = "FCS dock: creep to recorded berth. Pilot input cancels.";
+            status = droneDock ? "FCS dock: uncrewed final approach. Player control cancels." :
+                "FCS dock: creep to recorded berth. Pilot input cancels.";
         }
 
         private string GetDockStatus()
@@ -317,27 +332,48 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private void Activate(Mode requested)
+        private void Activate(Mode requested, bool uncrewed = false)
         {
+            if (droneDock)
+                Release("FCS off: switching from uncrewed docking.");
             if (mode != Mode.Off)
             {
                 mode = requested;
                 return;
             }
 
-            IMyCockpit selected = null;
+            IMyShipController selected = null;
             remotes.Clear();
-            var controllers = new List<IMyShipController>();
+            controllers.Clear();
             GridTerminalSystem.GetBlocksOfType(controllers, block => block.IsSameConstructAs(Me));
             foreach (var controller in controllers)
             {
                 var remote = controller as IMyRemoteControl;
                 if (remote != null)
                     remotes.Add(remote);
-                var candidate = controller as IMyCockpit;
-                if (candidate != null && candidate.CubeGrid == Me.CubeGrid && candidate.IsWorking &&
-                    candidate.IsUnderControl && candidate.CustomName.Contains("[FCS]"))
-                    selected = candidate;
+                if (controller.CubeGrid != Me.CubeGrid || !controller.IsWorking)
+                    continue;
+
+                if (uncrewed)
+                {
+                    if (controller.CustomName == DroneControllerName)
+                    {
+                        if (selected != null)
+                        {
+                            status = "FCS off: more than one " + DroneControllerName + " controller.";
+                            return;
+                        }
+                        selected = controller;
+                    }
+                }
+                else if (controller is IMyCockpit && controller.IsUnderControl && controller.CustomName.Contains("[FCS]"))
+                    selected = controller;
+            }
+
+            if (uncrewed && PilotHasControl())
+            {
+                status = "FCS off: leave all controllers before starting an uncrewed approach.";
+                return;
             }
 
             if (RemoteAutopilotEnabled())
@@ -347,7 +383,8 @@ namespace SpaceEngineers.Apps.FlightControl
             }
             if (selected == null)
             {
-                status = "FCS off: occupy a cockpit tagged [FCS].";
+                status = uncrewed ? "FCS off: need a controller named " + DroneControllerName + "." :
+                    "FCS off: occupy a cockpit tagged [FCS].";
                 return;
             }
 
@@ -365,6 +402,7 @@ namespace SpaceEngineers.Apps.FlightControl
             }
 
             cockpit = selected;
+            droneDock = uncrewed;
             mode = requested;
             try
             {
@@ -376,6 +414,14 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 Release("FCS off: engagement failed. " + error.Message);
             }
+        }
+
+        private bool PilotHasControl()
+        {
+            foreach (var controller in controllers)
+                if (controller.CubeGrid == Me.CubeGrid && controller.IsUnderControl)
+                    return true;
+            return false;
         }
 
         private bool RemoteAutopilotEnabled()
@@ -395,6 +441,7 @@ namespace SpaceEngineers.Apps.FlightControl
             var previousCockpit = cockpit;
             cockpit = null;
             mode = Mode.Off;
+            droneDock = false;
             Runtime.UpdateFrequency = UpdateFrequency.None;
 
             int failures = flight.Release();
@@ -442,7 +489,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 return true;
             }
 
-            public string Update(IMyCockpit pilot, Mode mode, double dt, Func<bool> hasInstructionBudget)
+            public string Update(IMyShipController pilot, Mode mode, double dt, Func<bool> hasInstructionBudget)
             {
                 var frame = pilot.WorldMatrix;
                 var velocity = pilot.GetShipVelocities();
@@ -587,7 +634,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
-            public void Approach(IMyCockpit pilot, Vector3D velocity, Vector3D angularVelocity,
+            public void Approach(IMyShipController pilot, Vector3D velocity, Vector3D angularVelocity,
                 Vector3D desiredVelocity)
             {
                 var frame = pilot.WorldMatrix;
@@ -631,7 +678,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 }
             }
 
-            public string AssessMass(IMyCockpit pilot, Func<bool> hasInstructionBudget)
+            public string AssessMass(IMyShipController pilot, Func<bool> hasInstructionBudget)
             {
                 double gravity = pilot.GetNaturalGravity().Length();
                 double mass = pilot.CalculateShipMass().PhysicalMass;
