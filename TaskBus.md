@@ -128,8 +128,8 @@ The resource amount shown is the requested amount.
 
 ### AMN platform worker
 
-Install `AmnPlatform.pb.cs` on a scout or drilling ship. Use
-`group Scouts` or `group MiningFleet` to select its assigned role and
+Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both
+`Scouts` and `MiningFleet` assignments, one lease at a time. Use
 `broker <ID>` if the world has multiple brokers. Name a local flight
 controller `[AMN PLATFORM]` and a forward camera `[AMN SCOUT]`.
 `probe <metres>` samples the camera ray and reports whether the ship is

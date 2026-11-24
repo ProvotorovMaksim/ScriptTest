@@ -25,7 +25,7 @@ namespace SpaceEngineers.Apps.Platform
             _worker = new TaskBusConsumer(
                 (envelope, _) => IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax),
                 () => Storage, value => Storage = value, message => Echo(message),
-                Me.EntityId, Me.CubeGrid.CustomName);
+                Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             var camera = FindCamera();
             if (camera != null) camera.EnableRaycast = true;
         }

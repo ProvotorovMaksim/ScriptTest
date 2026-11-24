@@ -235,6 +235,39 @@ namespace TaskBus.Tests
             Assert.Contains("\"base_stock_confirmed\":true", TakeResponse(broker, "TASK_ASSIGN", 42).PayloadJson);
         }
 
+        [Fact]
+        public void MiningPlatformCanFinishSurveyThenLeaseMiningWork()
+        {
+            var broker = StartBroker("");
+            string storage = "";
+            var platform = new TaskBusConsumer((message, _) => broker.IGC.Inbox.Enqueue((42, message)),
+                () => storage, value => storage = value, _ => { }, 42, "Platform", 1, miningPlatform: true);
+
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"survey\",\"group_id\":\"Scouts\",\"steps\":[\"survey\"]}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"mine\",\"group_id\":\"MiningFleet\",\"steps\":[\"mine\"]}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+
+            platform.Tick();
+            broker.Main("");
+            DeliverToWorker(platform, TakeResponse(broker, "TASK_ASSIGN", 42));
+            Assert.Contains("Stage: survey", platform.GetStatus());
+
+            platform.Tick();
+            broker.Main("");
+            Assert.Contains("\"group_id\":\"Scouts\"", TakeResponse(broker, "TASK_ASSIGN", 42).PayloadJson);
+            platform.ProcessCommand("stage survey");
+            broker.Main("");
+            DeliverToWorker(platform, TakeResponse(broker, "TASK_DONE_ACK", 42));
+
+            platform.Tick();
+            broker.Main("");
+            DeliverToWorker(platform, TakeResponse(broker, "TASK_ASSIGN", 42));
+            Assert.Contains("Stage: mine", platform.GetStatus());
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

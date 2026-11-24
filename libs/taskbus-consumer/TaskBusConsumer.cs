@@ -48,6 +48,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private string _oreSite;
         private string _oreApproach;
         private bool _baseStockConfirmed;
+        private readonly bool _miningPlatform;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
@@ -69,7 +70,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             ConsumerEchoDelegate echo,
             long entityId,
             string gridName,
-            int pollIntervalTicks = DefaultPollIntervalTicks)
+            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -82,6 +83,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _entityId = entityId;
             _gridName = gridName ?? string.Empty;
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
+            _miningPlatform = miningPlatform;
             LoadState();
         }
 
@@ -207,7 +209,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             var sb = new StringBuilder();
             sb.AppendLine("Consumer: " + _gridName);
-            sb.AppendLine("Group: " + _consumerGroup);
+            sb.AppendLine("Group: " + (_miningPlatform ? "MiningFleet + Scouts" : _consumerGroup));
             sb.AppendLine("Broker: " + (_brokerId == 0 ? "broadcast" : _brokerId.ToString(CultureInfo.InvariantCulture)));
             sb.AppendLine("Active task: " + (_activeTaskId ?? "none"));
             sb.AppendLine("Stage: " + (string.IsNullOrEmpty(_activeTaskId) ? "idle" : CurrentStage()));
@@ -240,7 +242,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             taskId = null;
             x = y = z = 0;
-            if (_consumerGroup != "MiningFleet" || !HasActiveTask || CurrentStage() != "mine" ||
+            if ((!_miningPlatform && _consumerGroup != "MiningFleet") || !HasActiveTask || CurrentStage() != "mine" ||
                 !HasRecentLeaseConfirmation)
                 return false;
 
@@ -262,7 +264,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void PollBroker()
         {
-            var payload = "{\"group_id\":" + TaskBusIgcHelper.ToJsonString(_consumerGroup) +
+            var payload = "{\"group_id\":" + TaskBusIgcHelper.ToJsonString(_miningPlatform ? "MiningFleet" : _consumerGroup) +
+                (_miningPlatform ? ",\"survey_capable\":true" : "") +
                 ",\"consumer_grid\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
                 ",\"active_task_id\":" + (string.IsNullOrEmpty(_activeTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_activeTaskId)) +
                 ",\"active_lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) +
@@ -273,6 +276,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void ReceiveTask(string taskJson)
         {
+            if (_miningPlatform)
+            {
+                string groupJson;
+                string groupId;
+                if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "group_id", out groupJson) ||
+                    !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId) ||
+                    (groupId != "MiningFleet" && groupId != "Scouts"))
+                    return;
+            }
+
             string taskIdJson;
             string taskId;
             if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "task_id", out taskIdJson) ||
@@ -337,7 +350,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
         }
 
-        private bool IsAutomaticPoint => _autoPoint && _consumerGroup == "MiningPoints" && HasActiveTask;
+        private bool IsAutomaticPoint => !_miningPlatform && _autoPoint && _consumerGroup == "MiningPoints" && HasActiveTask;
 
         private string CurrentChildRequestId() => _activeTaskId + ":" +
             _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture);
@@ -540,6 +553,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void SetConsumerGroup(string group)
         {
+            if (_miningPlatform)
+            {
+                _echo("Mining platforms accept both mining and survey assignments.");
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(group) || !string.IsNullOrEmpty(_activeTaskId))
             {
                 _echo("Set group only while idle: group <name>");

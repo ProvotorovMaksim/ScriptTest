@@ -329,6 +329,13 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "group_id", out groupJson) || !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId))
                 groupId = "default";
 
+            string surveyFlag;
+            bool surveyCapable = groupId == "MiningFleet" &&
+                TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "survey_capable", out surveyFlag) &&
+                surveyFlag == "true";
+            Func<TaskRecord, bool> acceptsGroup = task =>
+                task.GroupId == groupId || (surveyCapable && task.GroupId == "Scouts");
+
             string completedJson;
             string completedId;
             if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "completed_task_id", out completedJson) &&
@@ -355,7 +362,7 @@ namespace SpaceEngineers.Services.Broker
                 if (!hasActiveEpoch)
                     return;
                 if (previous == null || previous.WorkerId != consumerId ||
-                    previous.GroupId != groupId || previous.LeaseEpoch != activeEpoch ||
+                    !acceptsGroup(previous) || previous.LeaseEpoch != activeEpoch ||
                     (previous.State != "LEASED" && previous.State != "ACTIVE"))
                 {
                     SendTaskRevoked(consumerId, activeId, activeEpoch);
@@ -364,7 +371,7 @@ namespace SpaceEngineers.Services.Broker
             }
 
             var assigned = _tasks.FirstOrDefault(task => task.WorkerId == consumerId &&
-                task.GroupId == groupId && (task.State == "LEASED" || task.State == "ACTIVE"));
+                acceptsGroup(task) && (task.State == "LEASED" || task.State == "ACTIVE"));
             if (assigned != null)
             {
                 assigned.LastDispatchTick = _tick;
@@ -373,7 +380,7 @@ namespace SpaceEngineers.Services.Broker
                 return;
             }
 
-            var next = _tasks.FirstOrDefault(task => task.State == "QUEUED" && task.GroupId == groupId && task.RequesterId != consumerId);
+            var next = _tasks.FirstOrDefault(task => task.State == "QUEUED" && acceptsGroup(task) && task.RequesterId != consumerId);
             if (next == null)
             {
                 SendMessage("QUEUE_EMPTY", "null", consumerId);
