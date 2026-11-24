@@ -21,6 +21,7 @@ namespace SpaceEngineers.Services.Consumer
         private readonly string _haulerUnloadTo;
         private readonly string _haulerLoadFrom;
         private readonly List<IMyCargoContainer> _stationContainers = new List<IMyCargoContainer>();
+        private readonly List<IMyShipController> _cruiseControllers = new List<IMyShipController>();
         private readonly List<MyInventoryItem> _cargoItems = new List<MyInventoryItem>();
 
         private readonly GalnetWorkerBridge _galnet;
@@ -60,7 +61,8 @@ namespace SpaceEngineers.Services.Consumer
                     ? null : (Action<long, string, double>)LoadHaulerCargo);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
-                gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="));
+                gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
+                CanStartHaulerCruise);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
         }
 
@@ -147,6 +149,26 @@ namespace SpaceEngineers.Services.Consumer
                     return line.Substring(key.Length).Trim();
             }
             return null;
+        }
+
+        private bool CanStartHaulerCruise()
+        {
+            if (string.IsNullOrEmpty(_haulerDock))
+                return false;
+            var connector = GridTerminalSystem.GetBlockWithName(_haulerDock) as IMyShipConnector;
+            if (connector == null || connector.CubeGrid != Me.CubeGrid || !connector.IsWorking ||
+                connector.Status == MyShipConnectorStatus.Connected)
+                return false;
+
+            _cruiseControllers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_cruiseControllers, controller => controller.CubeGrid == Me.CubeGrid);
+            foreach (var controller in _cruiseControllers)
+            {
+                var remote = controller as IMyRemoteControl;
+                if (controller.IsUnderControl || (remote != null && remote.IsAutoPilotEnabled))
+                    return false;
+            }
+            return true;
         }
 
         private long ReadDockedGrid()

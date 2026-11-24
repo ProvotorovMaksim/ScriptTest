@@ -19,15 +19,18 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Func<string, IMyTerminalBlock> _findBlock;
         private readonly Action<string> _echo;
         private readonly Func<long, string> _findStationApproach;
+        private readonly Func<bool> _canStartCruise;
 
         public MiningRouteLoader(TaskBusConsumer worker, IMyCubeGrid grid,
-            Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null)
+            Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null,
+            Func<bool> canStartCruise = null)
         {
             _worker = worker;
             _grid = grid;
             _findBlock = findBlock;
             _echo = echo;
             _findStationApproach = findStationApproach;
+            _canStartCruise = canStartCruise;
         }
 
         public bool TryHandle(string command)
@@ -35,7 +38,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (string.Equals(command, "route approach", StringComparison.OrdinalIgnoreCase))
                 LoadMiningApproach();
             else if (string.Equals(command, "route station", StringComparison.OrdinalIgnoreCase) && _findStationApproach != null)
-                LoadStationApproach();
+                LoadStationApproach(false);
+            else if (string.Equals(command, "route cruise", StringComparison.OrdinalIgnoreCase) &&
+                _findStationApproach != null && _canStartCruise != null)
+                LoadStationApproach(true);
             else if (string.Equals(command, "route return", StringComparison.OrdinalIgnoreCase))
                 LoadReturnRoute();
             else
@@ -58,7 +64,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             AppendApproach(RouteControllerName, RouteWaypointPrefix + taskId, new Vector3D(x, y, z));
         }
 
-        private void LoadStationApproach()
+        private void LoadStationApproach(bool startCruise)
         {
             string taskId;
             bool pickup;
@@ -79,8 +85,49 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            AppendApproach(pickup ? "[AMN PICKUP]" : "[AMN DELIVERY]",
-                RouteWaypointPrefix + taskId, new Vector3D(x, y, z));
+            string controller = pickup ? "[AMN PICKUP]" : "[AMN DELIVERY]";
+            string waypoint = RouteWaypointPrefix + taskId;
+            var position = new Vector3D(x, y, z);
+            if (startCruise)
+                StartPreparedCruise(controller, waypoint, position);
+            else
+                AppendApproach(controller, waypoint, position);
+        }
+
+        private void StartPreparedCruise(string controller, string waypoint, Vector3D position)
+        {
+            try
+            {
+                var remote = _findBlock(controller) as IMyRemoteControl;
+                if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking ||
+                    remote.IsAutoPilotEnabled || !_canStartCruise())
+                {
+                    _echo("Cruise requires an undocked ship, no active pilot or autopilot, and a working " + controller + ".");
+                    return;
+                }
+
+                if (remote.FlightMode != FlightMode.OneWay)
+                {
+                    _echo("Set the route controller to One Way before starting cruise.");
+                    return;
+                }
+
+                _routeWaypoints.Clear();
+                remote.GetWaypointInfo(_routeWaypoints);
+                if (_routeWaypoints.Count == 0 ||
+                    _routeWaypoints[_routeWaypoints.Count - 1].Name != waypoint ||
+                    _routeWaypoints[_routeWaypoints.Count - 1].Coords != position)
+                {
+                    _echo("Load and review the current station route before starting cruise.");
+                    return;
+                }
+                remote.SetAutoPilotEnabled(true);
+                _echo(remote.IsAutoPilotEnabled ? "Cruise autopilot engaged." : "Cruise autopilot did not engage.");
+            }
+            catch (Exception error)
+            {
+                _echo("Could not start cruise: " + error.Message);
+            }
         }
 
         private void AppendApproach(string controller, string waypointName, Vector3D position)

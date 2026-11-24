@@ -265,6 +265,10 @@ Configure a reviewed approach for each station with
 approach to a local Remote Control. Use `[AMN PICKUP]` for the pickup leg
 and `[AMN DELIVERY]` for delivery. Keep autopilot off while loading the
 approach and remove the old AMN waypoint before preparing a new task.
+After reviewing the loaded route and undocking, run `route cruise` to
+start that leg's Remote Control in One Way mode. It checks the final waypoint against
+the confirmed assignment and rejects a connected ship or another
+active controller. Use the Remote Control to supervise or stop cruise.
 
 Name the hauler FCS programmable block `[AMN FCS]` and record each station
 berth with FCS while connected. At the final approach, run `route dock`
