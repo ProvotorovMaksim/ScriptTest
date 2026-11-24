@@ -44,6 +44,67 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void BasePublishesQueriesAndCancelsThroughTheBrokersOwnRelay()
+        {
+            MyGridProgram.CustomDataAtStartup = "App=1\nApp=9";
+            Relay relay;
+            try { relay = Start(4, ""); }
+            finally { MyGridProgram.CustomDataAtStartup = null; }
+            var broker = new Broker();
+            var relayBlock = new ApplicationBlock(4, command =>
+            {
+                relay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+            broker.GridTerminalSystem.Relay = relayBlock;
+            relay.GridTerminalSystem.ApplicationsById[1] = new ApplicationBlock(1, command =>
+            {
+                broker.Main(command);
+                return true;
+            });
+
+            var bridge = new GalnetWorkerBridge(new ApplicationBlock(9, _ => true), "GalnetBrokerRelay=4",
+                () => relayBlock, (_, __) => throw new InvalidOperationException("Radio not allowed"), _ => { });
+            var replies = new List<TaskBusEnvelope>();
+            relay.GridTerminalSystem.ApplicationsById[9] = new ApplicationBlock(9, command =>
+                bridge.TryReceive(command, (source, payload) =>
+                {
+                    Assert.Equal(1L, source);
+                    Assert.True(TaskBusProtocol.TryParseEnvelope(payload, out var reply));
+                    replies.Add(reply);
+                }));
+
+            var publish = Exchange("TASK_PUBLISH", "{\"request_id\":\"iron\",\"group_id\":\"MiningPoints\"}");
+            Assert.Equal("TASK_PUBLISHED_ACK", publish.EventType);
+            Assert.Contains("\"state\":\"QUEUED\"", publish.PayloadJson);
+
+            var query = Exchange("TASK_QUERY", "{\"request_id\":\"iron\"}");
+            Assert.Equal("TASK_PUBLISHED_ACK", query.EventType);
+            Assert.Contains("\"state\":\"QUEUED\"", query.PayloadJson);
+
+            var cancel = Exchange("TASK_CANCEL", "{\"request_id\":\"iron\"}");
+            Assert.Equal("TASK_CANCEL_ACK", cancel.EventType);
+            Assert.Contains("\"state\":\"CANCELLED\"", Exchange("TASK_QUERY",
+                "{\"request_id\":\"iron\"}").PayloadJson);
+
+            TaskBusEnvelope Exchange(string eventType, string payload)
+            {
+                replies.Clear();
+                bridge.Send(TaskBusProtocol.CreateEnvelope(eventType, payload, targetId: 1), 1);
+                for (int tick = 0; tick < 48 && replies.Count == 0; tick++)
+                {
+                    bridge.Flush();
+                    broker.Main("");
+                    relay.Main("", UpdateType.Update10);
+                }
+                Assert.DoesNotContain("SEND:", relay.Storage);
+                Assert.Empty(relay.IGC.UnicastOutbox);
+                Assert.Empty(broker.IGC.Outbox);
+                return Assert.Single(replies);
+            }
+        }
+
+        [Fact]
         public void DeliveryUsesReserveAfterRestartAndRetriesLostAck()
         {
             var nodes = new Dictionary<long, Relay>
