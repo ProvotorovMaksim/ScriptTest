@@ -88,6 +88,12 @@ confirmation. It does not identify the source of individual items.
 fleet workflow. AMN saves the dispatch setting and refuses to change it
 while requests or cancellations are outstanding.
 
+During a new request's survey stage, select the deposit with
+`site GPS:Ore:X:Y:Z:` and record a distinct approach point outside the voxel
+with `approach GPS:Name:X:Y:Z:`. Both points survive a restart and are included
+in the mining assignment. This records an operator-selected approach point.
+Flight routing and automatic site selection are separate work.
+
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
 children only from the block holding that lease in `MiningPoints`.

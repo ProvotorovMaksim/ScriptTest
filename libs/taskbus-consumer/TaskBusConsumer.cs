@@ -45,6 +45,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private bool _autoPoint;
         private string _completedChildRequest;
         private string _childState;
+        private string _oreSite;
+        private string _oreApproach;
         private bool _baseStockConfirmed;
         private string _consumerGroup = "default";
         private string _activeTaskId;
@@ -168,6 +170,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SetConsumerGroup(cmd.Substring(6).Trim());
                 return;
             }
+            if (cmd.StartsWith("site ", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("approach ", StringComparison.OrdinalIgnoreCase))
+            {
+                SetSurveyWaypoint(cmd);
+                return;
+            }
             if (cmd.StartsWith("stage ", StringComparison.OrdinalIgnoreCase))
             {
                 AdvanceStage(cmd.Substring(6).Trim());
@@ -207,7 +215,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 sb.AppendLine("Child request: " + CurrentChildRequestId());
                 sb.AppendLine("Child status: " + (_childState ?? "awaiting broker"));
-                if (CurrentStage() == "transport" && RequiresBaseStockConfirmation())
+                if (CurrentStage() == "transport" && AssignmentRequires("receipt_required"))
                     sb.AppendLine(_baseStockConfirmed ? "Base stock confirmed" : "Waiting for base stock confirmation");
                 if (_completedChildRequest == CurrentChildRequestId())
                     sb.AppendLine("Child task complete. Confirm stage.");
@@ -280,6 +288,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _activeTaskId = taskId;
                 _completedChildRequest = null;
                 _childState = null;
+                _oreSite = null;
+                _oreApproach = null;
                 _activeTaskJson = taskJson;
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
@@ -310,6 +320,42 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private string CurrentChildRequestId() => _activeTaskId + ":" +
             _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture);
+
+        private void SetSurveyWaypoint(string command)
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation)
+            {
+                _echo("Set a waypoint during the confirmed survey stage.");
+                return;
+            }
+
+            int separator = command.IndexOf(' ');
+            var gps = command.Substring(separator + 1).Trim();
+            string name;
+            double x;
+            double y;
+            double z;
+            if (!TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) || name.Length > 64)
+            {
+                _echo("Use site GPS:Ore:X:Y:Z: or approach GPS:Name:X:Y:Z:.");
+                return;
+            }
+
+            var position = "{\"x\":" + x.ToString("R", CultureInfo.InvariantCulture) +
+                ",\"y\":" + y.ToString("R", CultureInfo.InvariantCulture) +
+                ",\"z\":" + z.ToString("R", CultureInfo.InvariantCulture) + "}";
+            bool isSite = separator == 4;
+            if (position == (isSite ? _oreApproach : _oreSite))
+            {
+                _echo("Choose distinct ore and approach positions.");
+                return;
+            }
+            if (isSite)
+                _oreSite = position;
+            else
+                _oreApproach = position;
+            SaveState();
+        }
 
         private void PublishCurrentChild()
         {
@@ -343,6 +389,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out value))
                     payload.Append(',').Append(TaskBusIgcHelper.ToJsonString(field)).Append(':').Append(value);
             }
+            if (CurrentStage() == "mine" && _oreSite != null && _oreApproach != null)
+                payload.Append(",\"ore_position\":").Append(_oreSite)
+                    .Append(",\"approach_position\":").Append(_oreApproach);
             SendMessage("TASK_PUBLISH", payload.Append('}').ToString());
         }
 
@@ -391,9 +440,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            if (IsAutomaticPoint && expected == "transport" && RequiresBaseStockConfirmation() && !_baseStockConfirmed)
+            if (IsAutomaticPoint && expected == "transport" && AssignmentRequires("receipt_required") && !_baseStockConfirmed)
             {
                 _echo("Waiting for stock confirmation from the requesting base.");
+                return;
+            }
+
+            if (IsAutomaticPoint && expected == "survey" && AssignmentRequires("site_required") &&
+                (_oreSite == null || _oreApproach == null))
+            {
+                _echo("Save both the ore site and an approach point before confirming survey.");
                 return;
             }
 
@@ -419,12 +475,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private bool RequiresBaseStockConfirmation()
+        private bool AssignmentRequires(string field)
         {
             string details;
             string value;
             return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
-                TaskBusIgcHelper.TryGetJsonProperty(details, "receipt_required", out value) && value == "true";
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) && value == "true";
         }
 
         private string CurrentStage()
@@ -609,6 +665,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                         if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
+                    else if (key == "ORE_SITE") _oreSite = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "ORE_APPROACH") _oreApproach = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
                     else if (key == "BROKER") long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);
@@ -646,6 +704,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(CultureInfo.InvariantCulture));
                 var stagesJson = "[" + string.Join(",", _stages.Select(TaskBusIgcHelper.ToJsonString).ToArray()) + "]";
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
+                if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
+                if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
             }
             if (_autoPoint) storage.AppendLine("POINT_AUTO|1");

@@ -656,7 +656,7 @@ namespace SpaceEngineers.Apps.Amn
                 ",\"current\":" + current.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"minimum\":" + minimum.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"amount\":" + (minimum - current).ToString("R", CultureInfo.InvariantCulture) +
-                (_dispatchToPoint ? ",\"receipt_required\":true,\"steps\":[\"survey\",\"mine\",\"transport\"]" :
+                (_dispatchToPoint ? ",\"receipt_required\":true,\"site_required\":true,\"steps\":[\"survey\",\"mine\",\"transport\"]" :
                     ",\"steps\":[\"survey\",\"mine\",\"intermediate\",\"deliver\"]") +
                 ",\"base_grid_id\":" + Me.CubeGrid.EntityId.ToString(CultureInfo.InvariantCulture) +
                 ",\"base_grid_name\":" + TaskBusIgcHelper.ToJsonString(_gridName) +

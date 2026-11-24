@@ -19,7 +19,7 @@ namespace TaskBus.Tests
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
             var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
-                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true,\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
             point.ProcessIncomingMessage(1, parent);
             point.Tick();
             var firstPublication = sent[sent.Count - 1];
@@ -35,9 +35,19 @@ namespace TaskBus.Tests
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
                 "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
             point.ProcessCommand("stage survey");
+            Assert.Contains("Stage: survey", point.GetStatus());
+            point.ProcessCommand("site GPS:Iron:10:20:30:");
+            point.ProcessCommand("approach GPS:Entry:10:20:50:");
+            point = Start();
+            point.ProcessIncomingMessage(1, parent);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
+            point.ProcessCommand("stage survey");
             Assert.Contains("Stage: mine", point.GetStatus());
             point.Tick();
             Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
+            Assert.Contains("\"ore_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
+            Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":50}", sent[sent.Count - 1]);
         }
 
         [Fact]
