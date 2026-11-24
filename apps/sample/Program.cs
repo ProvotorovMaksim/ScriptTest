@@ -5,7 +5,7 @@ using System;
 using System.Linq;
 using VRageMath;
 using System.Text;
-using SpaceEngineers.CommonLibs;
+using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Apps.Sample
 {

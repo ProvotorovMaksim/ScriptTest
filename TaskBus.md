@@ -19,7 +19,7 @@ tests/                # Unit tests for TaskBusProtocol
 
 | Layer | Purpose | Key Files |
 |-------|---------|-----------|
-| `libs/igc-core` | Shared SDK mixin — compiled into every PB | `TaskBusProtocol.cs`, `TaskBusProducer.cs`, `TaskBusIgcHelper.cs`, `Logger.cs`, `Autopilot.cs` |
+| `libs/igc-core` | Shared protocol and IGC helpers, plus linked PB utilities | `TaskBusProtocol.cs`, `TaskBusIgcHelper.cs`, `Logger.cs`, `Autopilot.cs` |
 | `services/broker` | Queue broker: storage, deduplication, leases, consumer groups | `Program.cs` |
 | `services/consumer` | Polling consumer: checkpoints, stage workflow, commit ACK | `Program.cs` |
 | `apps/amn` | Resource monitor/producer: scans inventory, publishes deficits | `Program.cs` |
@@ -30,10 +30,11 @@ tests/                # Unit tests for TaskBusProtocol
 ### Unified build (recommended)
 
 ```sh
+export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 ./build.sh
 ```
 
-This compiles all 4 PB projects (broker, consumer, amn, sample) with Space Engineers assemblies and copies the output DLLs to `build/output/`. Install each DLL into the corresponding Programmable Block in-game.
+Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the six PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. In-game deployment requires packaging the PB source with its shared code for the Programmable Block API.
 
 ### Per-project build
 
@@ -53,7 +54,7 @@ dotnet test TaskBus.Tests/TaskBus.Tests.csproj
 ## Roles
 
 - **libs/igc-core/TaskBusProtocol.cs** — shared versioned JSON envelope and JSON helpers (public, XML-documented).
-- **libs/igc-core/TaskBusProducer.cs** — reusable transport-facing producer API (public, XML-documented).
+- **libs/taskbus-producer/TaskBusProducer.cs** — reusable transport-facing producer API (public, XML-documented).
 - **libs/igc-core/TaskBusIgcHelper.cs** — shared IGC/Storage helper: envelope parsing, JSON property extraction, Base64 storage encoding/decoding. Eliminates duplicated boilerplate across all PB programs.
 - **libs/igc-core/Logger.cs** — simple terminal-block logger (public, XML-documented).
 - **libs/igc-core/Autopilot.cs** — remote control autopilot helper with null-safe constructors (public, XML-documented).

@@ -12,7 +12,7 @@ namespace SpaceEngineers.Services.Producer
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
 
-        private readonly TaskBusProducer.TaskBusProducer _producer;
+        private readonly TaskBusProducer _producer;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private int _sequence;
 
@@ -20,9 +20,9 @@ namespace SpaceEngineers.Services.Producer
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
-            _producer = new TaskBusProducer.TaskBusProducer(CommunicationTag,
+            _producer = new TaskBusProducer(CommunicationTag,
                 (channel, envelope, targetId) =>
-                    IGC.SendBroadcastMessage(channel, envelope, targetId, TransmissionDistance.TransmissionDistanceMax));
+                    IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
         }
 
         public void Main(string argument)
