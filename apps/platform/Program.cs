@@ -18,6 +18,7 @@ namespace SpaceEngineers.Apps.Platform
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly TaskBusConsumer _worker;
+        private readonly MiningRouteLoader _routes;
         private readonly IMyBroadcastListener _listener;
         private string _lastProbe = "No scan yet.";
 
@@ -45,6 +46,7 @@ namespace SpaceEngineers.Apps.Platform
                 _galnet.Send,
                 () => Storage, value => Storage = value, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
+            _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             var camera = FindCamera();
             if (camera != null) camera.EnableRaycast = true;
         }
@@ -75,7 +77,7 @@ namespace SpaceEngineers.Apps.Platform
                 BeginOreSurvey(command.Substring(11).Trim());
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
                 ScheduleOreSample();
-            else
+            else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
             _galnet.Flush();

@@ -94,10 +94,10 @@ package_taskbus_pb() {
 producer=libs/taskbus-producer/TaskBusProducer.cs
 package_taskbus_pb services/broker TaskBroker "$producer"
 package_taskbus_pb services/galnet GalnetRelay libs/igc-core/GalnetTopology.cs
-package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusConsumer.cs libs/taskbus-consumer/GalnetWorkerBridge.cs
+package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusConsumer.cs libs/taskbus-consumer/GalnetWorkerBridge.cs libs/taskbus-consumer/MiningRouteLoader.cs
 package_taskbus_pb services/producer TaskProducer "$producer"
 package_taskbus_pb apps/amn AMN.Base "$producer"
-package_taskbus_pb apps/platform AmnPlatform libs/taskbus-consumer/TaskBusConsumer.cs libs/taskbus-consumer/GalnetWorkerBridge.cs
+package_taskbus_pb apps/platform AmnPlatform libs/taskbus-consumer/TaskBusConsumer.cs libs/taskbus-consumer/GalnetWorkerBridge.cs libs/taskbus-consumer/MiningRouteLoader.cs
 package_taskbus_pb apps/sample SampleMain libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
 package_taskbus_pb apps/ship-link ShipLink
 
