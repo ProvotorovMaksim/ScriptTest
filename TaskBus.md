@@ -419,6 +419,11 @@ After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
 the station identified by the mining assignment. The platform needs
 a local `[AMN FCS]` PB and a previously recorded berth for that grid.
+With `MiningAutoDock=true`, the platform requests the same FCS docking
+once after it settles within 2 m of the final prepared return waypoint
+under the same lease and with flight controls idle. Place that
+waypoint inside the FCS final approach envelope. FCS runs its usual
+docking checks. `ore stop` cancels a pending request before the handoff.
 Set `MiningUnloadTo=<mining point cargo container name>` and run
 `mine unload` while docked there with drills off. Each command transfers
 up to one stack of the requested resource from `MiningCargo` into the

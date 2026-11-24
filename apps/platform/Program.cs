@@ -40,6 +40,12 @@ namespace SpaceEngineers.Apps.Platform
         private bool _platformMiningRetreat;
         private readonly bool _autoMiningRetreat;
         private readonly bool _autoMiningReturn;
+        private readonly bool _autoMiningDock;
+        private bool _platformMiningReturn;
+        private Vector3D _miningReturnEndpoint;
+        private string _pendingMiningDockLease;
+        private long _miningDockReturnController;
+        private int _dockSettleUpdates;
         private string _pendingReturnLease;
         private int _returnSettleUpdates;
         private string _pendingRetreatLease;
@@ -106,6 +112,7 @@ namespace SpaceEngineers.Apps.Platform
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoMiningDock = string.Equals(ReadSetting("MiningAutoDock="), "true", StringComparison.OrdinalIgnoreCase);
             var laneSetting = ReadSetting("MiningLaneRadius=");
             if (laneSetting != null)
             {
@@ -212,6 +219,7 @@ namespace SpaceEngineers.Apps.Platform
                 _platformFlightLease = null;
                 _pendingRetreatLease = null;
                 _pendingReturnLease = null;
+                _pendingMiningDockLease = null;
                 CheckPlatformFlight();
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
@@ -228,7 +236,10 @@ namespace SpaceEngineers.Apps.Platform
                 StartMiningRetreat();
             }
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingMiningDockLease = null;
                 RequestMiningPointDock();
+            }
             else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
             {
                 _pendingReturnLease = null;
@@ -279,6 +290,7 @@ namespace SpaceEngineers.Apps.Platform
             {
                 UpdateAutomaticRetreat();
                 UpdateAutomaticMiningReturn();
+                UpdateAutomaticMiningDock();
             }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
@@ -1064,9 +1076,22 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             if (returning)
-                _routes.LoadReturnRoute(remote => StartPlatformFlight(remote, "Mining return", false));
+                _routes.LoadReturnRoute(StartMiningReturnFlight);
             else
                 _routes.LoadMiningApproach(remote => StartPlatformFlight(remote, "Mining approach", false));
+        }
+
+        private void StartMiningReturnFlight(IMyRemoteControl remote)
+        {
+            _pendingMiningDockLease = null;
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count == 0)
+                return;
+
+            _miningReturnEndpoint = _surveyWaypoints[_surveyWaypoints.Count - 1].Coords;
+            StartPlatformFlight(remote, "Mining return", false);
+            _platformMiningReturn = _worker.SupervisedCruiseRemote == remote.EntityId;
         }
 
         private void LoadAssignedMiningEndpoint()
@@ -1336,6 +1361,7 @@ namespace SpaceEngineers.Apps.Platform
             _worker.SetSupervisedCruiseRemote(remote.EntityId);
             _platformFlightLease = _worker.ConfirmedLeaseIdentity;
             _platformSurveyFlight = survey;
+            _platformMiningReturn = false;
             remote.SetAutoPilotEnabled(true);
             if (!remote.IsAutoPilotEnabled)
                 _worker.SetSupervisedCruiseRemote(0);
@@ -1367,9 +1393,19 @@ namespace SpaceEngineers.Apps.Platform
                     _pendingReturnLease = _platformFlightLease;
                     _returnSettleUpdates = 0;
                 }
+                if (_autoMiningDock && _platformMiningReturn && _platformFlightLease != null &&
+                    _platformFlightLease == _worker.ConfirmedLeaseIdentity && remote != null &&
+                    remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
+                    Vector3D.DistanceSquared(remote.GetPosition(), _miningReturnEndpoint) <= 4)
+                {
+                    _pendingMiningDockLease = _platformFlightLease;
+                    _miningDockReturnController = id;
+                    _dockSettleUpdates = 0;
+                }
                 _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
                 _platformMiningRetreat = false;
+                _platformMiningReturn = false;
                 return;
             }
             if (_platformMiningPass && (_drillingLease == null || remote.GetShipSpeed() > 1.5))
@@ -1389,6 +1425,7 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
                 _platformMiningRetreat = false;
+                _platformMiningReturn = false;
                 if (!_lastProbe.StartsWith("Mining movement halted", StringComparison.Ordinal))
                     _lastProbe = "Platform flight stopped. Check the lease and flight conditions.";
             }
@@ -1439,6 +1476,32 @@ namespace SpaceEngineers.Apps.Platform
             {
                 _pendingReturnLease = null;
                 _lastProbe = "Automatic return cancelled: the platform did not settle at the retreat waypoint.";
+            }
+        }
+
+        private void UpdateAutomaticMiningDock()
+        {
+            if (_pendingMiningDockLease == null)
+                return;
+            if (_pendingMiningDockLease != _worker.ConfirmedLeaseIdentity || _worker.SupervisedCruiseRemote != 0)
+            {
+                _pendingMiningDockLease = null;
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithId(_miningDockReturnController) as IMyRemoteControl;
+            if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
+                !remote.IsAutoPilotEnabled && remote.GetShipSpeed() <= 0.25 &&
+                Vector3D.DistanceSquared(remote.GetPosition(), _miningReturnEndpoint) <= 4)
+            {
+                _pendingMiningDockLease = null;
+                if (CanStartPlatformFlight())
+                    RequestMiningPointDock();
+            }
+            else if (++_dockSettleUpdates >= 30)
+            {
+                _pendingMiningDockLease = null;
+                _lastProbe = "Automatic docking cancelled: the platform did not settle at the return waypoint.";
             }
         }
 
