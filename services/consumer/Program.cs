@@ -123,7 +123,7 @@ namespace SpaceEngineers.Services.Consumer
                     RequestFcs("dock depart ready");
             }
             CheckLeasedHaulerDock();
-            _routes.CheckCruiseLease();
+            _routes.CheckCruiseLease((updateSource & UpdateType.Update10) != 0);
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
             if (!connected)

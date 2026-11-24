@@ -26,6 +26,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private bool _cruisePickup;
         private long _cruiseGrid;
         private Vector3D _cruiseEndpoint;
+        private Vector3D _cruiseProgressPosition;
+        private int _cruiseProgressUpdates;
+        private string _cruiseStopReason;
+        private const int CruiseProgressInterval = 60;
+        private const double MinimumCruiseMovementSquared = 0.25;
         private int _arrivalChecks;
         private readonly Action<long> _onCruiseArrival;
 
@@ -149,6 +154,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _cruisePickup = pickup;
                 _cruiseGrid = grid;
                 _cruiseEndpoint = position;
+                _cruiseProgressPosition = remote.GetPosition();
+                _cruiseProgressUpdates = 0;
+                _cruiseStopReason = null;
                 _arrivalChecks = 0;
                 remote.SetAutoPilotEnabled(true);
                 if (remote.IsAutoPilotEnabled)
@@ -187,7 +195,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return remote;
         }
 
-        public void CheckCruiseLease()
+        public void CheckCruiseLease(bool periodic = false)
         {
             if (_cruiseRemote == null && _worker.SupervisedCruiseRemote != 0 && _findBlockById != null)
             {
@@ -209,6 +217,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (_cruiseStopReason != null)
+            {
+                StopCruise(_cruiseStopReason);
+                return;
+            }
+
             string taskId;
             bool pickup;
             long grid;
@@ -217,6 +231,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 StopCruise("Cruise stopped: the current leg lost lease confirmation.");
             else if (!_cruiseRemote.IsAutoPilotEnabled)
                 CheckCruiseArrival();
+            else if (periodic && ++_cruiseProgressUpdates >= CruiseProgressInterval)
+            {
+                _cruiseProgressUpdates = 0;
+                var position = _cruiseRemote.GetPosition();
+                if (Vector3D.DistanceSquared(position, _cruiseProgressPosition) < MinimumCruiseMovementSquared)
+                    StopCruise("Cruise stopped: the ship did not move along the supervised route.");
+                else
+                    _cruiseProgressPosition = position;
+            }
         }
 
         private void CheckCruiseArrival()
@@ -246,6 +269,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private void ForgetCruise()
         {
             _cruiseRemote = null;
+            _cruiseStopReason = null;
             _worker.SetSupervisedCruiseRemote(0);
         }
 
@@ -253,6 +277,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             if (_cruiseRemote == null)
                 return;
+            _cruiseStopReason = reason;
             try
             {
                 if (_cruiseRemote.IsAutoPilotEnabled)
