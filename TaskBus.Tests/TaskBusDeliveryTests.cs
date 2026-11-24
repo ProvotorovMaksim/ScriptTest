@@ -11,6 +11,33 @@ namespace TaskBus.Tests
     public sealed class TaskBusDeliveryTests
     {
         [Fact]
+        public void BrokerRestartDoesNotRenewExpiredWallClockLease()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"default\"}", targetId: 1);
+            Dispatch(broker, 42, poll);
+            TakeResponse(broker, "TASK_ASSIGN", 42);
+            var rows = broker.Storage.Split('\n');
+            int index = System.Array.FindIndex(rows, row => row.StartsWith("TASK|"));
+            var fields = rows[index].Split('|');
+            Assert.True(long.Parse(fields[12]) > System.DateTime.UtcNow.Ticks);
+            fields[12] = "1";
+            rows[index] = string.Join("|", fields);
+
+            broker = StartBroker(string.Join("\n", rows));
+            var oldDone = TaskBusProtocol.CreateEnvelope("TASK_DONE",
+                "{\"task_id\":\"9-1\",\"lease_epoch\":1}", targetId: 1);
+            Dispatch(broker, 42, oldDone);
+            TakeResponse(broker, "TASK_REVOKED", 42);
+            Dispatch(broker, 43, poll);
+            var newLease = TakeResponse(broker, "TASK_ASSIGN", 43);
+            Assert.Contains("\"lease_epoch\":3", newLease.PayloadJson);
+        }
+
+        [Fact]
         public void LostPublishAndCompletionAcksRecoverAcrossRestarts()
         {
             var broker = StartBroker("");

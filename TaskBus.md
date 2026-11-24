@@ -62,6 +62,11 @@ catalog leaves unaccepted records pending on the sender. Use `survey cancel` to
 stop a transfer. A survey hit is a catalog observation. Route planning should use a
 separate approach point outside the voxel.
 
+The broker stores the UTC deadline of each newly issued or renewed
+lease alongside the simulation tick check. Loading Storage after downtime
+requeues expired leases and fences their old epochs. Legacy records without
+a UTC deadline keep the existing simulation tick check until renewed.
+
 ### Galnet routing core
 
 `GalnetTopology` computes next hops from current, reciprocal neighbor

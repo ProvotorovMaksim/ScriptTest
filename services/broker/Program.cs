@@ -20,6 +20,7 @@ namespace SpaceEngineers.Services.Broker
         private const int MaxTasks = 100;
         private const int RetainedRequestCount = 500;
         private const int LeaseTimeoutTicks = 180;
+        private static readonly long LeaseTimeoutUtc = TimeSpan.FromSeconds(30).Ticks;
         private int _tick;
         private int _sequence;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
@@ -44,6 +45,7 @@ namespace SpaceEngineers.Services.Broker
             public string State;
             public int Attempts;
             public int LastDispatchTick;
+            public long LeaseExpiresUtc;
             public int LeaseEpoch;
         }
 
@@ -70,6 +72,7 @@ namespace SpaceEngineers.Services.Broker
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _producer = new TaskBusProducer(CommunicationTag, SendEnvelope);
             LoadQueue();
+            ExpireConsumerLeases();
             SaveAfterParentLeaseChange(false);
         }
 
@@ -78,6 +81,7 @@ namespace SpaceEngineers.Services.Broker
             var command = argument ?? string.Empty;
             if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
             {
+                ExpireConsumerLeases();
                 ReceiveGalnet(command);
                 return;
             }
@@ -233,7 +237,7 @@ namespace SpaceEngineers.Services.Broker
                 return;
 
             task.State = "ACTIVE";
-            task.LastDispatchTick = _tick;
+            RenewLease(task);
             SaveQueue();
             Echo("Consumer " + sourceId + " persisted task " + task.Id);
         }
@@ -456,7 +460,7 @@ namespace SpaceEngineers.Services.Broker
                 acceptsGroup(task) && (task.State == "LEASED" || task.State == "ACTIVE"));
             if (assigned != null)
             {
-                assigned.LastDispatchTick = _tick;
+                RenewLease(assigned);
                 DispatchTask(assigned);
                 SaveQueue();
                 return;
@@ -472,22 +476,31 @@ namespace SpaceEngineers.Services.Broker
             next.WorkerId = consumerId;
             next.LeaseEpoch++;
             next.State = "LEASED";
-            next.LastDispatchTick = _tick;
+            RenewLease(next);
             SaveQueue();
             DispatchTask(next);
             SaveQueue();
+        }
+
+        private void RenewLease(TaskRecord task)
+        {
+            task.LastDispatchTick = _tick;
+            task.LeaseExpiresUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
         }
 
         private void ExpireConsumerLeases()
         {
             var changed = false;
             var parentChanged = false;
+            long now = DateTime.UtcNow.Ticks;
             foreach (var task in _tasks.Where(entry => entry.State == "LEASED" || entry.State == "ACTIVE"))
             {
-                if (_tick - task.LastDispatchTick <= LeaseTimeoutTicks)
+                if (_tick - task.LastDispatchTick <= LeaseTimeoutTicks &&
+                    (task.LeaseExpiresUtc == 0 || now < task.LeaseExpiresUtc))
                     continue;
 
                 task.WorkerId = 0;
+                task.LeaseExpiresUtc = 0;
                 task.State = "QUEUED";
                 task.LeaseEpoch++;
                 changed = true;
@@ -665,7 +678,7 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13))
+                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13 && parts.Length != 14))
                     continue;
 
                 try
@@ -702,6 +715,9 @@ namespace SpaceEngineers.Services.Broker
                         requestJson = TaskBusIgcHelper.DecodeStorage(parts[5]);
                         state = parts[6];
                     }
+                    long leaseExpiry = 0;
+                    if (parts.Length == 14)
+                        long.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseExpiry);
                     _tasks.Add(new TaskRecord
                     {
                         Id = id,
@@ -716,7 +732,8 @@ namespace SpaceEngineers.Services.Broker
                         Attempts = attempts,
                         LastDispatchTick = 0,
                         LeaseEpoch = leaseEpoch,
-                        BaseStockConfirmed = parts.Length == 13 && parts[12].Trim() == "1"
+                        LeaseExpiresUtc = leaseExpiry,
+                        BaseStockConfirmed = parts.Length >= 13 && parts[parts.Length - 1].Trim() == "1"
                     });
                 }
                 catch (FormatException)
@@ -755,6 +772,7 @@ namespace SpaceEngineers.Services.Broker
                     .Append(task.Attempts.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.LastDispatchTick.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .AppendLine(task.BaseStockConfirmed ? "1" : "0");
             }
             Storage = storage.ToString();
