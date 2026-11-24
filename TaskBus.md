@@ -719,7 +719,10 @@ clear a manual assistance request. Wingmates see reporting ships marked
 `[ASSIST]` at the top of the roster until the request is cleared or reports
 expire. With configured Galnet fleet peers, an active request also
 includes the current ship position in each heartbeat. Recipients display
-it while the heartbeat is fresh. `assist off` schedules a fresh heartbeat
+it while the heartbeat is fresh. `assist track <relay ID>` shows range
+and direction in cockpit axes to that moving position. Guidance pauses
+when the heartbeat goes stale and stops when the sender clears its
+request. Use `assist untrack` to deselect the position. `assist off` schedules a fresh heartbeat
 without the position. Radio status carries only the assistance flag.
 Changing fleets or restarting ShipLink clears the local request.
 

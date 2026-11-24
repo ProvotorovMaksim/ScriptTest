@@ -53,6 +53,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
+        private long _trackedAssistanceRelay;
 
         private string _fleetName;
         private bool _needsAssistance;
@@ -128,6 +129,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
                 _trackedContact = null;
+                _trackedAssistanceRelay = 0;
                 SaveSettings();
             }
 
@@ -173,15 +175,19 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendAssistance(command.Substring(12).Trim());
             else if (command.StartsWith("assist clear ", StringComparison.OrdinalIgnoreCase))
                 SendFleetWithdrawal(command.Substring(13).Trim(), assistance: true);
+            else if (command.StartsWith("assist track ", StringComparison.OrdinalIgnoreCase))
+                TrackAssistance(command.Substring(13).Trim());
             else if (command.StartsWith("contact clear ", StringComparison.OrdinalIgnoreCase))
                 SendFleetWithdrawal(command.Substring(14).Trim(), assistance: false);
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
             else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
                 TrackFleetContact(command.Substring(14).Trim());
-            else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(command, "assist untrack", StringComparison.OrdinalIgnoreCase))
             {
                 _trackedContact = null;
+                _trackedAssistanceRelay = 0;
                 _displayTick = DisplayUpdateIntervalTicks;
             }
             else if (command.StartsWith("contact ", StringComparison.OrdinalIgnoreCase))
@@ -275,6 +281,7 @@ namespace SpaceEngineers.Apps.ShipLink
             }
 
             _trackedContact = mark;
+            _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
         }
 
@@ -584,6 +591,50 @@ namespace SpaceEngineers.Apps.ShipLink
             status.SeenTick = _tick;
         }
 
+        private void TrackAssistance(string argument)
+        {
+            long relay;
+            FleetStatus status;
+            if (!long.TryParse(argument, out relay) || !_galnetPeers.TryGetValue(relay, out status) ||
+                status.Expires <= DateTime.UtcNow.Ticks || !status.NeedsAssistance || !status.AssistancePosition.HasValue)
+            {
+                Echo("Use assist track <relay ID> for a live Galnet assistance position.");
+                return;
+            }
+
+            _trackedContact = null;
+            _trackedAssistanceRelay = relay;
+            _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private void AppendTrackedAssistance(StringBuilder display, long now)
+        {
+            if (_trackedAssistanceRelay == 0)
+                return;
+            FleetStatus status;
+            if (!_galnetPeers.TryGetValue(_trackedAssistanceRelay, out status) || status.Expires <= now)
+            {
+                display.AppendLine("Tracked assistance: waiting for a fresh Galnet heartbeat.");
+                return;
+            }
+            if (!status.NeedsAssistance)
+            {
+                display.AppendLine("Tracked ship cleared its assistance request.");
+                _trackedAssistanceRelay = 0;
+                return;
+            }
+            if (!status.AssistancePosition.HasValue)
+            {
+                display.AppendLine("Tracked assistance: the current heartbeat has no position.");
+                return;
+            }
+
+            display.AppendLine("=== TRACKED ASSISTANCE ===");
+            long age = Math.Max(0L, (now - (status.Expires - HeartbeatLifetime)) / TimeSpan.TicksPerSecond);
+            display.AppendLine(status.Name + " | relay " + _trackedAssistanceRelay + " | " + age + " s old");
+            AppendPositionGuide(display, status.AssistancePosition.Value);
+        }
+
         private void AppendTrackedContact(StringBuilder display, long now)
         {
             if (_trackedContact == null)
@@ -601,8 +652,13 @@ namespace SpaceEngineers.Apps.ShipLink
             display.AppendLine("=== TRACKED FLEET MARK ===");
             display.AppendLine(mark.Name + " | relay " + mark.Source + " | " + age + " s old" +
                 (stale ? " | LAST KNOWN" : ""));
+            AppendPositionGuide(display, mark.Position);
+        }
+
+        private void AppendPositionGuide(StringBuilder display, Vector3D position)
+        {
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
-            var delta = mark.Position - (cockpit == null ? Me.CubeGrid.GetPosition() : cockpit.GetPosition());
+            var delta = position - (cockpit == null ? Me.CubeGrid.GetPosition() : cockpit.GetPosition());
             display.AppendLine("Range to reported position: " + Math.Round(delta.Length()) + " m");
             if (cockpit != null)
             {
@@ -828,6 +884,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 }
             }
             _contacts.RemoveAll(contact => contact.Expires <= now);
+            AppendTrackedAssistance(display, now);
             AppendTrackedContact(display, now);
             if (_contacts.Count > 0)
             {
