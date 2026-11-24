@@ -171,6 +171,11 @@ dotnet test TaskBus.Tests/TaskBus.Tests.csproj
 
 ## Delivery Guarantee
 
+Cancelled tasks leave the live queue immediately. The broker keeps the 500
+most recent cancellation IDs and 500 completion IDs as separate replay
+histories in Storage. A duplicate outside that history may be accepted as a
+new request.
+
 The queue provides at-least-once assignment, producer-side request deduplication, and consumer-side durable checkpoints. It cannot guarantee exactly-once physical work: if a PB loses power after performing a world action but before persisting its checkpoint, the action may be attempted again. Physical handlers must therefore verify world state and be idempotent. Lease epochs fence stale messages at the broker, but cannot undo an action already started in the game.
 
 ## Refactoring Notes

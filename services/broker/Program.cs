@@ -15,11 +15,12 @@ namespace SpaceEngineers.Services.Broker
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int MaxTasks = 100;
+        private const int RetainedRequestCount = 500;
         private const int LeaseTimeoutTicks = 180;
         private int _tick;
         private int _sequence;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
-        private readonly HashSet<string> _cancelledRequestIds = new HashSet<string>();
+        private readonly List<string> _cancelledRequestIds = new List<string>();
         private readonly List<string> _completedRequestIds = new List<string>();
         private readonly List<TaskCommit> _commits = new List<TaskCommit>();
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -146,7 +147,8 @@ namespace SpaceEngineers.Services.Broker
         {
             string requestIdJson;
             string requestId;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "request_id", out requestIdJson) || !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+            if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "request_id", out requestIdJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId) || string.IsNullOrWhiteSpace(requestId))
                 return;
 
             string keyJson;
@@ -174,7 +176,7 @@ namespace SpaceEngineers.Services.Broker
             if (_tasks.Count(task => task.State == "QUEUED" || task.State == "LEASED" || task.State == "ACTIVE") >= MaxTasks)
             {
                 SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"reason\":\"QUEUE_FULL\"}", requesterId);
-                Echo("Queue full. Run 'purge' after closing requests.");
+                Echo("Queue full. Finish or cancel an open task to free capacity.");
                 return;
             }
 
@@ -203,19 +205,19 @@ namespace SpaceEngineers.Services.Broker
         {
             string requestIdJson;
             string requestId;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) || !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+            if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId) || string.IsNullOrWhiteSpace(requestId))
                 return;
 
-            AddCancelledRequest(GetScopedRequestId(requesterId, requestId));
+            var scopedId = GetScopedRequestId(requesterId, requestId);
             var task = _tasks.FirstOrDefault(entry => entry.RequestId == requestId && entry.RequesterId == requesterId);
-            if (task != null && task.State != "DONE")
-            {
-                task.State = "CLEARED";
+            bool cancelled = task != null && task.State != "DONE" && _tasks.Remove(task);
+            bool recorded = !_completedRequestIds.Contains(scopedId) && AddCancelledRequest(scopedId);
+            if (cancelled || recorded)
                 SaveQueue();
-                if (task.WorkerId != 0)
-                    SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) + ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", task.WorkerId);
-            }
-            SaveQueue();
+            if (cancelled && task.WorkerId != 0)
+                SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
+                    ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", task.WorkerId);
             SendMessage("TASK_CANCEL_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", requesterId, "cancel-ack:" + requestId);
         }
 
@@ -388,16 +390,18 @@ namespace SpaceEngineers.Services.Broker
             if (string.IsNullOrEmpty(requestId) || _completedRequestIds.Contains(requestId))
                 return;
             _completedRequestIds.Add(requestId);
-            while (_completedRequestIds.Count > 500)
+            while (_completedRequestIds.Count > RetainedRequestCount)
                 _completedRequestIds.RemoveAt(0);
         }
 
-        private void AddCancelledRequest(string requestId)
+        private bool AddCancelledRequest(string requestId)
         {
-            if (string.IsNullOrEmpty(requestId) || !_cancelledRequestIds.Add(requestId))
-                return;
-            while (_cancelledRequestIds.Count > 500)
-                _cancelledRequestIds.Remove(_cancelledRequestIds.First());
+            if (string.IsNullOrEmpty(requestId) || _cancelledRequestIds.Contains(requestId))
+                return false;
+            _cancelledRequestIds.Add(requestId);
+            while (_cancelledRequestIds.Count > RetainedRequestCount)
+                _cancelledRequestIds.RemoveAt(0);
+            return true;
         }
 
         private string GetScopedRequestId(long producerId, string requestId)
