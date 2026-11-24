@@ -738,7 +738,10 @@ For a supervised final approach, turn off the standard autopilot, occupy the
 `[FCS]` cockpit, and line up within 3 m of the recorded pose with at most 0.4 m
 of side or vertical error and five degrees of angular error. Run
 `dock approach`. FCS targets up to 0.35 m/s and calls Connect when the matching
-port is connectable and ship speed is low enough. Use a clear approach
+port is connectable and ship speed is low enough. FCS releases control
+after 240 consecutive updates without at least 5 cm of progress.
+The status distinguishes a stalled approach from a connector that is
+within locking range but has not locked. Use a clear approach
 path. Pilot movement or rotation input, `dock off`, loss of control, leaving
 the corridor or a timeout releases FCS. Record the berth again after this
 update so the saved pose includes the port ID.

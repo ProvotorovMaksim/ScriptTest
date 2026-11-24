@@ -33,6 +33,10 @@ namespace SpaceEngineers.Apps.FlightControl
             public long PortId;
         }
         private int dockTicks;
+        private int dockProgressTick;
+        private double dockProgressDistance;
+        private const int DockStallUpdates = 240;
+        private const double MinimumDockProgress = 0.05;
         private bool dockCharging;
         private bool departureRequested;
         private bool disconnectPending;
@@ -355,6 +359,8 @@ namespace SpaceEngineers.Apps.FlightControl
             if (mode == Mode.Dock)
             {
                 dockTicks = 0;
+                dockProgressTick = 0;
+                dockProgressDistance = double.PositiveInfinity;
                 showDockGuide = true;
                 status = "FCS dock: checking final approach.";
             }
@@ -364,12 +370,6 @@ namespace SpaceEngineers.Apps.FlightControl
 
         private void UpdateDockApproach()
         {
-            if (dockLease.IsExpired(DateTime.UtcNow.Ticks))
-            {
-                Release("FCS off: AMN docking lease expired.");
-                return;
-            }
-
             const double alignment = 0.996194698; // cosine of five degrees
             if (++dockTicks > 1200 || dockConnector == null || dockConnector.CubeGrid != Me.CubeGrid ||
                 !dockConnector.IsWorking)
@@ -395,11 +395,18 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             }
 
+            if (dockLease.IsExpired(DateTime.UtcNow.Ticks))
+            {
+                Release("FCS off: AMN docking lease expired.");
+                return;
+            }
+
             var frame = dockConnector.WorldMatrix;
             var delta = dockPosition.Value - dockConnector.GetPosition();
             var correction = Vector3D.TransformNormal(delta, MatrixD.Transpose(dockFrame));
             var velocity = cockpit.GetShipVelocities();
-            if (delta.LengthSquared() > 9 || Math.Abs(correction.X) > 0.4 || Math.Abs(correction.Y) > 0.4 ||
+            double distanceSquared = delta.LengthSquared();
+            if (distanceSquared > 9 || Math.Abs(correction.X) > 0.4 || Math.Abs(correction.Y) > 0.4 ||
                 correction.Z > 0.15 || Vector3D.Dot(frame.Forward, dockFrame.Forward) < alignment ||
                 Vector3D.Dot(frame.Up, dockFrame.Up) < alignment || velocity.LinearVelocity.LengthSquared() > 1)
             {
@@ -414,21 +421,32 @@ namespace SpaceEngineers.Apps.FlightControl
                     Release("FCS off: connector target does not match the recorded berth.");
                     return;
                 }
-                if (velocity.LinearVelocity.LengthSquared() <= 0.04 && delta.LengthSquared() <= 0.36)
+                if (velocity.LinearVelocity.LengthSquared() <= 0.04 && distanceSquared <= 0.36)
                 {
                     dockConnector.Connect();
                     if (dockConnector.Status == MyShipConnectorStatus.Connected)
-                    {
-                        Release("FCS off: connected to recorded berth.", true);
-                        return;
-                    }
+                        return; // The next update verifies the connected port before reporting success.
                 }
+            }
+
+            double distance = Math.Sqrt(distanceSquared);
+            if (dockProgressDistance - distance >= MinimumDockProgress)
+            {
+                dockProgressDistance = distance;
+                dockProgressTick = dockTicks;
+            }
+            else if (dockTicks - dockProgressTick >= DockStallUpdates)
+            {
+                Release(connectorStatus == MyShipConnectorStatus.Connectable && distanceSquared <= 0.36
+                    ? "FCS off: connector did not lock at the recorded berth."
+                    : "FCS off: final approach stalled " + FormatNumber(distance) + " m from the recorded berth.");
+                return;
             }
 
             var desiredVelocity = delta * 0.65;
             if (desiredVelocity.LengthSquared() > 0.1225)
                 desiredVelocity = Vector3D.Normalize(desiredVelocity) * 0.35;
-            if (connectorStatus == MyShipConnectorStatus.Connectable && delta.LengthSquared() <= 0.36)
+            if (connectorStatus == MyShipConnectorStatus.Connectable && distanceSquared <= 0.36)
                 desiredVelocity = Vector3D.Zero;
 
             flight.Approach(cockpit, velocity.LinearVelocity, velocity.AngularVelocity, desiredVelocity);
