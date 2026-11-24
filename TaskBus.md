@@ -741,7 +741,8 @@ display and do not authenticate the sender.
 
 Use `contact clear <relay ID> <mark name>` to withdraw a mark sent to
 that relay. Use `assist clear <relay ID>` to withdraw the assistance GPS
-sent to it. The receiver removes matching reports from the submitting
+sent to it. Use `hazard clear <configured wingmate relay ID>` to withdraw an
+obstacle report and its course warning. The receiver removes matching reports from the submitting
 relay and suppresses delayed older copies until the withdrawal expires.
 The receiver saves up to 32 active withdrawals through a ShipLink
 recompile. Switching fleets clears the saved withdrawals. A newer
