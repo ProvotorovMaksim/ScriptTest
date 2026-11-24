@@ -34,7 +34,33 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 ./build.sh
 ```
 
-Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the six PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. In-game deployment requires packaging the PB source with its shared code for the Programmable Block API.
+Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. In-game deployment requires packaging the PB source with its shared code for the Programmable Block API.
+
+### Flight control PB
+
+`apps/fcs` is an opt-in cockpit flight controller. Copy the contents of
+`build/output/apps/fcs/fcs/FlightControl.pb.cs` into a Programmable Block on the
+same grid as the ship's thrusters and gyros. Name the occupied cockpit with
+`[FCS]`. Disable competing remote autopilots and clear existing overrides before
+engaging. The controller starts off after compilation or reload.
+
+- `normal` enables assisted flight with six-direction thrust, a 10% thrust
+  margin when possible, and support and braking checks. The default braking
+  budget is 50 m per local axis. It does not measure distance to terrain.
+- `manual` gives active pilot axes priority and leaves safety findings as
+  warnings. Release an axis to let FCS damp its unwanted motion.
+- `aero on` enables experimental external-force estimation for free-flight
+  trials. Use `aero off` before docking, landing contact, or mining. It starts
+  disabled and does not require a Workshop API.
+- `off` releases the actuators and restores cockpit thruster and dampener
+  settings. Leaving the cockpit also releases control while the PB is running.
+
+Thrust allocation uses effective thrust and each engine's moment arm from the
+ship's measured center of mass. The PB reports the modeled residual moment.
+Verify actuator behavior, gyro signs, and instruction usage in game before
+operational use, including with each mod enabled. A stopped PB cannot perform
+its release routine. For development trials keep the cockpit controls
+`Control Thrusters` and dampeners accessible on the toolbar.
 
 ### Per-project build
 
