@@ -82,7 +82,14 @@ up to 1024 characters to a working local programmable block named
 `[GALNET APP]`. The recipient script gets `galnet recv <origin> <ID> <payload>`.
 The relay acknowledges a successful local invocation. Application handlers
 must still make their own writes idempotent and confirm business outcomes.
-TaskBus integration and explicit laser link control are separate work.
+The broker can receive an addressed envelope via
+`galnet recv <remote relay> <packet ID> taskbus <source PB ID> <envelope>`
+when its grid has a working relay named `[GALNET RELAY]`. Name the broker
+`[GALNET APP]` on that grid so the relay invokes it. Replies are deferred
+until the next broker invocation to avoid calling back into an executing
+relay. Use configured, trusted relays for this test. Application IDs in
+the payload are not cryptographically authenticated. The worker bridge
+and explicit laser link control are separate work.
 
 ### Select a broker
 

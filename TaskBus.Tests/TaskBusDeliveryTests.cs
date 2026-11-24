@@ -268,6 +268,40 @@ namespace TaskBus.Tests
             Assert.Contains("Stage: mine", platform.GetStatus());
         }
 
+        [Fact]
+        public void BrokerDefersRelayReplyUntilAfterTheIncomingInvocation()
+        {
+            var broker = StartBroker("");
+            var relay = new RecordingRelay();
+            broker.GridTerminalSystem.Relay = relay;
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"MiningFleet\"}", targetId: 1);
+
+            broker.Main("galnet recv 73 1:1 taskbus 42 " + poll);
+            Assert.Empty(relay.Commands);
+            Assert.Empty(broker.IGC.Outbox);
+
+            broker.Main("");
+            var reply = Assert.Single(relay.Commands);
+            Assert.StartsWith("app 73 taskbus 1 ", reply);
+            Assert.True(TaskBusProtocol.TryParseEnvelope(reply.Substring("app 73 taskbus 1 ".Length), out var envelope));
+            Assert.Equal("QUEUE_EMPTY", envelope.EventType);
+            Assert.Equal(42L, envelope.TargetId);
+        }
+
+        private sealed class RecordingRelay : IMyProgrammableBlock
+        {
+            public long EntityId => 100;
+            public long CubeGrid => 1;
+            public bool IsWorking => true;
+            public readonly System.Collections.Generic.List<string> Commands = new();
+
+            public bool TryRun(string command)
+            {
+                Commands.Add(command);
+                return true;
+            }
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

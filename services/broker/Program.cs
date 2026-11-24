@@ -13,6 +13,9 @@ namespace SpaceEngineers.Services.Broker
     public sealed class Program : MyGridProgram
     {
         #endregion
+        private const string GalnetRelayName = "[GALNET RELAY]";
+        private readonly Dictionary<long, long> _galnetRoutes = new Dictionary<long, long>();
+        private readonly Queue<string> _galnetReplies = new Queue<string>();
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int MaxTasks = 100;
         private const int RetainedRequestCount = 500;
@@ -55,16 +58,22 @@ namespace SpaceEngineers.Services.Broker
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
-            _producer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
-                IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
+            _producer = new TaskBusProducer(CommunicationTag, SendEnvelope);
             LoadQueue();
             SaveAfterParentLeaseChange(false);
         }
 
         public void Main(string argument)
         {
-            _tick++;
             var command = argument ?? string.Empty;
+            if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
+            {
+                ReceiveGalnet(command);
+                return;
+            }
+
+            _tick++;
+            FlushGalnetReply();
             if (string.Equals(command, "purge", StringComparison.OrdinalIgnoreCase))
                 PurgeClosedTasks();
             else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
@@ -93,6 +102,65 @@ namespace SpaceEngineers.Services.Broker
 
                 HandleMessage(message.Source, envelope.EventType, envelope.PayloadJson);
             }
+        }
+
+        private IMyProgrammableBlock FindGalnetRelay()
+        {
+            var relay = GridTerminalSystem.GetBlockWithName(GalnetRelayName) as IMyProgrammableBlock;
+            return relay != null && relay.EntityId != Me.EntityId && relay.CubeGrid == Me.CubeGrid &&
+                relay.IsWorking ? relay : null;
+        }
+
+        private void ReceiveGalnet(string command)
+        {
+            if (FindGalnetRelay() == null)
+                return;
+
+            var fields = command.Split(new[] { ' ' }, 7, StringSplitOptions.RemoveEmptyEntries);
+            long relayId;
+            long workerId;
+            TaskBusEnvelope envelope;
+            if (fields.Length != 7 || fields[4] != "taskbus" ||
+                !long.TryParse(fields[2], out relayId) || relayId == 0 ||
+                !long.TryParse(fields[5], out workerId) || workerId == 0 || workerId == Me.EntityId ||
+                !TaskBusProtocol.TryParseEnvelope(fields[6], out envelope) || envelope.TargetId != Me.EntityId)
+                return;
+
+            long knownRelay;
+            if (_galnetRoutes.TryGetValue(workerId, out knownRelay))
+            {
+                if (knownRelay != relayId)
+                    return;
+            }
+            else
+            {
+                if (_galnetRoutes.Count >= 128)
+                    return;
+                _galnetRoutes.Add(workerId, relayId);
+            }
+            HandleMessage(workerId, envelope.EventType, envelope.PayloadJson);
+        }
+
+        private void SendEnvelope(string channel, string envelope, long targetId)
+        {
+            long relayId;
+            if (_galnetRoutes.TryGetValue(targetId, out relayId))
+            {
+                var command = "app " + relayId + " taskbus " + Me.EntityId + " " + envelope;
+                if (_galnetReplies.Count < 32 && !_galnetReplies.Contains(command))
+                    _galnetReplies.Enqueue(command);
+                return;
+            }
+            IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax);
+        }
+
+        private void FlushGalnetReply()
+        {
+            if (_galnetReplies.Count == 0)
+                return;
+            var relay = FindGalnetRelay();
+            if (relay != null && relay.TryRun(_galnetReplies.Peek()))
+                _galnetReplies.Dequeue();
         }
 
         private void HandleMessage(long sourceId, string eventType, string payloadJson)

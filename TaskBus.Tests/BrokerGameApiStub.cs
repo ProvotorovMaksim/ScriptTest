@@ -59,7 +59,9 @@ namespace Sandbox.ModAPI.Ingame
     public sealed class TestTerminal
     {
         public IMyProgrammableBlock Application;
-        public object GetBlockWithName(string name) => name == "[GALNET APP]" ? Application : null;
+        public IMyProgrammableBlock Relay;
+        public object GetBlockWithName(string name) =>
+            name == "[GALNET APP]" ? Application : name == "[GALNET RELAY]" ? Relay : null;
 
         private sealed class Antenna : IMyRadioAntenna
         {
