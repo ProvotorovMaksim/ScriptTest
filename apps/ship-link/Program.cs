@@ -254,8 +254,9 @@ namespace SpaceEngineers.Apps.ShipLink
         private void SendFleetMark(long target, string kind, string gps)
         {
             var relay = FindGalnetRelay();
+            long deadline = DateTime.UtcNow.Ticks + ContactLifetime;
             if (relay == null || target == relay.EntityId || !relay.TryRun(
-                "app " + target + " " + kind + "|" + (DateTime.UtcNow.Ticks + ContactLifetime) + "|" +
+                "app-until " + deadline + " " + target + " " + kind + "|" + deadline + "|" +
                 TaskBusIgcHelper.EncodeStorage(_fleetName) + "|" +
                 TaskBusIgcHelper.EncodeStorage(gps)))
                 Echo("Could not hand the fleet report to the local Galnet relay.");

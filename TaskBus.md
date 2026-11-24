@@ -321,7 +321,8 @@ Use `assist send <recipient relay ID>` to send the current ship position
 as a one-time assistance request to a wingmate over Galnet. The receiver
 shows it above other Galnet marks with an `[ASSIST]` label. It expires
 30 seconds after sending, including time spent in a relay queue. ShipLink
-shows each mark's age from the time of sending. When the mark list is full,
+shows each mark's age from the time of sending. Update the paired Galnet
+relay with ShipLink so it can apply the same deadline to its retry queue. When the mark list is full,
 an assistance request can replace the oldest ordinary mark. The
 existing `assist on` and `assist off` commands control the radio heartbeat.
 

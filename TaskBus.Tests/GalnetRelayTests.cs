@@ -125,6 +125,20 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void TimedApplicationUsesItsOwnDeadlineAcrossRestart()
+        {
+            var relay = Start(4, "0\n1");
+            long deadline = DateTime.UtcNow.AddSeconds(30).Ticks;
+            relay.Main("app-until 1 1 expired", UpdateType.Terminal);
+            Assert.DoesNotContain("SEND:", relay.Storage);
+            relay.Main("app-until " + deadline + " 1 current", UpdateType.Terminal);
+            Assert.Contains("|" + deadline + "|", relay.Storage);
+
+            var expired = Start(4, relay.Storage.Replace("|" + deadline + "|", "|1|"));
+            Assert.DoesNotContain("SEND:", expired.Storage);
+        }
+
+        [Fact]
         public void ApplicationPacketIsAcknowledgedOnlyAfterLocalHandoff()
         {
             var relay = Start(4, "0\n1");

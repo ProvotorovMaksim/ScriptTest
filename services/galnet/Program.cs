@@ -131,6 +131,16 @@ namespace SpaceEngineers.Services.Galnet
             }
             else if (command.StartsWith("send ", StringComparison.OrdinalIgnoreCase))
                 QueueMessage("DATA", command.Substring(5), 255);
+            else if (command.StartsWith("app-until ", StringComparison.OrdinalIgnoreCase))
+            {
+                var timed = command.Substring(10);
+                int separator = timed.IndexOf(' ');
+                long deadline;
+                if (separator > 0 && long.TryParse(timed.Substring(0, separator), out deadline))
+                    QueueMessage("APP", timed.Substring(separator + 1), MaxApplicationLength, deadline);
+                else
+                    Echo("Use app-until <UTC deadline ticks> <node ID> <payload>.");
+            }
             else if (command.StartsWith("app ", StringComparison.OrdinalIgnoreCase))
                 QueueMessage("APP", command.Substring(4), MaxApplicationLength);
             else if (string.Equals(command, "network status", StringComparison.OrdinalIgnoreCase))
@@ -272,8 +282,16 @@ namespace SpaceEngineers.Services.Galnet
                 Flood(owner, generation, sequence, remaining - 1, neighbors, sender);
         }
 
-        private void QueueMessage(string kind, string argument, int maxLength)
+        private void QueueMessage(string kind, string argument, int maxLength, long? deadline = null)
         {
+            long now = DateTime.UtcNow.Ticks;
+            long expires = deadline ?? now + MessageLifetime;
+            if (expires <= now || expires > now + MessageLifetime)
+            {
+                Echo("Deadline must be within the next five minutes.");
+                return;
+            }
+
             int split = argument.IndexOf(' ');
             long destination;
             if (split < 1 || !long.TryParse(argument.Substring(0, split), out destination) ||
@@ -286,7 +304,7 @@ namespace SpaceEngineers.Services.Galnet
 
             var id = _generation + ":" + (++_sequence);
             var packet = kind + "|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
-                (DateTime.UtcNow.Ticks + MessageLifetime) + "|" +
+                expires + "|" +
                 TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
             _outbox.Add(packet);
             SaveConfiguration();
