@@ -34,7 +34,7 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 ./build.sh
 ```
 
-Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the eight PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
+Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the nine PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
 
 ### Mining workflow reference
 
@@ -69,8 +69,11 @@ advertisements. The shortest path wins, with node ID as the tie-breaker.
 A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
 up to 128 node versions for its lifetime and accepts up to 32 neighbors
-per node. A relay Programmable Block and the on-wire protocol are still
-needed to provide advertisements and forward traffic.
+per node. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
+`peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
+shows the current next hop. Relay neighbors are logical unicast peers.
+This version exchanges topology only. Application traffic forwarding
+and explicit laser link control are separate work.
 
 ### Select a broker
 

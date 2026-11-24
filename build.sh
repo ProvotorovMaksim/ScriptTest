@@ -8,6 +8,7 @@ projects=(
   "libs/taskbus-consumer/taskbus-consumer.csproj"
   "libs/taskbus-producer/taskbus-producer.csproj"
   "services/broker/broker.csproj"
+  "services/galnet/galnet.csproj"
   "services/consumer/consumer.csproj"
   "services/producer/producer.csproj"
   "apps/amn/amn.csproj"
@@ -92,6 +93,7 @@ package_taskbus_pb() {
 
 producer=libs/taskbus-producer/TaskBusProducer.cs
 package_taskbus_pb services/broker TaskBroker "$producer"
+package_taskbus_pb services/galnet GalnetRelay libs/igc-core/GalnetTopology.cs
 package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusConsumer.cs
 package_taskbus_pb services/producer TaskProducer "$producer"
 package_taskbus_pb apps/amn AMN.Base "$producer"
