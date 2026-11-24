@@ -95,6 +95,11 @@ children, saves their cancellation records and revokes current assignments.
 A worker that misses the notification receives the revocation when polling
 with its old assignment.
 
+Name a text panel on the point consumer's grid exactly `[AMN STATUS]`
+to show the parent task, current stage, lease and last broker state for the
+child request. The panel also shows when the local radio is unavailable.
+The resource amount shown is the requested amount.
+
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.

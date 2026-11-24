@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
+using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.TaskBusConsumer;
 
 namespace SpaceEngineers.Services.Consumer
@@ -11,6 +12,8 @@ namespace SpaceEngineers.Services.Consumer
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int PollIntervalTicks = 30;
+        private const string MonitorName = "[AMN STATUS]";
+        private int _monitorTicks;
 
         private readonly TaskBusConsumer _consumer;
         private readonly IMyBroadcastListener _listener;
@@ -37,16 +40,9 @@ namespace SpaceEngineers.Services.Consumer
         {
             _antennas.Clear();
             GridTerminalSystem.GetBlocksOfType(_antennas, antenna => antenna.IsFunctional && antenna.Enabled);
-            if (_antennas.Count == 0)
-            {
-                _consumer.Tick(false);
-                _consumer.ProcessCommand(argument);
-                Echo("Enable a functional radio antenna to connect to the broker.");
-                return;
-            }
-
-            _consumer.Tick();
-            while (_listener.HasPendingMessage)
+            bool connected = _antennas.Count > 0;
+            _consumer.Tick(connected);
+            while (connected && _listener.HasPendingMessage)
             {
                 var message = _listener.AcceptMessage();
                 if (message.Source != Me.EntityId)
@@ -54,8 +50,33 @@ namespace SpaceEngineers.Services.Consumer
             }
 
             _consumer.ProcessCommand(argument);
-            Echo("Worker block ID: " + Me.EntityId);
-            Echo(_consumer.GetStatus());
+            string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
+            if (!connected)
+                status = "Radio unavailable.\n" + status;
+            Echo(status);
+
+            if (++_monitorTicks >= 6 || !string.IsNullOrWhiteSpace(argument))
+            {
+                _monitorTicks = 0;
+                UpdateMonitor(status);
+            }
+        }
+
+        private void UpdateMonitor(string status)
+        {
+            try
+            {
+                var panel = GridTerminalSystem.GetBlockWithName(MonitorName) as IMyTextPanel;
+                if (panel == null || panel.CubeGrid != Me.CubeGrid || !panel.IsWorking)
+                    return;
+                if (panel.ContentType != ContentType.TEXT_AND_IMAGE)
+                    panel.ContentType = ContentType.TEXT_AND_IMAGE;
+                panel.WriteText(status);
+            }
+            catch (Exception error)
+            {
+                Echo("AMN monitor unavailable: " + error.Message);
+            }
         }
 
         #region PreludeFooter

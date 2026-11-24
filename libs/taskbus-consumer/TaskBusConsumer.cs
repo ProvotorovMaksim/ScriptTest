@@ -44,6 +44,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private long _brokerId;
         private bool _autoPoint;
         private string _completedChildRequest;
+        private string _childState;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
@@ -202,8 +203,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             sb.AppendLine("Active task: " + (_activeTaskId ?? "none"));
             sb.AppendLine("Stage: " + (string.IsNullOrEmpty(_activeTaskId) ? "idle" : CurrentStage()));
             if (IsAutomaticPoint)
-                sb.AppendLine(_completedChildRequest == CurrentChildRequestId() ?
-                    "Child task complete; confirm stage." : "Waiting for child task.");
+            {
+                sb.AppendLine("Child request: " + CurrentChildRequestId());
+                sb.AppendLine("Child status: " + (_childState ?? "awaiting broker"));
+                if (_completedChildRequest == CurrentChildRequestId())
+                    sb.AppendLine("Child task complete. Confirm stage.");
+            }
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));
             sb.AppendLine("Lease epoch: " + _leaseEpoch);
@@ -271,6 +276,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
                 _activeTaskId = taskId;
                 _completedChildRequest = null;
+                _childState = null;
                 _activeTaskJson = taskJson;
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
@@ -282,6 +288,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _leaseEpoch = leaseEpoch;
                 _completedChildRequest = null;
+                _childState = null;
                 _activeTaskJson = taskJson;
                 SaveState();
             }
@@ -345,6 +352,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryReadJsonString(value, out state))
                 return false;
 
+            _childState = state;
             if (state == "DONE")
                 _completedChildRequest = request;
             return true;
@@ -378,6 +386,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
 
             _stageIndex++;
+            _childState = null;
             if (_stageIndex >= _stages.Count)
             {
                 _pendingCompletedTaskId = _activeTaskId;
