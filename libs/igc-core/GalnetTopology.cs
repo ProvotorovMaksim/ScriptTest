@@ -29,8 +29,6 @@ namespace SpaceEngineers.Libs.IgcCore
                     (generation == previous.Generation && sequence <= previous.Sequence))
                     return false;
             }
-            else if (_links.Count >= MaxNodes)
-                return false;
 
             var update = new Advertisement { Generation = generation, Sequence = sequence, ExpiresAt = expiresAt };
             foreach (var neighbor in neighbors)
@@ -42,9 +40,27 @@ namespace SpaceEngineers.Libs.IgcCore
                     update.Neighbors.Add(neighbor);
                 }
             }
+            if (previous == null && _links.Count >= MaxNodes && !RemoveOldestExpired(now))
+                return false;
+
             update.Neighbors.Sort();
             _links[node] = update;
             return true;
+        }
+
+        private bool RemoveOldestExpired(long now)
+        {
+            long oldestNode = 0;
+            long oldestExpiry = now;
+            foreach (var entry in _links)
+            {
+                if (entry.Value.ExpiresAt <= oldestExpiry)
+                {
+                    oldestNode = entry.Key;
+                    oldestExpiry = entry.Value.ExpiresAt;
+                }
+            }
+            return oldestNode != 0 && _links.Remove(oldestNode);
         }
 
         public bool TryGetNextHop(long source, long destination, long now, out long nextHop)

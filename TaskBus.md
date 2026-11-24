@@ -68,8 +68,9 @@ separate approach point outside the voxel.
 advertisements. The shortest path wins, with node ID as the tie-breaker.
 A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
-up to 128 node versions for its lifetime and accepts up to 32 neighbors
-per node. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
+up to 128 node versions and accepts up to 32 neighbors per node. When
+the table is full, an unfamiliar node can displace the oldest expired
+record. Current records remain eligible for routing. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
 `peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
 shows the current next hop. Relay neighbors are logical unicast peers.
 Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
@@ -97,6 +98,16 @@ The worker queues responses until its next invocation. The local bridge
 uses memory queues, with task checkpoints and completion recovery still
 owned by TaskBus. Direct IGC is used when no relay ID is configured.
 Other application bridges are separate work.
+
+To check failover in a world, connect the worker and broker relays
+through two independent satellite relays. Verify that `route <broker relay ID>`
+names the primary next hop. Turn off the antennas on both paths, queue a
+small test request, and check that the worker-side relay reports it as
+pending. Restore the reserve path first and check that the next hop
+changes, the request reaches the broker, and the pending count returns
+to zero after the acknowledgement. Compare task IDs and quantities at the
+broker before and after reconnecting to check for duplicate processing.
+Repeat with the primary path restored and a fresh test request.
 
 For a stationary laser link, add a line such as
 `Laser=Laser A|GPS:Peer:1:2:3:` to the relay Custom Data and recompile.

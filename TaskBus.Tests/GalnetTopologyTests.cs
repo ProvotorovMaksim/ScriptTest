@@ -27,6 +27,27 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void FullTopologyAdmitsReplacementSatelliteAfterOldEntryExpires()
+        {
+            var topology = new GalnetTopology();
+            Assert.True(topology.Observe(1, 1, 1, 100, new long[] { 2, 129 }, 0));
+            Assert.True(topology.Observe(2, 1, 1, 10, new long[] { 1, 3 }, 0));
+            Assert.True(topology.Observe(3, 1, 1, 100, new long[] { 2, 129 }, 0));
+            for (int node = 4; node <= 128; node++)
+                Assert.True(topology.Observe(node, 1, 1, 100, new long[0], 0));
+
+            Assert.False(topology.Observe(129, 1, 1, 100, new long[] { 1, 3 }, 9));
+            Assert.True(topology.TryGetNextHop(1, 3, 9, out var hop));
+            Assert.Equal(2L, hop);
+            Assert.False(topology.TryGetNextHop(1, 3, 10, out _));
+
+            Assert.True(topology.Observe(129, 1, 2, 100, new long[] { 1, 3 }, 10));
+            Assert.True(topology.TryGetNextHop(1, 3, 10, out hop));
+            Assert.Equal(129L, hop);
+            Assert.False(topology.Observe(130, 1, 1, 100, new long[0], 10));
+        }
+
+        [Fact]
         public void ALinkNeedsCurrentAdvertisementsFromBothEndpoints()
         {
             var topology = new GalnetTopology();
