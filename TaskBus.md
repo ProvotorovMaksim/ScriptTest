@@ -85,7 +85,11 @@ while requests or cancellations are outstanding.
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
 children only from the block holding that lease in `MiningPoints`.
-Retries of an already admitted request return its existing result.
+Retries of an already admitted request return its existing result. When the
+parent lease expires or the parent closes, the broker cancels its outstanding
+children, saves their cancellation records and revokes current assignments.
+A worker that misses the notification receives the revocation when polling
+with its old assignment.
 
 ### Mining dispatch acceptance test
 

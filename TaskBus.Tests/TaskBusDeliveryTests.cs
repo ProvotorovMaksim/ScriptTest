@@ -159,6 +159,38 @@ namespace TaskBus.Tests
             Assert.Contains("\"state\":\"QUEUED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 42).PayloadJson);
         }
 
+        [Fact]
+        public void ExpiredParentRevokesActiveChildAndPersistsCancellation()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 42, TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_ASSIGN", 42);
+
+            var child = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"scout\",\"group_id\":\"Scouts\",\"parent_task_id\":\"9-1\"," +
+                "\"parent_lease_epoch\":1}", targetId: 1);
+            Dispatch(broker, 42, child);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 42);
+            var scoutPoll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"Scouts\"}", targetId: 1);
+            Dispatch(broker, 43, scoutPoll);
+            var assignment = TakeResponse(broker, "TASK_ASSIGN", 43);
+            Assert.Contains("\"task_id\":\"42-2\"", assignment.PayloadJson);
+
+            for (int tick = 0; tick < 180; tick++)
+                broker.Main("");
+            Assert.Contains("\"task_id\":\"42-2\"", TakeResponse(broker, "TASK_REVOKED", 43).PayloadJson);
+
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 42, child);
+            Assert.Contains("\"state\":\"CANCELLED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 42).PayloadJson);
+            Dispatch(broker, 43, scoutPoll);
+            TakeResponse(broker, "QUEUE_EMPTY", 43);
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

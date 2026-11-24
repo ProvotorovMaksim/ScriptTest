@@ -36,6 +36,7 @@ namespace SpaceEngineers.Services.Broker
             public long WorkerId;
             public string Key;
             public string RequestJson;
+            public bool HasParent;
             public string State;
             public int Attempts;
             public int LastDispatchTick;
@@ -56,6 +57,7 @@ namespace SpaceEngineers.Services.Broker
             _producer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
                 IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
             LoadQueue();
+            SaveAfterParentLeaseChange(false);
         }
 
         public void Main(string argument)
@@ -199,6 +201,7 @@ namespace SpaceEngineers.Services.Broker
                 RequesterId = requesterId,
                 Key = taskKey,
                 RequestJson = requestJson,
+                HasParent = ReferencesParent(requestJson),
                 State = "QUEUED"
             });
             SaveQueue();
@@ -221,9 +224,35 @@ namespace SpaceEngineers.Services.Broker
                 !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch))
                 return false;
 
-            return _tasks.Any(task => task.Id == parentId && task.GroupId == "MiningPoints" &&
+            return _tasks.Any(task => task.Id == parentId && task.GroupId == "MiningPoints" && !task.HasParent &&
                 task.WorkerId == requesterId && task.LeaseEpoch == epoch &&
                 (task.State == "LEASED" || task.State == "ACTIVE"));
+        }
+
+        private static bool ReferencesParent(string requestJson)
+        {
+            string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out value) ||
+                TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out value);
+        }
+
+        private void SaveAfterParentLeaseChange(bool notifyWorkers)
+        {
+            var invalid = _tasks.Where(task => task.HasParent &&
+                !HasParentLease(task.RequesterId, task.RequestJson)).ToList();
+            foreach (var child in invalid)
+            {
+                _tasks.Remove(child);
+                AddCancelledRequest(GetScopedRequestId(child.RequesterId, child.RequestId));
+            }
+            if (invalid.Count > 0 || notifyWorkers)
+                SaveQueue();
+            if (!notifyWorkers)
+                return;
+
+            foreach (var child in invalid)
+                if (child.WorkerId != 0)
+                    SendTaskRevoked(child.WorkerId, child.Id, child.LeaseEpoch);
         }
 
         private void CancelTask(long requesterId, string payloadJson)
@@ -238,7 +267,9 @@ namespace SpaceEngineers.Services.Broker
             var task = _tasks.FirstOrDefault(entry => entry.RequestId == requestId && entry.RequesterId == requesterId);
             bool cancelled = task != null && task.State != "DONE" && _tasks.Remove(task);
             bool recorded = !_completedRequestIds.Contains(scopedId) && AddCancelledRequest(scopedId);
-            if (cancelled || recorded)
+            if (cancelled && task.GroupId == "MiningPoints")
+                SaveAfterParentLeaseChange(true);
+            else if (cancelled || recorded)
                 SaveQueue();
             if (cancelled && task.WorkerId != 0)
                 SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
@@ -316,6 +347,7 @@ namespace SpaceEngineers.Services.Broker
         private void ExpireConsumerLeases()
         {
             var changed = false;
+            var parentChanged = false;
             foreach (var task in _tasks.Where(entry => entry.State == "LEASED" || entry.State == "ACTIVE"))
             {
                 if (_tick - task.LastDispatchTick <= LeaseTimeoutTicks)
@@ -325,9 +357,12 @@ namespace SpaceEngineers.Services.Broker
                 task.State = "QUEUED";
                 task.LeaseEpoch++;
                 changed = true;
+                parentChanged |= task.GroupId == "MiningPoints";
                 Echo("Lease expired; requeued " + task.Id);
             }
-            if (changed)
+            if (parentChanged)
+                SaveAfterParentLeaseChange(true);
+            else if (changed)
                 SaveQueue();
         }
 
@@ -359,7 +394,10 @@ namespace SpaceEngineers.Services.Broker
             AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId));
             AddTaskCommit(taskId, consumerId, leaseEpoch);
             _tasks.Remove(task);
-            SaveQueue();
+            if (task.GroupId == "MiningPoints")
+                SaveAfterParentLeaseChange(true);
+            else
+                SaveQueue();
             SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = consumerId, LeaseEpoch = leaseEpoch });
             Echo("Completed: " + task.Id);
         }
@@ -530,6 +568,7 @@ namespace SpaceEngineers.Services.Broker
                         WorkerId = workerId,
                         Key = resource,
                         RequestJson = requestJson,
+                        HasParent = ReferencesParent(requestJson),
                         State = state,
                         Attempts = attempts,
                         LastDispatchTick = 0,
