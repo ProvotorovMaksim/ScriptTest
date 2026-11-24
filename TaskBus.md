@@ -243,6 +243,12 @@ to confirm pickup and delivery automatically when the required checks pass
 under a recently confirmed lease. A delivery without a saved pickup
 measurement still needs operator confirmation.
 
+Set `HaulerUnloadTo=<base cargo container name>` to transfer cargo
+automatically during delivery. The container must be uniquely named on the
+assigned base grid and connected through the conveyor system. Transfers
+are bounded by the remaining delivery quantity and cargo is measured again
+before the delivery stage completes.
+
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions
 are grid references for route planning. Configure docking approach waypoints

@@ -115,9 +115,17 @@ namespace TaskBus.Tests
             var sent = new List<string>();
             double cargo = 50;
             long dock = 600;
+            int unloadCalls = 0;
             var hauler = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { },
                 _ => { }, 42, "Hauler", 1, readHaulerCargo: _ => cargo, readDockedGrid: () => dock,
-                autoHauler: true);
+                autoHauler: true, unloadHaulerCargo: (grid, resource, remaining) =>
+                {
+                    Assert.Equal(600, grid);
+                    Assert.Equal("Ore/Iron", resource);
+                    Assert.Equal(50, remaining);
+                    unloadCalls++;
+                    cargo -= remaining;
+                });
             hauler.ProcessCommand("group Haulers");
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
                 "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50," +
@@ -133,7 +141,7 @@ namespace TaskBus.Tests
             hauler.Tick();
             Assert.Contains("Pending completion: none", hauler.GetStatus());
 
-            cargo = 0;
+            Assert.Equal(1, unloadCalls);
             hauler.Tick();
             Assert.Contains("Pending completion: haul", hauler.GetStatus());
             Assert.Contains("TASK_DONE", sent[sent.Count - 1]);

@@ -18,6 +18,8 @@ namespace SpaceEngineers.Services.Consumer
         private int _monitorTicks;
         private readonly string _haulerCargo;
         private readonly string _haulerDock;
+        private readonly string _haulerUnloadTo;
+        private readonly List<IMyCargoContainer> _unloadContainers = new List<IMyCargoContainer>();
         private readonly List<MyInventoryItem> _cargoItems = new List<MyInventoryItem>();
 
         private readonly GalnetWorkerBridge _galnet;
@@ -36,6 +38,7 @@ namespace SpaceEngineers.Services.Consumer
                 message => Echo(message));
             _haulerCargo = ReadSetting("HaulerCargo=");
             _haulerDock = ReadSetting("HaulerDock=");
+            _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
                 getStorage: () => Storage,
@@ -48,7 +51,9 @@ namespace SpaceEngineers.Services.Consumer
                 readHaulerCargo: _haulerCargo == null ? null : (Func<string, double?>)ReadHaulerCargo,
                 gridId: Me.CubeGrid.EntityId,
                 readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid,
-                autoHauler: string.Equals(ReadSetting("HaulerAuto="), "true", StringComparison.OrdinalIgnoreCase));
+                autoHauler: string.Equals(ReadSetting("HaulerAuto="), "true", StringComparison.OrdinalIgnoreCase),
+                unloadHaulerCargo: string.IsNullOrEmpty(_haulerUnloadTo)
+                    ? null : (Action<long, string, double>)UnloadHaulerCargo);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
@@ -110,12 +115,7 @@ namespace SpaceEngineers.Services.Consumer
 
         private double? ReadHaulerCargo(string resource)
         {
-            if (string.IsNullOrEmpty(_haulerCargo))
-                return null;
-            var container = GridTerminalSystem.GetBlockWithName(_haulerCargo) as IMyCargoContainer;
-            if (container == null || container.CubeGrid != Me.CubeGrid || !container.IsFunctional)
-                return null;
-            var inventory = container.GetInventory();
+            var inventory = FindHaulerInventory();
             if (inventory == null)
                 return null;
 
@@ -124,11 +124,59 @@ namespace SpaceEngineers.Services.Consumer
             inventory.GetItems(_cargoItems);
             foreach (var item in _cargoItems)
             {
-                var type = item.Type.TypeId.ToString().Replace("MyObjectBuilder_", string.Empty);
-                if (string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase))
+                if (MatchesResource(item, resource))
                     total += (double)item.Amount;
             }
             return total;
+        }
+
+        private IMyInventory FindHaulerInventory()
+        {
+            if (string.IsNullOrEmpty(_haulerCargo))
+                return null;
+            var container = GridTerminalSystem.GetBlockWithName(_haulerCargo) as IMyCargoContainer;
+            return container != null && container.CubeGrid == Me.CubeGrid && container.IsFunctional
+                ? container.GetInventory() : null;
+        }
+
+        private static bool MatchesResource(MyInventoryItem item, string resource)
+        {
+            var type = item.Type.TypeId.ToString().Replace("MyObjectBuilder_", string.Empty);
+            return string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void UnloadHaulerCargo(long gridId, string resource, double amount)
+        {
+            if (gridId == 0 || gridId == Me.CubeGrid.EntityId || ReadDockedGrid() != gridId || amount <= 0)
+                return;
+
+            var source = FindHaulerInventory();
+            if (source == null)
+                return;
+
+            _unloadContainers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_unloadContainers, container =>
+                container.CubeGrid.EntityId == gridId && container.IsFunctional &&
+                string.Equals(container.CustomName, _haulerUnloadTo, StringComparison.Ordinal));
+            if (_unloadContainers.Count != 1)
+                return;
+
+            var destination = _unloadContainers[0].GetInventory();
+            if (destination == null || !source.IsConnectedTo(destination))
+                return;
+
+            _cargoItems.Clear();
+            source.GetItems(_cargoItems);
+            foreach (var item in _cargoItems)
+            {
+                if (!MatchesResource(item, resource))
+                    continue;
+
+                var quantity = (VRage.MyFixedPoint)Math.Min(amount, (double)item.Amount);
+                if ((double)quantity > 0)
+                    source.TransferItemTo(destination, item, quantity);
+                return;
+            }
         }
 
         private string ReadGridPositionJson()

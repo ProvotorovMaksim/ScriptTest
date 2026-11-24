@@ -75,6 +75,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly long _gridId;
         private readonly Func<long> _readDockedGrid;
         private readonly bool _autoHauler;
+        private readonly Action<long, string, double> _unloadHaulerCargo;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -84,7 +85,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             long entityId,
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
-            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false)
+            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
+            Action<long, string, double> unloadHaulerCargo = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -102,6 +104,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _readHaulerCargo = readHaulerCargo;
             _gridId = gridId;
             _readDockedGrid = readDockedGrid;
+            _unloadHaulerCargo = unloadHaulerCargo;
             _autoHauler = autoHauler && _readDockedGrid != null && _readHaulerCargo != null;
             LoadState();
         }
@@ -826,9 +829,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 double unloaded = _pickupCargo.Value - loaded.Value;
                 if (unloaded + 0.0000001 < amount)
                 {
-                    if (!automatic)
+                    if (automatic && _unloadHaulerCargo != null)
+                        _unloadHaulerCargo(_readDockedGrid(), resource, Math.Min(loaded.Value, amount - unloaded));
+                    else if (!automatic)
                         _echo("Unload at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
-                        ". Measured decrease: " + unloaded.ToString("G", CultureInfo.InvariantCulture));
+                            ". Measured decrease: " + unloaded.ToString("G", CultureInfo.InvariantCulture));
                     return false;
                 }
             }
