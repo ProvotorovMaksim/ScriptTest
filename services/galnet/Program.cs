@@ -303,6 +303,24 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             int expired = _outbox.RemoveAll(pending => !IsCurrentPacket(pending, now));
+            var encoded = TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
+            if (kind == "APP" && !deadline.HasValue)
+            {
+                var address = "APP|" + Me.EntityId + "|" + destination + "|";
+                var suffix = "|" + encoded;
+                foreach (var pending in _outbox)
+                {
+                    if (pending.StartsWith(address, StringComparison.Ordinal) &&
+                        pending.EndsWith(suffix, StringComparison.Ordinal))
+                    {
+                        if (expired > 0)
+                            SaveConfiguration();
+                        ForwardMessage(pending, 0);
+                        return;
+                    }
+                }
+            }
+
             int limit = deadline.HasValue ? MaxPending - ReservedPending : MaxPending;
             if (_outbox.Count >= limit)
             {
@@ -315,7 +333,7 @@ namespace SpaceEngineers.Services.Galnet
             var id = _generation + ":" + (++_sequence);
             var packet = kind + "|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
                 expires + "|" +
-                TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
+                encoded;
             _outbox.Add(packet);
             SaveConfiguration();
             ForwardMessage(packet, 0);

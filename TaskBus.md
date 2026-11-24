@@ -80,7 +80,10 @@ up to 16 pending messages in Storage. Timed messages are admitted while
 fewer than 12 total messages are pending, leaving four slots for regular
 deliveries. The relay clears expired entries before checking capacity
 and retries pending messages via the current
-route until the destination acknowledges or the five-minute UTC deadline
+route. Repeated regular application sends to the same destination with the
+same payload reuse the pending packet and its original deadline, including
+after a relay restart. Delivery is retried until acknowledgement or until
+the five-minute UTC deadline
 expires. Upgrade all relays together. Older diagnostic packets without
 a deadline are discarded. The receiver retains up to 64 delivery IDs until their original deadlines
 for duplicate suppression across restarts. If every slot is occupied, new

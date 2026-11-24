@@ -125,6 +125,22 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void RepeatedApplicationKeepsOriginalPacketAcrossRestart()
+        {
+            var relay = Start(4, "0\n1\n2");
+            relay.Main("app 1 repeated payload", UpdateType.Terminal);
+            var packet = Assert.Single(relay.Storage.Split('\n').Where(line => line.StartsWith("SEND:")));
+            relay = Start(4, relay.Storage);
+            for (int i = 0; i < 20; i++)
+                relay.Main("app 1 repeated payload", UpdateType.Terminal);
+
+            Assert.Equal(packet, Assert.Single(relay.Storage.Split('\n').Where(line => line.StartsWith("SEND:"))));
+            relay.Main("app 2 repeated payload", UpdateType.Terminal);
+            relay.Main("app 1 different payload", UpdateType.Terminal);
+            Assert.Equal(3, relay.Storage.Split('\n').Count(line => line.StartsWith("SEND:")));
+        }
+
+        [Fact]
         public void TimedApplicationsLeaveSpaceForRegularDelivery()
         {
             var relay = Start(4, "0\n1");
@@ -134,11 +150,11 @@ namespace TaskBus.Tests
 
             Assert.Equal(12, relay.Storage.Split('\n').Count(line => line.StartsWith("SEND:")));
             for (int i = 0; i < 5; i++)
-                relay.Main("app 1 task", UpdateType.Terminal);
+                relay.Main("app 1 task-" + i, UpdateType.Terminal);
 
             Assert.Equal(16, relay.Storage.Split('\n').Count(line => line.StartsWith("SEND:")));
             Assert.Equal(4, relay.Storage.Split('\n').Count(line =>
-                line.EndsWith("|" + TaskBusIgcHelper.EncodeStorage("task"))));
+                line.StartsWith("SEND:APP|") && TaskBusIgcHelper.DecodeStorage(line.Split('|')[6]).StartsWith("task-")));
         }
 
         [Fact]
