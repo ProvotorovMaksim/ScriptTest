@@ -383,6 +383,10 @@ assigned approach to the surveyed ore position. Departure from this lane
 stops the managed drills. For a supervised pass, prepare one reviewed
 endpoint in a local `[AMN MINE PASS]` Remote Control, set One Way and a
 speed limit at or below 1 m/s, then settle within 5 m of the approach.
+Run `mine plan` to load a candidate endpoint from the assigned ore GPS.
+It offsets for the controller's current position relative to the grid
+origin and preserves manually prepared waypoints. It leaves the autopilot
+and drills idle while the operator checks alignment and clearance.
 Run `mine pass` to start both the drills and the controller. The pass
 stops on completion, lease loss, lane or cargo limits, or speed above
 1.5 m/s. It also stops if it advances less than 0.5 m toward its endpoint

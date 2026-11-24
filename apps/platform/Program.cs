@@ -48,6 +48,7 @@ namespace SpaceEngineers.Apps.Platform
         private Vector3D _miningPassEndpoint;
         private double _miningPassDistance;
         private const string MiningPassRemoteName = "[AMN MINE PASS]";
+        private const string MiningEndpointName = "AMN assigned ore";
         private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -209,6 +210,8 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
                 StartManagedDrills();
+            else if (string.Equals(command, "mine plan", StringComparison.OrdinalIgnoreCase))
+                LoadAssignedMiningEndpoint();
             else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
                 StartMiningPass();
             else if (string.Equals(command, "mine retreat", StringComparison.OrdinalIgnoreCase))
@@ -1052,6 +1055,64 @@ namespace SpaceEngineers.Apps.Platform
                 _routes.LoadMiningApproach(remote => StartPlatformFlight(remote, "Mining approach", false));
         }
 
+        private void LoadAssignedMiningEndpoint()
+        {
+            string taskId;
+            double approachX;
+            double approachY;
+            double approachZ;
+            double oreX;
+            double oreY;
+            double oreZ;
+            if (!_miningLaneRadius.HasValue || _miningCargoName == null || _drillingLease != null ||
+                _worker.SupervisedCruiseRemote != 0 ||
+                !_worker.TryGetMiningApproach(out taskId, out approachX, out approachY, out approachZ) ||
+                !_worker.TryGetMiningOrePosition(out oreX, out oreY, out oreZ))
+            {
+                Echo("Planning needs a confirmed mining assignment, a configured lane and cargo, and idle drills.");
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
+            var approach = new Vector3D(approachX, approachY, approachZ);
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking || remote.IsAutoPilotEnabled ||
+                remote.FlightMode != FlightMode.OneWay || !(remote.SpeedLimit > 0 && remote.SpeedLimit <= 1) ||
+                remote.GetShipSpeed() > 0.25 || Vector3D.DistanceSquared(remote.GetPosition(), approach) > 25)
+            {
+                Echo("Settle at the assigned approach with an idle One Way " + MiningPassRemoteName + " at 1 m/s or less.");
+                return;
+            }
+
+            var ore = new Vector3D(oreX, oreY, oreZ);
+            var gridOrigin = Me.CubeGrid.GetPosition();
+            if (!CheckMiningLane(approachX, approachY, approachZ, gridOrigin))
+            {
+                Echo(_lastProbe);
+                return;
+            }
+
+            // The lane constrains the grid origin, but the Remote Control flies its own position.
+            var endpoint = ore + (remote.GetPosition() - gridOrigin);
+            if (Vector3D.DistanceSquared(remote.GetPosition(), endpoint) <= 4)
+            {
+                Echo("The platform is already within 2 m of the assigned ore endpoint.");
+                return;
+            }
+
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count > 1 ||
+                (_surveyWaypoints.Count == 1 && _surveyWaypoints[0].Name != MiningEndpointName))
+            {
+                Echo("The mining controller has a manually prepared route. Clear it before generating an endpoint.");
+                return;
+            }
+            remote.ClearWaypoints();
+            remote.AddWaypoint(endpoint, MiningEndpointName);
+            Echo(FormatSurveyGps(MiningEndpointName, endpoint));
+            Echo("Review the loaded endpoint, ship alignment and drill clearance before running mine pass.");
+        }
+
         private void StartMiningPass()
         {
             string taskId;
@@ -1084,6 +1145,20 @@ namespace SpaceEngineers.Apps.Platform
             {
                 Echo("Load one reviewed mining endpoint inside the assigned lane.");
                 return;
+            }
+
+            if (_surveyWaypoints[0].Name == MiningEndpointName)
+            {
+                double oreX;
+                double oreY;
+                double oreZ;
+                var plannedGridPosition = _surveyWaypoints[0].Coords + Me.CubeGrid.GetPosition() - remote.GetPosition();
+                if (!_worker.TryGetMiningOrePosition(out oreX, out oreY, out oreZ) ||
+                    Vector3D.DistanceSquared(plannedGridPosition, new Vector3D(oreX, oreY, oreZ)) > 4)
+                {
+                    Echo("The generated endpoint no longer matches the assignment or ship alignment. Run mine plan again.");
+                    return;
+                }
             }
 
             _platformMiningPass = true;
