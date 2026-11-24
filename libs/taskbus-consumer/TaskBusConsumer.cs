@@ -66,6 +66,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private int _pendingCompletedEpoch;
         private int _tick;
         private int? _lastLeaseConfirmationTick;
+        private long _leaseConfirmationSource;
 
 
         public TaskBusConsumer(
@@ -117,7 +118,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 case "TASK_PUBLISHED_ACK":
                     return HandleChildAcknowledgement(payloadJson);
                 case "TASK_ASSIGN":
-                    ReceiveTask(payloadJson);
+                    ReceiveTask(sourceId, payloadJson);
                     return true;
                 case "QUEUE_EMPTY":
                     HandleEmptyQueue();
@@ -279,7 +280,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return false;
 
             ore = resource.Substring(4);
-            lease = _brokerId.ToString(CultureInfo.InvariantCulture) + ":" +
+            lease = _leaseConfirmationSource.ToString(CultureInfo.InvariantCulture) + ":" +
                 _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _activeTaskId;
             return true;
         }
@@ -320,7 +321,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             SendMessage("TASK_POLL", payload);
         }
 
-        private void ReceiveTask(string taskJson)
+        private void ReceiveTask(long sourceId, string taskJson)
         {
             if (_miningPlatform)
             {
@@ -395,6 +396,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string confirmation;
             _baseStockConfirmed = TaskBusIgcHelper.TryGetJsonProperty(taskJson, "base_stock_confirmed", out confirmation) &&
                 confirmation == "true";
+            _leaseConfirmationSource = sourceId;
             _lastLeaseConfirmationTick = _tick;
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");

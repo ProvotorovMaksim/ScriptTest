@@ -29,6 +29,23 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void SurveyLeaseDistinguishesBroadcastBrokersWithIdenticalAssignments()
+        {
+            var worker = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { },
+                42, "Platform", miningPlatform: true);
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"survey-1\",\"lease_epoch\":1,\"group_id\":\"Scouts\"," +
+                "\"details\":{\"resource\":\"Ore/Iron\",\"steps\":[\"survey\"]}}", targetId: 42);
+
+            worker.ProcessIncomingMessage(1, assignment);
+            Assert.True(worker.TryGetSurveyLease(out var first, out _));
+            worker.ProcessIncomingMessage(2, assignment);
+            Assert.True(worker.TryGetSurveyLease(out var second, out _));
+
+            Assert.NotEqual(first, second);
+        }
+
+        [Fact]
         public void MiningApproachRequiresARecentlyConfirmedLease()
         {
             string storage = "";
