@@ -64,12 +64,25 @@ namespace TaskBus.Tests
             point.ProcessIncomingMessage(1, parent);
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
                 "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
+            point.ProcessCommand("site remember");
             point.ProcessCommand("stage survey");
             Assert.Contains("Stage: mine", point.GetStatus());
             point.Tick();
             Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
             Assert.Contains("\"ore_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
             Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":50}", sent[sent.Count - 1]);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:1\",\"state\":\"DONE\"}", targetId: 42));
+            point.ProcessCommand("stage mine");
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_DONE_ACK",
+                "{\"task_id\":\"parent\",\"lease_epoch\":7}", targetId: 42));
+
+            point = Start();
+            point.ProcessIncomingMessage(1, parent.Replace("\"parent\"", "\"next\""));
+            Assert.Contains("Stage: mine", point.GetStatus());
+            point.Tick();
+            Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
+            Assert.Contains("\"request_id\":\"next:7:1\"", sent[sent.Count - 1]);
         }
 
         [Fact]

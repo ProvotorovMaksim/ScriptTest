@@ -106,6 +106,13 @@ point. Review clearance for the return controller's mounting position,
 the loaded ship and current obstacles before launching. Final docking
 is handled separately by FCS.
 
+On the mining point, run `site remember` after its survey child completes
+and both waypoints are set, before confirming the survey stage. This
+registers an operator-approved, reusable site for the requested ore at
+that point. Future leases for that ore start at mining and reuse the
+recorded pair. Use `site forget Ore/Iron` when the site is depleted or its
+approach is no longer usable. The saved catalog is local to the point.
+
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
 children only from the block holding that lease in `MiningPoints`.

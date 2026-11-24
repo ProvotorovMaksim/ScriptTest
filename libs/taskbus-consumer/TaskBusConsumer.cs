@@ -47,6 +47,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private string _childState;
         private string _oreSite;
         private string _oreApproach;
+        private readonly Dictionary<string, string> _knownSites =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private bool _baseStockConfirmed;
         private readonly bool _miningPlatform;
         private string _consumerGroup = "default";
@@ -170,6 +172,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (cmd.StartsWith("group ", StringComparison.OrdinalIgnoreCase))
             {
                 SetConsumerGroup(cmd.Substring(6).Trim());
+                return;
+            }
+            if (cmd == "site remember")
+            {
+                RememberSurveySite();
+                return;
+            }
+            if (cmd.StartsWith("site forget ", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_knownSites.Remove(cmd.Substring(12).Trim()))
+                    SaveState();
                 return;
             }
             if (cmd.StartsWith("site ", StringComparison.OrdinalIgnoreCase) ||
@@ -328,6 +341,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
                 _leaseEpoch = leaseEpoch;
+                ReuseKnownSite();
                 SaveState();
                 _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
             }
@@ -354,6 +368,53 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private string CurrentChildRequestId() => _activeTaskId + ":" +
             _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture);
+
+        private string GetRequestedResource()
+        {
+            string details;
+            string raw;
+            string resource;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out resource) ? resource : null;
+        }
+
+        private void RememberSurveySite()
+        {
+            var resource = GetRequestedResource();
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId() || _oreSite == null || _oreApproach == null ||
+                string.IsNullOrEmpty(resource) || !resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase))
+            {
+                _echo("A completed survey and two selected waypoints are required.");
+                return;
+            }
+            if (_knownSites.Count >= 32 && !_knownSites.ContainsKey(resource))
+            {
+                _echo("Known-site catalog is full.");
+                return;
+            }
+
+            _knownSites[resource] = _oreSite + ";" + _oreApproach;
+            SaveState();
+            _echo("Remembered site for " + resource + ".");
+        }
+
+        private void ReuseKnownSite()
+        {
+            if (!IsAutomaticPoint || _stages.Count < 2 || _stages[0] != "survey" || _stages[1] != "mine")
+                return;
+            var resource = GetRequestedResource();
+            string saved;
+            if (resource == null || !_knownSites.TryGetValue(resource, out saved))
+                return;
+
+            var points = saved.Split(';');
+            _oreSite = points[0];
+            _oreApproach = points[1];
+            _stageIndex = 1;
+            _echo("Using known site for " + resource + ".");
+        }
 
         private void SetSurveyWaypoint(string command)
         {
@@ -726,6 +787,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                         if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
+                    else if (key == "KNOWN_SITE")
+                    {
+                        var fields = value.Split('|');
+                        if (fields.Length == 2 && _knownSites.Count < 32)
+                        {
+                            var resource = TaskBusIgcHelper.DecodeStorage(fields[0]);
+                            var points = TaskBusIgcHelper.DecodeStorage(fields[1]);
+                            if (points.Split(';').Length == 2)
+                                _knownSites[resource] = points;
+                        }
+                    }
                     else if (key == "ORE_SITE") _oreSite = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "ORE_APPROACH") _oreApproach = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
@@ -769,6 +841,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
             }
+            foreach (var site in _knownSites)
+                storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Key) +
+                    "|" + TaskBusIgcHelper.EncodeStorage(site.Value));
             if (_autoPoint) storage.AppendLine("POINT_AUTO|1");
             storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));
