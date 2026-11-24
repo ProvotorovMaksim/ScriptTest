@@ -181,17 +181,26 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
             if (cmd.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
             {
+                const string restoredCommand = "broker restored ";
+                bool restored = cmd.StartsWith(restoredCommand, StringComparison.OrdinalIgnoreCase);
                 long brokerId;
-                if (!long.TryParse(cmd.Substring(7).Trim(), out brokerId) || brokerId < 0)
-                    _echo("Usage: broker <block ID>, or broker 0 for broadcast.");
-                else if (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId))
-                    _echo("Change broker only after the current task and completion are resolved.");
+                if (!long.TryParse(cmd.Substring(restored ? restoredCommand.Length : 7).Trim(), out brokerId) ||
+                    brokerId < 0 || (restored && brokerId == 0))
+                    _echo("Usage: broker <block ID>, broker 0, or broker restored <block ID>.");
+                else if (!restored && (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId)))
+                    _echo("Resolve current work first, or use broker restored for a restored queue.");
                 else if (_brokerId != brokerId)
                 {
                     _brokerId = brokerId;
-                    _lastRevokedTaskId = null;
-                    _lastRevokedEpoch = -1;
+                    _lastLeaseConfirmationTick = null;
+                    if (!restored)
+                    {
+                        _lastRevokedTaskId = null;
+                        _lastRevokedEpoch = -1;
+                    }
                     SaveState();
+                    if (restored)
+                        PollBroker();
                 }
                 return;
             }

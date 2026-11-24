@@ -15,6 +15,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Action<string, long> _sendDirect;
         private readonly Action<string> _echo;
         private readonly long _brokerRelayId;
+        private long _outboxTargetId;
 
         public bool IsConfigured { get; }
         public bool IsAvailable => _brokerRelayId != 0 && FindRelay() != null;
@@ -49,6 +50,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (_outboxTargetId != targetId)
+            {
+                DiscardPendingSends();
+                _outboxTargetId = targetId;
+            }
             var command = "app " + _brokerRelayId + " taskbus " + _local.EntityId + " " + envelope;
             if (_outbox.Count < 16 && !_outbox.Contains(command))
                 _outbox.Enqueue(command);

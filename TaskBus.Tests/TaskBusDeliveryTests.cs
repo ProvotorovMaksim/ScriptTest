@@ -108,10 +108,21 @@ namespace TaskBus.Tests
             broker = StartBroker(broker.Storage);
             worker = StartWorker();
             Assert.Contains("Pending completion: 9-1", worker.GetStatus());
-            worker.Tick();
+            var replacement = StartBroker(broker.Storage, 2);
+            var source = broker;
+            broker = replacement;
+            worker.ProcessCommand("broker 2");
+            Assert.Contains("Broker: 1", worker.GetStatus());
+            worker.ProcessCommand("broker restored 2");
+            Assert.Contains("Broker: 2", StartWorker().GetStatus());
             broker.Main("");
-            DeliverToWorker(worker, TakeResponse(broker, "TASK_DONE_ACK", 42));
+            var acknowledgement = TakeResponse(broker, "TASK_DONE_ACK", 42);
+            var reply = TaskBusProtocol.CreateEnvelope(acknowledgement.EventType,
+                acknowledgement.PayloadJson, targetId: 42);
+            Assert.False(worker.ProcessIncomingMessage(1, reply));
+            Assert.True(worker.ProcessIncomingMessage(2, reply));
             Assert.Contains("Pending completion: none", StartWorker().GetStatus());
+            broker = source;
 
             Dispatch(broker, 9, publish);
             Assert.Contains("\"state\":\"DONE\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
@@ -538,11 +549,16 @@ namespace TaskBus.Tests
             return storage.Replace(deadline, key + "1");
         }
 
-        private static Broker StartBroker(string storage)
+        private static Broker StartBroker(string storage, long entityId = 1)
         {
             MyGridProgram.StorageAtStartup = storage;
+            MyGridProgram.EntityIdAtStartup = entityId;
             try { return new Broker(); }
-            finally { MyGridProgram.StorageAtStartup = null; }
+            finally
+            {
+                MyGridProgram.StorageAtStartup = null;
+                MyGridProgram.EntityIdAtStartup = 0;
+            }
         }
 
         private static void Dispatch(Broker broker, long sender, string envelope)

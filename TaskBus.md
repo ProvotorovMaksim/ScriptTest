@@ -84,12 +84,14 @@ are on the same grid. Pause the source and run `broker export`. If using
 two panels, copy the complete text without editing it. Pause a fresh empty
 destination and run `broker import`. A successful import restores the
 queue and its deduplication history and leaves the destination paused.
-Use the broker selection procedure below to switch idle workers. To
-move AMN.Base with open requests, first prepare the restored broker and
-configure its Galnet relay on the base if the relay has changed. Once the
-destination resumes, run `broker restored <new PB ID>` on AMN.Base. This
-keeps the original request IDs and pending cancellations and retries them
-against the restored queue. Use this command only with the verified copy
+Use the broker selection procedure below to switch idle workers. If a
+worker still has an assignment or a pending completion, run
+`broker restored <new PB ID>` after the restored broker resumes. The
+worker invalidates local lease confirmation and retains its checkpoint
+until the restored broker confirms or revokes it. If the relay changed,
+configure the destination Galnet relay on each switching block. On
+AMN.Base, `broker restored <new PB ID>` keeps the original request IDs
+and pending cancellations and retries them against the restored queue. Use this command only with the verified copy
 of the original queue. Keep
 the source paused. The snapshot carries the earliest safe resume time.
 It is at least 30 seconds after pausing a broker that has issued work,
