@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
+using VRage.Game.GUI.TextPanel;
 using VRageMath;
 
 namespace SpaceEngineers.Apps.FlightControl
@@ -10,6 +11,10 @@ namespace SpaceEngineers.Apps.FlightControl
         // PB BODY START
         private readonly FlightController flight = new FlightController();
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
+        private const string StatusPanelName = "[FCS STATUS]";
+        private const int StatusPanelInterval = 15;
+        private IMyTextPanel statusPanel;
+        private int statusPanelTicks;
         private IMyCockpit cockpit;
         private bool previousThrusterControl;
         private bool previousDampeners;
@@ -18,7 +23,9 @@ namespace SpaceEngineers.Apps.FlightControl
 
         public void Main(string argument, UpdateType source)
         {
-            switch ((argument ?? "").Trim().ToLowerInvariant())
+            var previousMode = mode;
+            var command = (argument ?? "").Trim().ToLowerInvariant();
+            switch (command)
             {
                 case "normal": Activate(Mode.Normal); break;
                 case "aero on": flight.EstimateAerodynamics = true; break;
@@ -50,6 +57,30 @@ namespace SpaceEngineers.Apps.FlightControl
             }
 
             Echo(status);
+            bool refreshPanel = command.Length != 0 || (source & UpdateType.Update1) == 0;
+            if (refreshPanel || previousMode != mode || (statusPanel != null && ++statusPanelTicks >= StatusPanelInterval))
+                WriteStatusPanel(refreshPanel);
+        }
+
+        private void WriteStatusPanel(bool refreshPanel)
+        {
+            statusPanelTicks = 0;
+            try
+            {
+                if (refreshPanel)
+                    statusPanel = GridTerminalSystem.GetBlockWithName(StatusPanelName) as IMyTextPanel;
+                if (statusPanel == null || statusPanel.CubeGrid != Me.CubeGrid || !statusPanel.IsWorking)
+                    return;
+
+                if (statusPanel.ContentType != ContentType.TEXT_AND_IMAGE)
+                    statusPanel.ContentType = ContentType.TEXT_AND_IMAGE;
+                statusPanel.WriteText(status);
+            }
+            catch (Exception error)
+            {
+                statusPanel = null;
+                Echo("FCS status panel unavailable: " + error.Message);
+            }
         }
 
         private void Activate(Mode requested)

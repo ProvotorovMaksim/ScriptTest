@@ -147,6 +147,10 @@ engaging. The controller starts off after compilation or reload.
   control while the PB is running. If an actuator is unavailable during
   release, FCS attempts the remaining settings and reports a warning.
 
+Name an LCD on the FCS block's grid exactly `[FCS STATUS]` and run `status`
+to show live flight status there. The panel refreshes while FCS is active
+and shows the reason when FCS releases control.
+
 The FCS status shows speed and the highest stopping-distance estimate across
 the cockpit's local X, Y and Z axes. Compare it with the 50 m braking budget.
 The estimate assumes current orientation, effective thrust and estimated
