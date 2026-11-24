@@ -24,6 +24,8 @@ namespace SpaceEngineers.Apps.FlightControl
         private long dockPortId;
         private int dockTicks;
         private bool dockCharging;
+        private bool departureRequested;
+        private int departureCharge = 95;
         private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
         private bool showDockGuide;
         private const string StatusPanelName = "[FCS STATUS]";
@@ -42,9 +44,13 @@ namespace SpaceEngineers.Apps.FlightControl
         public Program()
         {
             var settings = Storage.Split('\n');
+            var limits = settings[0].Split(';');
             double distance;
-            if (TryReadBrakingDistance(settings[0], out distance))
+            if (TryReadBrakingDistance(limits[0], out distance))
                 flight.BrakingDistance = distance;
+            int charge;
+            if (limits.Length == 2 && TryReadDepartureCharge(limits[1], out charge))
+                departureCharge = charge;
             Vector3D position;
             Vector3D forward;
             Vector3D up;
@@ -57,7 +63,9 @@ namespace SpaceEngineers.Apps.FlightControl
                 dockFrame = MatrixD.CreateWorld(position, forward, up);
                 if (settings.Length >= 5)
                     long.TryParse(settings[4], out dockPortId);
-                dockCharging = dockPortId != 0 && settings.Length >= 6 && settings[5] == "charging";
+                departureRequested = dockPortId != 0 && settings.Length >= 6 && settings[5] == "departing";
+                dockCharging = departureRequested ||
+                    (dockPortId != 0 && settings.Length >= 6 && settings[5] == "charging");
                 if (dockCharging)
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
             }
@@ -80,7 +88,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "dock record": RecordDockPose(); break;
                 case "dock approach": BeginDockApproach(false); break;
                 case "dock drone": BeginDockApproach(true); break;
-                case "dock depart": DepartBerth(); break;
+                case "dock depart": DepartBerth(true); break;
                 case "dock guide":
                     dockConnector = FindDockConnector();
                     showDockGuide = dockConnector != null && dockPosition.HasValue;
@@ -89,6 +97,12 @@ namespace SpaceEngineers.Apps.FlightControl
                     break;
                 case "dock off":
                     showDockGuide = false;
+                    if (departureRequested)
+                    {
+                        departureRequested = false;
+                        SaveSettings();
+                        status = "FCS: departure cancelled; continuing to charge.";
+                    }
                     if (mode == Mode.Dock)
                         Release("FCS off: docking cancelled.");
                     break;
@@ -96,6 +110,18 @@ namespace SpaceEngineers.Apps.FlightControl
                 default:
                     if (command.StartsWith("brake ", StringComparison.Ordinal))
                         SetBrakingDistance(command.Substring(6));
+                    else if (command.StartsWith("dock charge ", StringComparison.Ordinal))
+                    {
+                        int charge;
+                        if (TryReadDepartureCharge(command.Substring(12), out charge))
+                        {
+                            departureCharge = charge;
+                            SaveSettings();
+                            Echo("Departure charge: " + departureCharge + "%.");
+                        }
+                        else
+                            Echo("Usage: dock charge <whole percent, 0 to 100>.");
+                    }
                     break;
             }
 
@@ -303,12 +329,13 @@ namespace SpaceEngineers.Apps.FlightControl
 
         private void SaveSettings()
         {
-            Storage = FormatNumber(flight.BrakingDistance);
+            Storage = FormatNumber(flight.BrakingDistance) + ";" +
+                departureCharge.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (dockPosition.HasValue)
                 Storage += "\n" + FormatDockVector(dockPosition.Value) + "\n" +
                     FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up) +
                     "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                (dockCharging ? "\ncharging" : "");
+                (departureRequested ? "\ndeparting" : dockCharging ? "\ncharging" : "");
         }
 
         private static string FormatDockVector(Vector3D vector) =>
@@ -511,17 +538,41 @@ namespace SpaceEngineers.Apps.FlightControl
             return false;
         }
 
+        private static bool TryReadDepartureCharge(string text, out int charge) =>
+            int.TryParse(text, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out charge) && charge >= 0 && charge <= 100;
+
+        private double GetBatteryChargePercent()
+        {
+            batteries.Clear();
+            GridTerminalSystem.GetBlocksOfType(batteries, battery => battery.CubeGrid == Me.CubeGrid &&
+                battery.IsFunctional && battery.Enabled);
+            double stored = 0;
+            double capacity = 0;
+            foreach (var battery in batteries)
+            {
+                stored += battery.CurrentStoredPower;
+                capacity += battery.MaxStoredPower;
+            }
+            return capacity > 0 ? 100 * stored / capacity : 100;
+        }
+
         private void CheckDockPower()
         {
             try
             {
                 var connector = FindDockConnector();
                 if (connector != null && connector.Status == MyShipConnectorStatus.Connected)
+                {
+                    if (departureRequested && mode == Mode.Off)
+                        DepartBerth(false);
                     return;
+                }
 
                 if (SetDockBatteryMode(ChargeMode.Auto))
                 {
                     dockCharging = false;
+                    departureRequested = false;
                     SaveSettings();
                     if (mode == Mode.Off)
                         Runtime.UpdateFrequency = UpdateFrequency.None;
@@ -534,7 +585,7 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private void DepartBerth()
+        private void DepartBerth(bool requestedNow)
         {
             if (mode != Mode.Off)
             {
@@ -549,19 +600,37 @@ namespace SpaceEngineers.Apps.FlightControl
                 if (connector == null || connector.Status != MyShipConnectorStatus.Connected ||
                     port == null || port.EntityId != dockPortId)
                 {
-                    Echo("Departure requires a connection to the recorded berth.");
+                    status = "FCS: departure requires a connection to the recorded berth.";
+                    departureRequested = false;
+                    SaveSettings();
                     return;
+                }
+                if (dockCharging)
+                {
+                    double charge = GetBatteryChargePercent();
+                    if (charge < departureCharge)
+                    {
+                        if (requestedNow && !departureRequested)
+                        {
+                            departureRequested = true;
+                            SaveSettings();
+                        }
+                        status = "FCS: waiting for battery charge " + Math.Round(charge, 1) +
+                            "% / " + departureCharge + "%.";
+                        return;
+                    }
                 }
                 if (!SetDockBatteryMode(ChargeMode.Auto))
                     return;
 
                 connector.Disconnect();
+                departureRequested = false;
                 if (connector.Status != MyShipConnectorStatus.Connected)
                 {
                     dockCharging = false;
-                    SaveSettings();
                     Runtime.UpdateFrequency = UpdateFrequency.None;
                 }
+                SaveSettings();
                 status = "FCS: ship batteries set to Auto. Disconnect requested.";
             }
             catch (Exception error)

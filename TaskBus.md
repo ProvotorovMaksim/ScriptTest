@@ -212,6 +212,13 @@ powered, FCS sets the batteries to Auto on its next power check. The
 charging state survives a programmable-block recompile. Test the cycle
 with the base powered and verify both charge modes at the drone terminal.
 
+The uncrewed charge cycle defaults to a 95% departure threshold, measured
+across enabled, functional ship batteries by stored energy. Set it with
+`dock charge <0–100>`. A `dock depart` request below the threshold is saved
+and retried after charging. `dock off` cancels the pending departure while
+leaving the drone docked. The mining workflow should request departure after
+unloading. An undock outside FCS bypasses the charge threshold.
+
 To investigate an automatic approach that stalls near the port, record a
 successful connected pose and compare the guide readings at the stall with
 the same ship, berth and cargo load in a copy of the world without the
