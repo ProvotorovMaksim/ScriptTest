@@ -20,16 +20,31 @@ namespace SpaceEngineers.Services.Galnet
         private long _generation;
         private long _sequence;
         private long _tick;
+        private const int MaxPending = 16;
+        private const int MaxReceived = 64;
+        private readonly List<string> _outbox = new List<string>();
+        private readonly Queue<string> _received = new Queue<string>();
+        private string _lastDelivery = "No message received.";
 
         public Program()
         {
             var settings = Storage.Split('\n');
             long.TryParse(settings[0], out _generation);
             _generation++;
-            for (int i = 1; i < settings.Length && _peers.Count < 32; i++)
+            for (int i = 1; i < settings.Length; i++)
             {
+                var line = settings[i].TrimEnd('\r');
                 long peer;
-                if (long.TryParse(settings[i], out peer) && peer != 0 && peer != Me.EntityId)
+                if (line.StartsWith("SEND:", StringComparison.Ordinal) && _outbox.Count < MaxPending)
+                    _outbox.Add(line.Substring(5));
+                else if (line.StartsWith("SEEN:", StringComparison.Ordinal) && _received.Count < MaxReceived)
+                    _received.Enqueue(line.Substring(5));
+                else if (line.StartsWith("LAST:", StringComparison.Ordinal))
+                {
+                    try { _lastDelivery = TaskBusIgcHelper.DecodeStorage(line.Substring(5)); }
+                    catch (FormatException) { }
+                }
+                else if (_peers.Count < 32 && long.TryParse(line, out peer) && peer != 0 && peer != Me.EntityId)
                     _peers[peer] = -LinkLifetime;
             }
             SaveConfiguration();
@@ -53,10 +68,15 @@ namespace SpaceEngineers.Services.Galnet
             if (periodic && (_tick % AdvertiseEvery == 1 ||
                 _peers.Values.Any(seen => _tick - seen == LinkLifetime)))
                 Advertise();
+            if (periodic && _tick % AdvertiseEvery == 1)
+                foreach (var pending in _outbox)
+                    ForwardMessage(pending, 0);
 
             var command = (argument ?? "").Trim();
             if (command.StartsWith("peer ", StringComparison.OrdinalIgnoreCase))
                 ChangePeer(command);
+            else if (command.StartsWith("send ", StringComparison.OrdinalIgnoreCase))
+                QueueMessage(command.Substring(5));
             else if (command.StartsWith("route ", StringComparison.OrdinalIgnoreCase))
             {
                 long destination;
@@ -69,6 +89,7 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             Echo("Galnet node: " + Me.EntityId);
+            Echo("Pending: " + _outbox.Count + " | " + _lastDelivery);
             foreach (var peer in _peers)
                 Echo(peer.Key + (IsLive(peer.Key) ? " online" : " offline"));
         }
@@ -99,8 +120,15 @@ namespace SpaceEngineers.Services.Galnet
                 _peers[sender] = _tick;
                 return;
             }
-            if (!IsLive(sender) || string.IsNullOrEmpty(packet) || packet.Length > 1024)
+            if (!IsLive(sender) || string.IsNullOrEmpty(packet) || packet.Length > 2048)
                 return;
+
+            if (packet.StartsWith("DATA|", StringComparison.Ordinal) ||
+                packet.StartsWith("ACK|", StringComparison.Ordinal))
+            {
+                ForwardMessage(packet, sender);
+                return;
+            }
 
             var fields = packet.Split('|');
             long owner;
@@ -133,6 +161,85 @@ namespace SpaceEngineers.Services.Galnet
                 Flood(owner, generation, sequence, remaining - 1, neighbors, sender);
         }
 
+        private void QueueMessage(string argument)
+        {
+            int split = argument.IndexOf(' ');
+            long destination;
+            if (split < 1 || !long.TryParse(argument.Substring(0, split), out destination) ||
+                destination == 0 || destination == Me.EntityId || argument.Length - split > 256 ||
+                _outbox.Count >= MaxPending)
+            {
+                Echo("Use send <node ID> <text up to 255 characters>. Outbox holds 16 messages.");
+                return;
+            }
+
+            var id = _generation + ":" + (++_sequence);
+            var packet = "DATA|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
+                TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
+            _outbox.Add(packet);
+            SaveConfiguration();
+            ForwardMessage(packet, 0);
+        }
+
+        private void ForwardMessage(string packet, long previousHop)
+        {
+            var fields = packet.Split('|');
+            long origin;
+            long destination;
+            int hops;
+            if (fields.Length != 6 || (fields[0] != "DATA" && fields[0] != "ACK") ||
+                !long.TryParse(fields[1], out origin) || origin == 0 ||
+                !long.TryParse(fields[2], out destination) || destination == 0 ||
+                !int.TryParse(fields[4], out hops) || hops < 1 || hops > MaxHops ||
+                fields[3].Length == 0 || fields[3].Length > 48 ||
+                (hops == MaxHops && previousHop != 0 && previousHop != origin))
+                return;
+
+            if (destination == Me.EntityId)
+            {
+                if (fields[0] == "DATA")
+                    AcceptData(origin, fields[3], fields[5]);
+                else
+                {
+                    var prefix = "DATA|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
+                    if (_outbox.RemoveAll(item => item.StartsWith(prefix, StringComparison.Ordinal)) > 0)
+                        SaveConfiguration();
+                }
+                return;
+            }
+
+            long nextHop;
+            if (hops <= 1 || !_topology.TryGetNextHop(Me.EntityId, destination, _tick, out nextHop) ||
+                nextHop == previousHop || !IsLive(nextHop))
+                return;
+
+            if (previousHop != 0)
+            {
+                fields[4] = (hops - 1).ToString();
+                packet = string.Join("|", fields);
+            }
+            IGC.SendUnicastMessage(nextHop, Channel, packet);
+        }
+
+        private void AcceptData(long origin, string id, string encoded)
+        {
+            var key = origin + ":" + id;
+            if (!_received.Contains(key))
+            {
+                string message;
+                try { message = TaskBusIgcHelper.DecodeStorage(encoded); }
+                catch (FormatException) { return; }
+                if (message.Length > 255)
+                    return;
+                if (_received.Count >= MaxReceived)
+                    _received.Dequeue();
+                _received.Enqueue(key);
+                _lastDelivery = "From " + origin + ": " + message;
+                SaveConfiguration();
+            }
+            ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|", 0);
+        }
+
         private void Flood(long owner, long generation, long sequence, int remaining,
             List<long> neighbors, long exclude)
         {
@@ -163,7 +270,12 @@ namespace SpaceEngineers.Services.Galnet
 
         private void SaveConfiguration()
         {
-            Storage = _generation + "\n" + string.Join("\n", _peers.Keys);
+            var lines = new List<string> { _generation.ToString() };
+            foreach (var peer in _peers.Keys) lines.Add(peer.ToString());
+            foreach (var packet in _outbox) lines.Add("SEND:" + packet);
+            foreach (var key in _received) lines.Add("SEEN:" + key);
+            lines.Add("LAST:" + TaskBusIgcHelper.EncodeStorage(_lastDelivery));
+            Storage = string.Join("\n", lines);
         }
 
         #region PreludeFooter

@@ -72,8 +72,12 @@ up to 128 node versions for its lifetime and accepts up to 32 neighbors
 per node. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
 `peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
 shows the current next hop. Relay neighbors are logical unicast peers.
-This version exchanges topology only. Application traffic forwarding
-and explicit laser link control are separate work.
+Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
+up to 16 pending messages in Storage and retries them via the current
+route until the destination acknowledges. The last 64 delivery IDs are
+retained for duplicate suppression across receiver restarts. Text delivery
+is a diagnostic. TaskBus integration and explicit laser link control are
+separate work.
 
 ### Select a broker
 
