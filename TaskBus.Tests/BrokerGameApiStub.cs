@@ -66,6 +66,14 @@ namespace Sandbox.ModAPI.Ingame
         bool TryRun(string command);
     }
 
+    public interface IMyTextPanel
+    {
+        long CubeGrid { get; }
+        bool IsWorking { get; }
+        string GetText();
+        bool WriteText(string text, bool append);
+    }
+
     public sealed class TestTerminal
     {
         public IMyProgrammableBlock Application;
@@ -73,8 +81,9 @@ namespace Sandbox.ModAPI.Ingame
         public object GetBlockWithId(long id) => ApplicationsById.TryGetValue(id, out var block) ? block : null;
         public IMyProgrammableBlock Relay;
         public IMyLaserAntenna Laser;
+        public IMyTextPanel BackupPanel;
         public object GetBlockWithName(string name) =>
-            name == "[GALNET APP]" ? Application : name == "[GALNET RELAY]" ? Relay : name == "Laser A" ? Laser : null;
+            name == "[GALNET APP]" ? Application : name == "[GALNET RELAY]" ? Relay : name == "Laser A" ? Laser : name == "[TASKBUS BACKUP]" ? BackupPanel : null;
 
         private sealed class Antenna : IMyRadioAntenna
         {

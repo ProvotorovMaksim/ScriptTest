@@ -78,6 +78,17 @@ Workers with previously delivered assignments may take until their
 confirmation deadline to stop. Use `broker resume` on the same PB to
 start issuing work again.
 
+For a planned handoff, add a dedicated `[TASKBUS BACKUP]` text panel to
+the source and destination grids. A shared panel works when both brokers
+are on the same grid. Pause the source and run `broker export`. If using
+two panels, copy the complete text without editing it. Pause a fresh empty
+destination and run `broker import`. A successful import restores the
+queue and its deduplication history and leaves the destination paused.
+Use the broker selection procedure below to switch idle clients. Keep
+the source paused and wait at least 30 seconds after pausing it before
+resuming the destination so old assignments have time to expire. Transfer
+is operator-driven, and the backup must fit in one text panel.
+
 ### Galnet routing core
 
 `GalnetTopology` computes next hops from current, reciprocal neighbor

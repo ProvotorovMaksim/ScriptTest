@@ -475,6 +475,54 @@ namespace TaskBus.Tests
             }
         }
 
+        [Fact]
+        public void PausedBrokerTransfersQueueAndRejectsCorruptedBackup()
+        {
+            var source = StartBroker("");
+            var panel = new BackupPanel();
+            source.GridTerminalSystem.BackupPanel = panel;
+            Dispatch(source, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"handoff\",\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(source, "TASK_PUBLISHED_ACK", 9);
+            source.Main("broker pause");
+            source.Main("broker export");
+
+            var destination = StartBroker("");
+            destination.GridTerminalSystem.BackupPanel = panel;
+            destination.Main("broker pause");
+            var empty = destination.Storage;
+            var backup = panel.Text;
+            panel.Text += "truncated";
+            destination.Main("broker import");
+            Assert.Equal(empty, destination.Storage);
+            panel.Text = backup.Replace("\n", "\r\n");
+
+            destination.Main("broker import");
+            Assert.Equal(source.Storage.Replace("\r\n", "\n"), destination.Storage.Replace("\r\n", "\n"));
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\"}", targetId: 1);
+            Dispatch(destination, 42, poll);
+            Assert.Empty(destination.IGC.Outbox);
+
+            destination.Main("broker resume");
+            Dispatch(destination, 42, poll);
+            Assert.Contains("9-1", TakeResponse(destination, "TASK_ASSIGN", 42).PayloadJson);
+        }
+
+        private sealed class BackupPanel : IMyTextPanel
+        {
+            public long CubeGrid => 1;
+            public bool IsWorking => true;
+            public string Text = "";
+            public string GetText() => Text;
+
+            public bool WriteText(string text, bool append)
+            {
+                Text = append ? Text + text : text;
+                return true;
+            }
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

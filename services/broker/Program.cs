@@ -13,6 +13,8 @@ namespace SpaceEngineers.Services.Broker
     public sealed class Program : MyGridProgram
     {
         #endregion
+        private const string BackupPanelName = "[TASKBUS BACKUP]";
+        private const string BackupVersion = "TASKBUS-BACKUP-1|";
         private const string GalnetRelayName = "[GALNET RELAY]";
         private readonly Dictionary<long, long> _galnetRoutes = new Dictionary<long, long>();
         private readonly Queue<string> _galnetReplies = new Queue<string>();
@@ -104,6 +106,10 @@ namespace SpaceEngineers.Services.Broker
                     SaveQueue();
                     Echo("Broker resumed.");
                 }
+                else if (string.Equals(command, "broker export", StringComparison.OrdinalIgnoreCase))
+                    TransferBackup(import: false);
+                else if (string.Equals(command, "broker import", StringComparison.OrdinalIgnoreCase))
+                    TransferBackup(import: true);
                 else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
                     ShowStatus();
                 return;
@@ -662,6 +668,69 @@ namespace SpaceEngineers.Services.Broker
             Echo((_paused ? "Paused. " : "Active. ") + "Tasks: " + _tasks.Count);
             foreach (var task in _tasks)
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);
+        }
+
+        private void TransferBackup(bool import)
+        {
+            var panel = GridTerminalSystem.GetBlockWithName(BackupPanelName) as IMyTextPanel;
+            if (panel == null || !panel.IsWorking || panel.CubeGrid != Me.CubeGrid)
+            {
+                Echo("A working " + BackupPanelName + " text panel is required on this grid.");
+                return;
+            }
+
+            if (!import)
+            {
+                var existing = panel.GetText();
+                if (existing.Length != 0 && !existing.StartsWith(BackupVersion, StringComparison.Ordinal))
+                {
+                    Echo("Backup panel contains unrelated text.");
+                    return;
+                }
+                var queueText = Storage.Replace("\r\n", "\n");
+                var backup = BackupVersion + BackupChecksum(queueText) + "\n" + queueText;
+                if (!panel.WriteText(backup, false) || panel.GetText().Replace("\r\n", "\n") != backup)
+                    Echo("Backup write failed verification.");
+                else
+                    Echo("Broker backup exported.");
+                return;
+            }
+
+            if (_sequence != 0 || _tasks.Count != 0 || _completedRequestIds.Count != 0 ||
+                _cancelledRequestIds.Count != 0 || _commits.Count != 0)
+            {
+                Echo("Import requires an empty broker.");
+                return;
+            }
+
+            var snapshot = panel.GetText().Replace("\r\n", "\n");
+            var separator = snapshot.IndexOf('\n');
+            if (separator <= BackupVersion.Length || !snapshot.StartsWith(BackupVersion, StringComparison.Ordinal))
+            {
+                Echo("Unrecognized broker backup.");
+                return;
+            }
+            var queue = snapshot.Substring(separator + 1);
+            if (snapshot.Substring(BackupVersion.Length, separator - BackupVersion.Length) != BackupChecksum(queue) ||
+                !queue.StartsWith("SEQ|", StringComparison.Ordinal) ||
+                queue.IndexOf("\nPAUSED|1\n", StringComparison.Ordinal) < 0)
+            {
+                Echo("Broker backup failed verification.");
+                return;
+            }
+
+            Storage = queue;
+            LoadQueue();
+            SaveAfterParentLeaseChange(false);
+            Echo("Broker backup imported. Broker remains paused.");
+        }
+
+        private static string BackupChecksum(string value)
+        {
+            uint hash = 2166136261;
+            foreach (var character in value)
+                hash = unchecked((hash ^ character) * 16777619);
+            return hash.ToString("X8", CultureInfo.InvariantCulture);
         }
 
         private void LoadQueue()
