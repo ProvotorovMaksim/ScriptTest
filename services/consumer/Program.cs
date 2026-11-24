@@ -47,7 +47,8 @@ namespace SpaceEngineers.Services.Consumer
                 getGridPositionJson: ReadGridPositionJson,
                 readHaulerCargo: _haulerCargo == null ? null : (Func<string, double?>)ReadHaulerCargo,
                 gridId: Me.CubeGrid.EntityId,
-                readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid);
+                readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid,
+                autoHauler: string.Equals(ReadSetting("HaulerAuto="), "true", StringComparison.OrdinalIgnoreCase));
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);

@@ -82,6 +82,36 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void AutomaticHaulerAdvancesOnlyWithDockAndCargoEvidence()
+        {
+            var sent = new List<string>();
+            double cargo = 50;
+            long dock = 600;
+            var hauler = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { },
+                _ => { }, 42, "Hauler", 1, readHaulerCargo: _ => cargo, readDockedGrid: () => dock,
+                autoHauler: true);
+            hauler.ProcessCommand("group Haulers");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50," +
+                "\"pickup_grid_id\":500,\"base_grid_id\":600,\"steps\":[\"pickup\",\"deliver\"]}}", targetId: 42);
+            hauler.ProcessIncomingMessage(1, assignment);
+            hauler.Tick();
+            Assert.Contains("Stage: pickup", hauler.GetStatus());
+
+            dock = 500;
+            hauler.Tick();
+            Assert.Contains("Stage: deliver", hauler.GetStatus());
+            dock = 600;
+            hauler.Tick();
+            Assert.Contains("Pending completion: none", hauler.GetStatus());
+
+            cargo = 0;
+            hauler.Tick();
+            Assert.Contains("Pending completion: haul", hauler.GetStatus());
+            Assert.Contains("TASK_DONE", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void SurveyLeaseRequiresConfirmationAfterRestart()
         {
             string storage = "";

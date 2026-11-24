@@ -234,6 +234,11 @@ delivery. Both station connectors must be on the grids identified by the
 assignment. A transport task published before pickup grid IDs were added
 must be reissued before it can use the pickup docking check.
 
+With both `HaulerCargo` and `HaulerDock` configured, set `HaulerAuto=true`
+to confirm pickup and delivery automatically when the required checks pass
+under a recently confirmed lease. A delivery without a saved pickup
+measurement still needs operator confirmation.
+
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions
 are grid references for route planning. Configure docking approach waypoints

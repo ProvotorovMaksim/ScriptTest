@@ -74,6 +74,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private double? _pickupCargo;
         private readonly long _gridId;
         private readonly Func<long> _readDockedGrid;
+        private readonly bool _autoHauler;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -83,7 +84,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             long entityId,
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
-            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null)
+            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -101,6 +102,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _readHaulerCargo = readHaulerCargo;
             _gridId = gridId;
             _readDockedGrid = readDockedGrid;
+            _autoHauler = autoHauler && _readDockedGrid != null && _readHaulerCargo != null;
             LoadState();
         }
 
@@ -239,6 +241,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 PollBroker();
             if (_tick % _pollIntervalTicks == 0 && IsAutomaticPoint && HasRecentLeaseConfirmation)
                 PublishCurrentChild();
+            if (_autoHauler && _consumerGroup == "Haulers" && HasActiveTask &&
+                HasRecentLeaseConfirmation && _tick % _pollIntervalTicks == 0)
+            {
+                var stage = CurrentStage();
+                if (stage == "pickup" || (stage == "deliver" && _pickupCargo.HasValue))
+                    AdvanceStage(stage, automatic: true);
+            }
         }
 
         /// <summary>
@@ -676,7 +685,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SurveyReportField() + "}");
         }
 
-        private void AdvanceStage(string completedStage, string surveyReport = null)
+        private void AdvanceStage(string completedStage, string surveyReport = null, bool automatic = false)
         {
             if (string.IsNullOrEmpty(_activeTaskId))
             {
@@ -698,12 +707,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
 
             if (_consumerGroup == "Haulers" && _readDockedGrid != null &&
-                (expected == "pickup" || expected == "deliver") && !CheckHaulerDock(expected == "pickup"))
+                (expected == "pickup" || expected == "deliver") && !CheckHaulerDock(expected == "pickup", automatic))
                 return;
 
             if (_consumerGroup == "Haulers" &&
                 ((expected == "pickup" && _readHaulerCargo != null) || (expected == "deliver" && _pickupCargo.HasValue)) &&
-                !CheckHaulerCargo(expected == "pickup"))
+                !CheckHaulerCargo(expected == "pickup", automatic))
                 return;
 
             if (IsAutomaticPoint && _completedChildRequest != CurrentChildRequestId())
@@ -749,7 +758,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private bool CheckHaulerDock(bool pickup)
+        private bool CheckHaulerDock(bool pickup, bool automatic)
         {
             string field = pickup ? "pickup_grid_id" : "base_grid_id";
             string details;
@@ -759,18 +768,20 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) ||
                 !long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out grid) || grid == 0)
             {
-                _echo("The assignment has no " + (pickup ? "pickup" : "delivery") + " grid ID to verify.");
+                if (!automatic)
+                    _echo("The assignment has no " + (pickup ? "pickup" : "delivery") + " grid ID to verify.");
                 return false;
             }
 
             if (_readDockedGrid() == grid)
                 return true;
 
-            _echo("Dock at the assigned " + (pickup ? "mining point" : "delivery base") + " before confirming.");
+            if (!automatic)
+                _echo("Dock at the assigned " + (pickup ? "mining point" : "delivery base") + " before confirming.");
             return false;
         }
 
-        private bool CheckHaulerCargo(bool pickup)
+        private bool CheckHaulerCargo(bool pickup, bool automatic)
         {
             string details;
             double amount;
@@ -779,14 +790,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
                 !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
             {
-                _echo("The transport assignment has no valid resource amount.");
+                if (!automatic)
+                    _echo("The transport assignment has no valid resource amount.");
                 return false;
             }
 
             double? loaded = _readHaulerCargo == null ? null : _readHaulerCargo(resource);
             if (!loaded.HasValue || !(loaded.Value >= 0) || double.IsInfinity(loaded.Value))
             {
-                _echo("Cargo measurement unavailable. Check the configured hauler container.");
+                if (!automatic)
+                    _echo("Cargo measurement unavailable. Check the configured hauler container.");
                 return false;
             }
 
@@ -794,7 +807,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 if (loaded.Value < amount)
                 {
-                    _echo("Load at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource + ".");
+                    if (!automatic)
+                        _echo("Load at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource + ".");
                     return false;
                 }
                 _pickupCargo = loaded.Value;
@@ -804,7 +818,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 double unloaded = _pickupCargo.Value - loaded.Value;
                 if (unloaded + 0.0000001 < amount)
                 {
-                    _echo("Unload at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
+                    if (!automatic)
+                        _echo("Unload at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
                         ". Measured decrease: " + unloaded.ToString("G", CultureInfo.InvariantCulture));
                     return false;
                 }
