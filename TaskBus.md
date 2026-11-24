@@ -765,6 +765,10 @@ Name a local forward camera `[SHIPLINK SCOUT]` and run
 a configured Galnet fleet peer. The receiver shows a `[HAZARD]` GPS mark
 for up to 30 seconds after sending. A scan with no hit sends no message
 and only describes the checked ray.
+The cockpit shows a course warning for the first fresh hazard projected
+within 50 m of the ship's current velocity line over the next 12 seconds.
+This is a constant-velocity estimate using a reported point. ShipLink
+only displays the warning.
 
 Use `assist send <recipient relay ID>` to send the current ship position
 as a one-time assistance request to a wingmate over Galnet. The receiver

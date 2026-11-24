@@ -655,6 +655,45 @@ namespace SpaceEngineers.Apps.ShipLink
             AppendPositionGuide(display, mark.Position);
         }
 
+        private void AppendCourseHazard(StringBuilder display, long now)
+        {
+            const double warningSeconds = 12;
+            const double corridorRadiusSquared = 50 * 50;
+            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl && block.CubeGrid == Me.CubeGrid) ??
+                _cockpits.FirstOrDefault(block => block.CubeGrid == Me.CubeGrid);
+            if (cockpit == null)
+                return;
+            var velocity = cockpit.GetShipVelocities().LinearVelocity;
+            double speedSquared = velocity.LengthSquared();
+            if (!(speedSquared >= 0.25) || double.IsInfinity(speedSquared))
+                return;
+
+            var origin = cockpit.GetPosition();
+            FleetContact nearest = null;
+            double soonest = warningSeconds;
+            double lateral = 0;
+            foreach (var mark in _contacts)
+            {
+                if (!mark.Hazard || mark.Expires <= now)
+                    continue;
+                var offset = mark.Position - origin;
+                double seconds = Vector3D.Dot(offset, velocity) / speedSquared;
+                if (!(seconds > 0 && seconds <= soonest))
+                    continue;
+                double distanceSquared = (offset - velocity * seconds).LengthSquared();
+                if (!(distanceSquared <= corridorRadiusSquared))
+                    continue;
+                nearest = mark;
+                soonest = seconds;
+                lateral = Math.Sqrt(distanceSquared);
+            }
+
+            if (nearest != null)
+                display.AppendLine("COURSE HAZARD | " + nearest.Name + " | " +
+                    soonest.ToString("0.0", CultureInfo.InvariantCulture) + " s ahead | " +
+                    Math.Round(lateral) + " m off course");
+        }
+
         private void AppendPositionGuide(StringBuilder display, Vector3D position)
         {
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
@@ -810,6 +849,9 @@ namespace SpaceEngineers.Apps.ShipLink
 
             display.AppendLine();
 
+            long now = DateTime.UtcNow.Ticks;
+            AppendCourseHazard(display, now);
+
             // Antenna status
             var functionalAntennas = _antennas.Count(a => a.IsFunctional && a.Enabled);
             display.AppendLine($"Antennas: {functionalAntennas} active");
@@ -863,7 +905,6 @@ namespace SpaceEngineers.Apps.ShipLink
                         (status.Piloted ? "piloted" : "unoccupied"));
                 }
             }
-            long now = DateTime.UtcNow.Ticks;
             if (_galnetPeers.Count > 0)
             {
                 display.AppendLine("=== GALNET WINGMATES ===");
