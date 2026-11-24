@@ -8,6 +8,39 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void AutomaticMiningPointRetriesChildAndRequiresItsCompletion()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1);
+
+            var point = Start();
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+            point.ProcessIncomingMessage(1, parent);
+            point.Tick();
+            var firstPublication = sent[sent.Count - 1];
+            Assert.Contains("\"group_id\":\"Scouts\"", firstPublication);
+            Assert.Contains("\"parent_lease_epoch\":7", firstPublication);
+            point.ProcessCommand("stage survey");
+            Assert.Contains("Stage: survey", point.GetStatus());
+
+            point = Start();
+            point.ProcessIncomingMessage(1, parent);
+            point.Tick();
+            Assert.Equal(firstPublication, sent[sent.Count - 1]);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
+            point.ProcessCommand("stage survey");
+            Assert.Contains("Stage: mine", point.GetStatus());
+            point.Tick();
+            Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void WorkerPollsAndAcceptsAssignmentsOnlyFromStoredBroker()
         {
             string storage = "";

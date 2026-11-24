@@ -76,9 +76,13 @@ Messages travel over IGC broadcast, with the recipient ID in the envelope.
 
 Before creating deficits, run `dispatch point` on the requesting base AMN
 and `group MiningPoints` on the TaskConsumer block at the mining point.
-The point leases the parent request and sees `survey`, `mine` and
-`transport` as its workflow stages. For now the operator acknowledges
-those stages on the point's consumer. `dispatch fleet` restores the direct
+The point leases a parent request with `survey`, `mine` and `transport`
+stages. While the point is idle, run `point auto` to automatically publish
+one child for the current stage to `Scouts`, `MiningFleet` or `Haulers`
+respectively. The child request ID is stable across retries and restart.
+After the child completes, confirm the stage on the point consumer.
+For transport, only confirm after the requesting base has received the cargo.
+`point manual` restores operator-only stage confirmation. `dispatch fleet` restores the direct
 fleet workflow. AMN saves the dispatch setting and refuses to change it
 while requests or cancellations are outstanding.
 

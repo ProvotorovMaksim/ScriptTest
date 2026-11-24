@@ -42,6 +42,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly string _gridName;
 
         private long _brokerId;
+        private bool _autoPoint;
+        private string _completedChildRequest;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
@@ -101,6 +103,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             switch (eventType)
             {
+                case "TASK_PUBLISHED_ACK":
+                    return HandleChildAcknowledgement(payloadJson);
                 case "TASK_ASSIGN":
                     ReceiveTask(payloadJson);
                     return true;
@@ -128,6 +132,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (cmd == "status")
             {
                 ShowStatus();
+                return;
+            }
+            if (cmd == "point auto" || cmd == "point manual")
+            {
+                if (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId))
+                    _echo("Change point mode only while idle.");
+                else
+                {
+                    _autoPoint = cmd == "point auto";
+                    SaveState();
+                }
                 return;
             }
             if (cmd.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
@@ -171,6 +186,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
             if (_tick % _pollIntervalTicks == 0 || !string.IsNullOrEmpty(_pendingCompletedTaskId))
                 PollBroker();
+            if (_tick % _pollIntervalTicks == 0 && IsAutomaticPoint && HasRecentLeaseConfirmation)
+                PublishCurrentChild();
         }
 
         /// <summary>
@@ -184,6 +201,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             sb.AppendLine("Broker: " + (_brokerId == 0 ? "broadcast" : _brokerId.ToString(CultureInfo.InvariantCulture)));
             sb.AppendLine("Active task: " + (_activeTaskId ?? "none"));
             sb.AppendLine("Stage: " + (string.IsNullOrEmpty(_activeTaskId) ? "idle" : CurrentStage()));
+            if (IsAutomaticPoint)
+                sb.AppendLine(_completedChildRequest == CurrentChildRequestId() ?
+                    "Child task complete; confirm stage." : "Waiting for child task.");
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));
             sb.AppendLine("Lease epoch: " + _leaseEpoch);
@@ -250,6 +270,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 }
 
                 _activeTaskId = taskId;
+                _completedChildRequest = null;
                 _activeTaskJson = taskJson;
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
@@ -260,6 +281,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             else if (leaseEpoch > _leaseEpoch)
             {
                 _leaseEpoch = leaseEpoch;
+                _completedChildRequest = null;
                 _activeTaskJson = taskJson;
                 SaveState();
             }
@@ -269,6 +291,63 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _lastLeaseConfirmationTick = _tick;
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
+        }
+
+        private bool IsAutomaticPoint => _autoPoint && _consumerGroup == "MiningPoints" && HasActiveTask;
+
+        private string CurrentChildRequestId() => _activeTaskId + ":" +
+            _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture);
+
+        private void PublishCurrentChild()
+        {
+            string group;
+            string childStage;
+            switch (CurrentStage())
+            {
+                case "survey": group = "Scouts"; childStage = "survey"; break;
+                case "mine": group = "MiningFleet"; childStage = "mine"; break;
+                case "transport": group = "Haulers"; childStage = "deliver"; break;
+                default: return;
+            }
+
+            var requestId = CurrentChildRequestId();
+            if (_completedChildRequest == requestId)
+                return;
+
+            string details;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details))
+                return;
+
+            var payload = new StringBuilder("{\"request_id\":");
+            payload.Append(TaskBusIgcHelper.ToJsonString(requestId))
+                .Append(",\"group_id\":").Append(TaskBusIgcHelper.ToJsonString(group))
+                .Append(",\"parent_task_id\":").Append(TaskBusIgcHelper.ToJsonString(_activeTaskId))
+                .Append(",\"parent_lease_epoch\":").Append(_leaseEpoch.ToString(CultureInfo.InvariantCulture))
+                .Append(",\"steps\":[").Append(TaskBusIgcHelper.ToJsonString(childStage)).Append(']');
+            foreach (var field in new[] { "key", "resource", "amount", "base_grid_id", "base_grid_name", "base_position" })
+            {
+                string value;
+                if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out value))
+                    payload.Append(',').Append(TaskBusIgcHelper.ToJsonString(field)).Append(':').Append(value);
+            }
+            SendMessage("TASK_PUBLISH", payload.Append('}').ToString());
+        }
+
+        private bool HandleChildAcknowledgement(string payload)
+        {
+            string value;
+            string request;
+            string state;
+            if (!IsAutomaticPoint ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "request_id", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out request) || request != CurrentChildRequestId() ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "state", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out state))
+                return false;
+
+            if (state == "DONE")
+                _completedChildRequest = request;
+            return true;
         }
 
         private void AdvanceStage(string completedStage)
@@ -289,6 +368,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (!string.Equals(completedStage, expected, StringComparison.OrdinalIgnoreCase))
             {
                 _echo("Current stage is " + expected + "; report: stage " + expected);
+                return;
+            }
+
+            if (IsAutomaticPoint && _completedChildRequest != CurrentChildRequestId())
+            {
+                _echo("Waiting for the broker to confirm the child task is complete.");
                 return;
             }
 
@@ -495,6 +580,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                         if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
+                    else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
                     else if (key == "BROKER") long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "REVOKED_EPOCH")
@@ -533,6 +619,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
             }
+            if (_autoPoint) storage.AppendLine("POINT_AUTO|1");
             storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));
             if (!string.IsNullOrEmpty(_lastRevokedTaskId))
