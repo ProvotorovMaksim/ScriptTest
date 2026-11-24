@@ -21,6 +21,8 @@ namespace SpaceEngineers.Apps.Amn
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const string SurveyProperty = "Survey.DetectedOre";
         private const int MaxOreObservations = 256;
+        private long _surveyRecipient;
+        private readonly Queue<string> _surveyOutbox = new Queue<string>();
         private readonly HashSet<string> _oreObservations = new HashSet<string>();
         private readonly List<IMyOreDetector> _oreDetectors = new List<IMyOreDetector>();
         private string _gridName;
@@ -61,11 +63,21 @@ namespace SpaceEngineers.Apps.Amn
             }
             if (string.Equals(command, "survey list", StringComparison.OrdinalIgnoreCase))
             {
-                Echo("Ore observations: " + _oreObservations.Count);
+                Echo("Survey block ID: " + Me.EntityId);
+                Echo("Ore observations: " + _oreObservations.Count + ". Pending transfers: " + _surveyOutbox.Count);
                 foreach (var observation in _oreObservations.OrderBy(value => value).Take(15))
                     Echo(observation);
                 return;
             }
+            if (string.Equals(command, "survey cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                _surveyOutbox.Clear();
+                _surveyRecipient = 0;
+                SaveMinimums();
+                Echo("Pending survey transfer cancelled.");
+            }
+            if (command.StartsWith("survey send ", StringComparison.OrdinalIgnoreCase))
+                QueueSurveyTransfer(command.Substring(12));
             if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
             {
                 long brokerId;
@@ -115,11 +127,18 @@ namespace SpaceEngineers.Apps.Amn
                     continue;
 
                 string targetJson;
-                long targetId;
+                long targetId = 0;
                 if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
                     long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
                     targetId != 0 && targetId != Me.EntityId)
                     continue;
+
+                if (eventType == "ORE_OBSERVATION" || eventType == "ORE_OBSERVATION_ACK")
+                {
+                    if (targetId == Me.EntityId)
+                        HandleSurveyTransfer(message.Source, eventType, payloadJson);
+                    continue;
+                }
 
                 if (_brokerId != 0 && message.Source != _brokerId &&
                     (eventType == "TASK_PUBLISHED_ACK" || eventType == "TASK_CANCEL_ACK" || eventType == "TASK_REJECTED"))
@@ -179,6 +198,10 @@ namespace SpaceEngineers.Apps.Amn
                     eventType != "TASK_CANCEL_ACK" && eventType != "TASK_PUBLISHED_ACK" && eventType != "TASK_REJECTED")
                     Echo($"From PB {message.Source}: {eventType} {payloadJson}");
             }
+
+            if (_antennas.Count > 0 && _surveyRecipient != 0 && _surveyOutbox.Count > 0 &&
+                (_tickCount % 6 == 1 || command.StartsWith("survey send ", StringComparison.OrdinalIgnoreCase)))
+                SendMessage("ORE_OBSERVATION", TaskBusIgcHelper.ToJsonString(_surveyOutbox.Peek()), _surveyRecipient);
 
             //Base_resourse SCAN
             _containers.Clear();
@@ -302,19 +325,79 @@ namespace SpaceEngineers.Apps.Amn
                 "New observations: " + added + ". Catalog: " + _oreObservations.Count + "/" + MaxOreObservations + ".");
         }
 
+        private void QueueSurveyTransfer(string argument)
+        {
+            long recipient;
+            if (!long.TryParse(argument, out recipient) || recipient == 0 || recipient == Me.EntityId)
+            {
+                Echo("Usage: survey send <destination programmable block ID>.");
+                return;
+            }
+            if (_surveyOutbox.Count != 0)
+            {
+                Echo("Survey transfer already pending for block " + _surveyRecipient + ".");
+                return;
+            }
+            _surveyRecipient = recipient;
+            foreach (var observation in _oreObservations.OrderBy(value => value))
+                _surveyOutbox.Enqueue(observation);
+            SaveMinimums();
+            Echo("Survey observations queued: " + _surveyOutbox.Count + ".");
+        }
+
+        private void HandleSurveyTransfer(long sender, string eventType, string payload)
+        {
+            string observation;
+            if (!TaskBusIgcHelper.TryReadJsonString(payload, out observation))
+                return;
+
+            if (eventType == "ORE_OBSERVATION_ACK")
+            {
+                if (sender == _surveyRecipient && _surveyOutbox.Count > 0 && _surveyOutbox.Peek() == observation)
+                {
+                    _surveyOutbox.Dequeue();
+                    SaveMinimums();
+                }
+                return;
+            }
+
+            string normalized;
+            if (!TryNormalizeOreObservation(observation, out normalized))
+                return;
+            if (!_oreObservations.Contains(normalized))
+            {
+                if (_oreObservations.Count >= MaxOreObservations)
+                {
+                    Echo("Ore catalog full. Incoming observation could not be saved.");
+                    return;
+                }
+                _oreObservations.Add(normalized);
+                SaveMinimums();
+            }
+            SendMessage("ORE_OBSERVATION_ACK", payload, sender);
+        }
+
         private bool AddOreObservation(string report)
         {
+            string observation;
+            return _oreObservations.Count < MaxOreObservations &&
+                TryNormalizeOreObservation(report, out observation) && _oreObservations.Add(observation);
+        }
+
+        private static bool TryNormalizeOreObservation(string report, out string observation)
+        {
+            observation = null;
             string ore;
             double x;
             double y;
             double z;
-            if (_oreObservations.Count >= MaxOreObservations ||
-                !TaskBusIgcHelper.TryReadOreGps(report, out ore, out x, out y, out z) || ore.Length > 64)
+            if (!TaskBusIgcHelper.TryReadOreGps(report, out ore, out x, out y, out z) || ore.Length > 64)
                 return false;
 
             var culture = CultureInfo.InvariantCulture;
-            return _oreObservations.Add("GPS:" + ore + ":" + x.ToString("R", culture) + ":" +
-                y.ToString("R", culture) + ":" + z.ToString("R", culture) + ":");
+            observation = "GPS:" + ore + ":" + x.ToString("R", culture) + ":" +
+                y.ToString("R", culture) + ":" + z.ToString("R", culture) + ":";
+            return true;
         }
 
         private void LoadMinimums()
@@ -330,6 +413,23 @@ namespace SpaceEngineers.Apps.Amn
             var lines = Storage.Split('\n');
             foreach (var line in lines)
             {
+                if (line.StartsWith("SURVEY_TARGET|", StringComparison.Ordinal))
+                {
+                    long.TryParse(line.Substring(14), NumberStyles.Integer, CultureInfo.InvariantCulture, out _surveyRecipient);
+                    continue;
+                }
+                if (line.StartsWith("SURVEY_PENDING|", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string observation;
+                        if (_surveyOutbox.Count < MaxOreObservations &&
+                            TryNormalizeOreObservation(TaskBusIgcHelper.DecodeStorage(line.Substring(15)), out observation))
+                            _surveyOutbox.Enqueue(observation);
+                    }
+                    catch (FormatException) { }
+                    continue;
+                }
                 if (line.StartsWith("ORE|", StringComparison.Ordinal))
                 {
                     try { AddOreObservation(TaskBusIgcHelper.DecodeStorage(line.Substring(4))); }
@@ -399,6 +499,12 @@ namespace SpaceEngineers.Apps.Amn
                 storage.AppendLine("CLEAR_PENDING|" + resource);
             foreach (var observation in _oreObservations.OrderBy(value => value))
                 storage.AppendLine("ORE|" + TaskBusIgcHelper.EncodeStorage(observation));
+            if (_surveyOutbox.Count > 0)
+            {
+                storage.AppendLine("SURVEY_TARGET|" + _surveyRecipient.ToString(CultureInfo.InvariantCulture));
+                foreach (var observation in _surveyOutbox)
+                    storage.AppendLine("SURVEY_PENDING|" + TaskBusIgcHelper.EncodeStorage(observation));
+            }
             Storage = storage.ToString();
         }
 

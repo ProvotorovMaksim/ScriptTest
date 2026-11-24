@@ -54,7 +54,12 @@ one GPS record per line with the ore name and world coordinates.
 Workshop availability and runtime behavior still need a check in the target
 world. Run `survey` on AMN to read working detectors on its construct and
 persist up to 256 distinct GPS observations. `survey list` shows the count
-and the first 15 records. A survey hit is a catalog observation. Route planning should use a
+and the first 15 records. Use `survey send <block ID>` to transfer the
+catalog to another AMN block. Read `Survey block ID` from the destination's
+`survey list` output. The sender retries one record at a time and both
+the pending queue and the receiving catalog persist across reload. A full
+catalog leaves unaccepted records pending on the sender. Use `survey cancel` to
+stop a transfer. A survey hit is a catalog observation. Route planning should use a
 separate approach point outside the voxel.
 
 ### Select a broker
