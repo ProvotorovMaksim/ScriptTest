@@ -324,7 +324,12 @@ Run `ore plan 25 GPS:Center:X:Y:Z:` during a confirmed task survey to
 list a 3×3 sweep around an operator-selected clear center. The plane is
 perpendicular to local gravity, or aligned with the ship's up axis in
 space. Previously sampled positions are omitted. The GPS points are for
-route review and do not have terrain clearance checks.
+route review and do not have terrain clearance checks. The plan is saved
+with the survey. Use `ore route` to load one point into a dedicated local
+Remote Control named `[AMN SURVEY ROUTE]` in One Way mode. Turn autopilot
+off before loading a point, then start the reviewed leg from the remote.
+A completed sample within 2 m of the point, measured at the remote, advances
+the saved plan. Repeat `ore route` for the next point.
 
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from

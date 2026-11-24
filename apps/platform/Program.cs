@@ -16,6 +16,11 @@ namespace SpaceEngineers.Apps.Platform
         private const string Channel = "SE1-SHIP-LINK";
         private readonly GalnetWorkerBridge _galnet;
         private const string ControllerName = "[AMN PLATFORM]";
+        private const string SurveyRemoteName = "[AMN SURVEY ROUTE]";
+        private const string SurveyWaypointName = "AMN survey sample";
+        private const int MaxSurveyPlanPoints = 9;
+        private readonly List<Vector3D> _surveyPlan = new List<Vector3D>();
+        private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly TaskBusConsumer _worker;
@@ -119,6 +124,8 @@ namespace SpaceEngineers.Apps.Platform
                 SubmitOreSurvey();
             else if (command.StartsWith("ore plan ", StringComparison.OrdinalIgnoreCase))
                 PlanSurvey(command.Substring(9).Trim());
+            else if (string.Equals(command, "ore route", StringComparison.OrdinalIgnoreCase))
+                LoadNextSurveyWaypoint();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
@@ -175,6 +182,7 @@ namespace SpaceEngineers.Apps.Platform
             _surveyLease = lease;
             _autoSample = false;
             _surveyViews.Clear();
+            _surveyPlan.Clear();
             _oreHits.Clear();
             _reportOre = null;
             _reportView = null;
@@ -214,6 +222,8 @@ namespace SpaceEngineers.Apps.Platform
                     _surveyViews.Add(new Vector3D(x, y, z));
                 else if (kind == "hit" && _oreHits.Count < MaxOreHits)
                     _oreHits.Add(new Vector3D(x, y, z));
+                else if (kind == "plan" && _surveyPlan.Count < MaxSurveyPlanPoints)
+                    _surveyPlan.Add(new Vector3D(x, y, z));
                 else if (kind == "reportOre")
                     _reportOre = new Vector3D(x, y, z);
                 else if (kind == "reportView")
@@ -232,6 +242,8 @@ namespace SpaceEngineers.Apps.Platform
             saved.AppendLine(_positiveViews.ToString(CultureInfo.InvariantCulture));
             if (_surveyLease != null)
                 saved.AppendLine("lease|" + TaskBusIgcHelper.EncodeStorage(_surveyLease));
+            foreach (var point in _surveyPlan)
+                saved.AppendLine(FormatSurveyGps("plan", point));
             foreach (var view in _surveyViews)
                 saved.AppendLine(FormatSurveyGps("view", view));
             foreach (var hit in _oreHits)
@@ -314,7 +326,7 @@ namespace SpaceEngineers.Apps.Platform
             var center = new Vector3D(x, y, z);
             Echo(inGravity ? "Survey plan aligned to local gravity." : "Survey plan aligned to ship orientation.");
             int index = 0;
-            int remaining = 0;
+            _surveyPlan.Clear();
             for (int row = -1; row <= 1; row++)
             {
                 for (int column = -1; column <= 1; column++)
@@ -325,10 +337,59 @@ namespace SpaceEngineers.Apps.Platform
                     if (!IsNewSurveyPosition(point))
                         continue;
                     Echo(FormatSurveyGps("Survey " + index, point));
-                    remaining++;
+                    _surveyPlan.Add(point);
                 }
             }
-            Echo("Unvisited points: " + remaining + ". Review terrain and approach clearance.");
+            SaveSurvey();
+            Echo("Unvisited points: " + _surveyPlan.Count + ". Review terrain and approach clearance.");
+        }
+
+        private IMyRemoteControl FindSurveyRemote()
+        {
+            var remote = GridTerminalSystem.GetBlockWithName(SurveyRemoteName) as IMyRemoteControl;
+            return remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking ? remote : null;
+        }
+
+        private void LoadNextSurveyWaypoint()
+        {
+            if (_surveyLease == null || !SurveyLeaseIsCurrent() || _surveyPlan.Count == 0)
+            {
+                Echo("A confirmed survey lease and a pending survey plan are required.");
+                return;
+            }
+
+            var remote = FindSurveyRemote();
+            if (remote == null || remote.IsAutoPilotEnabled || remote.FlightMode != FlightMode.OneWay)
+            {
+                Echo("Use a working " + SurveyRemoteName + " in One Way mode with autopilot off.");
+                return;
+            }
+
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count > 1 ||
+                (_surveyWaypoints.Count == 1 && _surveyWaypoints[0].Name != SurveyWaypointName))
+            {
+                Echo("Clear other waypoints from the dedicated survey controller first.");
+                return;
+            }
+
+            if (_surveyWaypoints.Count == 0 || _surveyWaypoints[0].Coords != _surveyPlan[0])
+            {
+                remote.ClearWaypoints();
+                remote.AddWaypoint(_surveyPlan[0], SurveyWaypointName);
+            }
+            Echo("Survey waypoint ready. Review clearance before starting the one-way flight.");
+        }
+
+        private void CompletePlannedSurveyPosition()
+        {
+            if (_surveyPlan.Count == 0)
+                return;
+            var remote = FindSurveyRemote();
+            if (remote != null && !remote.IsAutoPilotEnabled &&
+                Vector3D.DistanceSquared(remote.GetPosition(), _surveyPlan[0]) <= 4)
+                _surveyPlan.RemoveAt(0);
         }
 
         private bool IsNewSurveyPosition(Vector3D position)
@@ -477,6 +538,7 @@ namespace SpaceEngineers.Apps.Platform
                     }
                 }
                 _surveyViews.Add(_samplePosition);
+                CompletePlannedSurveyPosition();
                 if (hit)
                     _positiveViews++;
                 SaveSurvey();
