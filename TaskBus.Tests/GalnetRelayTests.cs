@@ -263,7 +263,7 @@ namespace TaskBus.Tests
             worker.ProcessCommand("broker 1");
 
             workerRelay.GridTerminalSystem.Application = new ApplicationBlock(42,
-                command => bridge.TryReceive(command, worker));
+                command => bridge.TryReceive(command, (source, envelope) => worker.ProcessIncomingMessage(source, envelope)));
             brokerRelay.GridTerminalSystem.Application = new ApplicationBlock(1, command =>
             {
                 broker.Main(command);

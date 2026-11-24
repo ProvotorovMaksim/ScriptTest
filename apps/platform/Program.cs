@@ -76,7 +76,7 @@ namespace SpaceEngineers.Apps.Platform
         public void Main(string argument)
         {
             var command = (argument ?? "").Trim();
-            if (_galnet.TryReceive(command, _worker))
+            if (_galnet.TryReceive(command, (source, envelope) => _worker.ProcessIncomingMessage(source, envelope)))
                 return;
 
             _antennas.Clear();

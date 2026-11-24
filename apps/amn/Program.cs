@@ -10,6 +10,7 @@ using VRage.Game.GUI.TextPanel;
 using System.Text;
 using SpaceEngineers.Libs.IgcCore;
 using SpaceEngineers.Libs.TaskBusProducer;
+using SpaceEngineers.Libs.TaskBusConsumer;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
@@ -43,21 +44,27 @@ namespace SpaceEngineers.Apps.Amn
         private readonly HashSet<string> _pendingResourceClears = new HashSet<string>();
         private IMyBroadcastListener _listener;
         private TaskBusProducer _taskBusProducer;
+        private readonly GalnetWorkerBridge _galnet;
 
         public Program()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _gridName = Me.CubeGrid.CustomName;
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
-            _taskBusProducer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
-                IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
+            _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
+                () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
+                (envelope, _) => IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
+                message => Echo(message));
+            _taskBusProducer = new TaskBusProducer(CommunicationTag, SendEnvelope);
 
             LoadMinimums();
         }
         public void Main(string args)
         {
-            _tickCount++;
             var command = args ?? string.Empty;
+            if (_galnet.TryReceive(command, (source, envelope) => HandleIncoming(source, envelope, true)))
+                return;
+            _tickCount++;
             if (string.Equals(command, "survey", StringComparison.OrdinalIgnoreCase))
             {
                 ScanOreDetectors();
@@ -136,89 +143,8 @@ namespace SpaceEngineers.Apps.Amn
             while (_listener.HasPendingMessage)
             {
                 var message = _listener.AcceptMessage();
-                if (message.Source == Me.EntityId)
-                    continue;
-
-                var json = message.Data as string;
-                string eventType;
-                string payloadJson;
-                if (string.IsNullOrEmpty(json) || !TaskBusIgcHelper.TryParseEnvelope(json, out eventType, out payloadJson))
-                    continue;
-
-                string targetJson;
-                long targetId = 0;
-                if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
-                    long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
-                    targetId != 0 && targetId != Me.EntityId)
-                    continue;
-
-                if (eventType == "ORE_OBSERVATION" || eventType == "ORE_OBSERVATION_ACK")
-                {
-                    if (targetId == Me.EntityId)
-                        HandleSurveyTransfer(message.Source, eventType, payloadJson);
-                    continue;
-                }
-
-                if (_brokerId != 0 && message.Source != _brokerId &&
-                    (eventType == "TASK_PUBLISHED_ACK" || eventType == "TASK_CANCEL_ACK" || eventType == "TASK_REJECTED"))
-                    continue;
-
-                if (eventType == "PING")
-                    SendMessage("PONG", "null");
-                else if (eventType == "TASK_PUBLISHED_ACK")
-                {
-                    string requestIdJson;
-                    string requestId;
-                    if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) &&
-                        TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
-                    {
-                        string stateJson;
-                        string requestState = null;
-                        bool hasState = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "state", out stateJson) &&
-                            TaskBusIgcHelper.TryReadJsonString(stateJson, out requestState);
-                        var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
-                        if (hasState && !string.IsNullOrEmpty(resource) && !_pendingResourceClears.Contains(resource))
-                        {
-                            if (requestState == "DONE" || requestState == "CANCELLED")
-                            {
-                                _requestIds.Remove(resource);
-                                _lowResources.Remove(resource);
-                            }
-                            else if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
-                                QueueResourceClear(resource);
-                        }
-                        SaveMinimums();
-                    }
-                }
-                else if (eventType == "TASK_CANCEL_ACK")
-                {
-                    string requestIdJson;
-                    string requestId;
-                    if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) && TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
-                    {
-                        var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
-                        if (!string.IsNullOrEmpty(resource) && _pendingResourceClears.Remove(resource))
-                        {
-                            _requestIds.Remove(resource);
-                            SaveMinimums();
-                        }
-                    }
-                }
-                else if (eventType == "TASK_REJECTED")
-                {
-                    Echo("Broker rejected resource request: " + payloadJson);
-                }
-                else if (eventType == "MSG")
-                {
-                    string text;
-                    Echo(TaskBusIgcHelper.TryReadJsonString(payloadJson, out text)
-                        ? $"From PB {message.Source}: {text}"
-                        : $"Invalid MSG payload from PB {message.Source}");
-                }
-                else if (eventType != "TASK_ASSIGN" && eventType != "TASK_ACCEPTED" && eventType != "TASK_DONE" &&
-                    eventType != "TASK_POLL" && eventType != "TASK_PUBLISH" && eventType != "TASK_CANCEL" &&
-                    eventType != "TASK_CANCEL_ACK" && eventType != "TASK_PUBLISHED_ACK" && eventType != "TASK_REJECTED")
-                    Echo($"From PB {message.Source}: {eventType} {payloadJson}");
+                if (message.Source != Me.EntityId)
+                    HandleIncoming(message.Source, message.Data as string, false);
             }
 
             if (_antennas.Count > 0 && _surveyRecipient != 0 && _surveyOutbox.Count > 0 &&
@@ -272,6 +198,7 @@ namespace SpaceEngineers.Apps.Amn
 
             UpdateMinimumTasks(resources);
             UpdateCockpitPanel(resources);
+            _galnet.Flush();
 
         }
 
@@ -700,6 +627,102 @@ namespace SpaceEngineers.Apps.Amn
             if (!_requestIds.TryGetValue(resource, out requestId))
                 return;
             SendMessage("TASK_CANCEL", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", _brokerId, "cancel:" + requestId);
+        }
+
+        private void HandleIncoming(long source, string json, bool viaGalnet)
+        {
+            string eventType;
+            string payloadJson;
+            if (string.IsNullOrEmpty(json) || !TaskBusIgcHelper.TryParseEnvelope(json, out eventType, out payloadJson))
+                return;
+
+            string targetJson;
+            long targetId = 0;
+            if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
+                long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
+                targetId != 0 && targetId != Me.EntityId)
+                return;
+
+            if (eventType == "ORE_OBSERVATION" || eventType == "ORE_OBSERVATION_ACK")
+            {
+                if (targetId == Me.EntityId)
+                    HandleSurveyTransfer(source, eventType, payloadJson);
+                return;
+            }
+
+            bool brokerReply = eventType == "TASK_PUBLISHED_ACK" || eventType == "TASK_CANCEL_ACK" ||
+                eventType == "TASK_REJECTED";
+            if (brokerReply && ((_brokerId != 0 && source != _brokerId) ||
+                (_galnet.IsConfigured && !viaGalnet)))
+                return;
+
+            if (eventType == "PING")
+                SendMessage("PONG", "null");
+            else if (eventType == "TASK_PUBLISHED_ACK")
+            {
+                string requestIdJson;
+                string requestId;
+                if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) &&
+                    TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+                {
+                    string stateJson;
+                    string requestState = null;
+                    bool hasState = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "state", out stateJson) &&
+                        TaskBusIgcHelper.TryReadJsonString(stateJson, out requestState);
+                    var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
+                    if (hasState && !string.IsNullOrEmpty(resource) && !_pendingResourceClears.Contains(resource))
+                    {
+                        if (requestState == "DONE" || requestState == "CANCELLED")
+                        {
+                            _requestIds.Remove(resource);
+                            _lowResources.Remove(resource);
+                        }
+                        else if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
+                            QueueResourceClear(resource);
+                    }
+                    SaveMinimums();
+                }
+            }
+            else if (eventType == "TASK_CANCEL_ACK")
+            {
+                string requestIdJson;
+                string requestId;
+                if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) && TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+                {
+                    var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
+                    if (!string.IsNullOrEmpty(resource) && _pendingResourceClears.Remove(resource))
+                    {
+                        _requestIds.Remove(resource);
+                        SaveMinimums();
+                    }
+                }
+            }
+            else if (eventType == "TASK_REJECTED")
+            {
+                Echo("Broker rejected resource request: " + payloadJson);
+            }
+            else if (eventType == "MSG")
+            {
+                string text;
+                Echo(TaskBusIgcHelper.TryReadJsonString(payloadJson, out text)
+                    ? $"From PB {source}: {text}"
+                    : $"Invalid MSG payload from PB {source}");
+            }
+            else if (eventType != "TASK_ASSIGN" && eventType != "TASK_ACCEPTED" && eventType != "TASK_DONE" &&
+                eventType != "TASK_POLL" && eventType != "TASK_PUBLISH" && eventType != "TASK_CANCEL" &&
+                eventType != "TASK_CANCEL_ACK" && eventType != "TASK_PUBLISHED_ACK" && eventType != "TASK_REJECTED")
+                Echo($"From PB {source}: {eventType} {payloadJson}");
+        }
+
+        private void SendEnvelope(string channel, string envelope, long targetId)
+        {
+            TaskBusEnvelope message;
+            if (_galnet.IsConfigured && TaskBusProtocol.TryParseEnvelope(envelope, out message) &&
+                (message.EventType == "TASK_PUBLISH" || message.EventType == "TASK_QUERY" ||
+                    message.EventType == "TASK_CANCEL"))
+                _galnet.Send(envelope, targetId);
+            else
+                IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax);
         }
 
         private void SendMessage(string eventType, string payloadJson, long targetId = 0, string messageId = null)

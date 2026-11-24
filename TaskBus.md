@@ -107,7 +107,12 @@ and recompile. Run `broker <TaskBroker PB ID>` on the worker while idle.
 The worker queues responses until its next invocation. The local bridge
 uses memory queues, with task checkpoints and completion recovery still
 owned by TaskBus. Direct IGC is used when no relay ID is configured.
-Other application bridges are separate work.
+AMN.Base can use the same bridge for publishing, querying and cancelling
+deficit requests. Use a base-side relay named `[GALNET RELAY]`, name the
+AMN.Base PB `[GALNET APP]`, and configure `GalnetBrokerRelay` and
+`broker <TaskBroker PB ID>` as on a worker. The base and broker need
+separate relay endpoints for this mode. Direct ore catalog transfers
+and radio diagnostics continue to use radio.
 
 To check failover in a world, connect the worker and broker relays
 through two independent satellite relays. Verify that `route <broker relay ID>`

@@ -45,7 +45,7 @@ namespace SpaceEngineers.Services.Consumer
         public void Main(string argument)
         {
             var command = (argument ?? "").Trim();
-            if (_galnet.TryReceive(command, _consumer))
+            if (_galnet.TryReceive(command, (source, envelope) => _consumer.ProcessIncomingMessage(source, envelope)))
                 return;
 
             _antennas.Clear();

@@ -12,7 +12,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Queue<string> _outbox = new Queue<string>();
         private readonly IMyProgrammableBlock _local;
         private readonly Func<IMyProgrammableBlock> _findRelay;
-        private readonly ConsumerSendDelegate _sendDirect;
+        private readonly Action<string, long> _sendDirect;
         private readonly Action<string> _echo;
         private readonly long _brokerRelayId;
 
@@ -20,7 +20,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         public bool IsAvailable => _brokerRelayId != 0 && FindRelay() != null;
 
         public GalnetWorkerBridge(IMyProgrammableBlock local, string settings,
-            Func<IMyProgrammableBlock> findRelay, ConsumerSendDelegate sendDirect, Action<string> echo)
+            Func<IMyProgrammableBlock> findRelay, Action<string, long> sendDirect, Action<string> echo)
         {
             _local = local;
             _findRelay = findRelay;
@@ -54,7 +54,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _outbox.Enqueue(command);
         }
 
-        public bool TryReceive(string command, TaskBusConsumer worker)
+        public bool TryReceive(string command, Action<long, string> receive)
         {
             if (!command.StartsWith("galnet recv ", StringComparison.Ordinal))
                 return false;
@@ -69,7 +69,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 long.TryParse(fields[2], out origin) && origin == _brokerRelayId &&
                 long.TryParse(fields[5], out broker) && broker != 0 &&
                 TaskBusProtocol.TryParseEnvelope(fields[6], out envelope) && envelope.TargetId == _local.EntityId)
-                worker.ProcessIncomingMessage(broker, fields[6]);
+                receive(broker, fields[6]);
             return true;
         }
 
