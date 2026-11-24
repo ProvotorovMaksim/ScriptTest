@@ -427,7 +427,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void PollBroker()
         {
+            var pointPosition = IsConfiguredAutomaticPoint && _getGridPositionJson != null
+                ? _getGridPositionJson() : null;
             var payload = "{\"group_id\":" + TaskBusIgcHelper.ToJsonString(_miningPlatform ? "MiningFleet" : _consumerGroup) +
+                (pointPosition == null ? "" : ",\"point_position\":" + pointPosition) +
                 (_miningPlatform ? ",\"survey_capable\":true" : "") +
                 ",\"consumer_grid\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
                 ",\"active_task_id\":" + (string.IsNullOrEmpty(_activeTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_activeTaskId)) +
@@ -842,7 +845,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     payload.Append(',').Append(TaskBusIgcHelper.ToJsonString(field)).Append(':').Append(value);
             }
             string candidate;
-            if (childStage == "survey" && TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidate))
+            if (childStage == "survey" &&
+                (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "shared_ore_gps", out candidate) ||
+                    TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidate)))
                 payload.Append(",\"ore_candidate_gps\":").Append(candidate);
             if (CurrentStage() == "mine" && _oreSite != null && _oreApproach != null)
                 payload.Append(",\"ore_position\":").Append(_oreSite)

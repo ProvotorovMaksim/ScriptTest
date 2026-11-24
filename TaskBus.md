@@ -264,7 +264,12 @@ depleted deposit by its ore GPS, or `site forget Ore/Iron` to remove all
 entries for that ore. When the mining child completes and a configured
 buffer confirms the requested ore amount, the point also saves the
 deposit and approach that it used. A full catalog leaves transport
-dispatch available.
+dispatch available. The broker separately retains up to 64 ore coordinates
+from completed mining children matching their parent resource. This
+shared catalog survives restart and queue handoff. When a mining point
+reports its position, the broker can attach a candidate within 5 km.
+The point passes it to the scout for verification when it has no
+usable local entry. Shared coordinates do not supply a flight corridor.
 To seed it from an already verified deposit, run
 `site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:` on the automatic
 mining point. Supply both the ore and its distinct, reviewed entry

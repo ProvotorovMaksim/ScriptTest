@@ -286,6 +286,39 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void CommittedMiningChildSharesOreCandidateWithAnotherPointAfterRestart()
+        {
+            var broker = StartBroker("");
+            string Request(string id) => TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"" + id + "\",\"group_id\":\"MiningPoints\",\"resource\":\"Ore/Iron\"}", targetId: 1);
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\",\"point_position\":{\"x\":0,\"y\":0,\"z\":0}}", targetId: 1);
+            Dispatch(broker, 9, Request("first"));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 40, poll);
+            TakeResponse(broker, "TASK_ASSIGN", 40);
+            Dispatch(broker, 40, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"mine\",\"group_id\":\"MiningFleet\",\"parent_task_id\":\"9-1\"," +
+                "\"parent_lease_epoch\":1,\"resource\":\"Ore/Iron\",\"ore_position\":{\"x\":10,\"y\":20,\"z\":30}}",
+                targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 40);
+            Assert.DoesNotContain("DEPOSIT|", broker.Storage);
+            Dispatch(broker, 44, TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningFleet\"}", targetId: 1));
+            TakeResponse(broker, "TASK_ASSIGN", 44);
+            Dispatch(broker, 44, TaskBusProtocol.CreateEnvelope("TASK_DONE",
+                "{\"task_id\":\"40-2\",\"lease_epoch\":1}", targetId: 1));
+            TakeResponse(broker, "TASK_DONE_ACK", 44);
+
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 9, Request("second"));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 41, poll);
+            Assert.Contains("\"shared_ore_gps\":\"GPS:Iron:10:20:30:\"",
+                TakeResponse(broker, "TASK_ASSIGN", 41).PayloadJson);
+        }
+
+        [Fact]
         public void RequestStatusQueryIsReadOnlyAndScopedToRequester()
         {
             var broker = StartBroker("");

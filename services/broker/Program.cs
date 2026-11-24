@@ -55,6 +55,10 @@ namespace SpaceEngineers.Services.Broker
             public int LeaseEpoch;
         }
 
+        private const int MaxSharedDeposits = 64;
+        private const double SharedDepositRadius = 5000;
+        private readonly List<string> _sharedDeposits = new List<string>();
+
         private readonly Dictionary<string, string> _surveyReports = new Dictionary<string, string>();
 
         private static string ReadSurveyReport(string payload)
@@ -565,7 +569,7 @@ namespace SpaceEngineers.Services.Broker
             if (assigned != null)
             {
                 RenewLease(assigned);
-                DispatchTask(assigned);
+                DispatchTask(assigned, payloadJson);
                 SaveQueue();
                 return;
             }
@@ -582,7 +586,7 @@ namespace SpaceEngineers.Services.Broker
             next.State = "LEASED";
             RenewLease(next);
             SaveQueue();
-            DispatchTask(next);
+            DispatchTask(next, payloadJson);
             SaveQueue();
         }
 
@@ -647,7 +651,11 @@ namespace SpaceEngineers.Services.Broker
             {
                 var parent = FindParentLease(task.RequesterId, task.RequestJson);
                 if (parent != null)
+                {
                     parent.CompletedMiningPhase = Math.Max(parent.CompletedMiningPhase, MiningPhaseForGroup(task.GroupId));
+                    if (task.GroupId == "MiningFleet")
+                        RememberSharedDeposit(task, parent);
+                }
             }
             AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId),
                 task.HasParent && task.GroupId == "Scouts" ? surveyReport : null);
@@ -681,8 +689,62 @@ namespace SpaceEngineers.Services.Broker
             SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(commit.TaskId) + ",\"lease_epoch\":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", commit.ConsumerId, "done-ack:" + commit.TaskId + ":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
         }
 
-        private void DispatchTask(TaskRecord task)
+        private static string ReadOreName(string request)
         {
+            string raw;
+            string resource;
+            return TaskBusIgcHelper.TryGetJsonProperty(request, "resource", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out resource) &&
+                resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                resource.Length > 4 && resource.Length <= 68 && resource.IndexOf(':') < 0
+                ? resource.Substring(4) : null;
+        }
+
+        private void RememberSharedDeposit(TaskRecord child, TaskRecord parent)
+        {
+            var ore = ReadOreName(child.RequestJson);
+            string position;
+            double x;
+            double y;
+            double z;
+            if (ore == null || !string.Equals(ore, ReadOreName(parent.RequestJson), StringComparison.OrdinalIgnoreCase) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(child.RequestJson, "ore_position", out position) ||
+                !TryReadCoordinates(position, out x, out y, out z))
+                return;
+
+            var gps = "GPS:" + ore + ":" + x.ToString("R", CultureInfo.InvariantCulture) + ":" +
+                y.ToString("R", CultureInfo.InvariantCulture) + ":" + z.ToString("R", CultureInfo.InvariantCulture) + ":";
+            _sharedDeposits.Remove(gps);
+            if (_sharedDeposits.Count == MaxSharedDeposits)
+                _sharedDeposits.RemoveAt(0);
+            _sharedDeposits.Add(gps);
+        }
+
+        private static bool TryReadCoordinates(string json, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return TaskBusIgcHelper.TryReadFiniteNumber(json, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(json, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(json, "z", out z);
+        }
+
+        private string FindSharedDeposit(TaskRecord task, string poll)
+        {
+            if (task.GroupId != "MiningPoints" || _sharedDeposits.Count == 0)
+                return null;
+            var ore = ReadOreName(task.RequestJson);
+            string position;
+            double x;
+            double y;
+            double z;
+            return ore != null && TaskBusIgcHelper.TryGetJsonProperty(poll, "point_position", out position) &&
+                TryReadCoordinates(position, out x, out y, out z)
+                ? TaskBusIgcHelper.FindNearestOre(_sharedDeposits, ore, x, y, z, SharedDepositRadius) : null;
+        }
+
+        private void DispatchTask(TaskRecord task, string poll)
+        {
+            var candidate = FindSharedDeposit(task, poll);
             var payload = "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
                 ",\"request_id\":" + TaskBusIgcHelper.ToJsonString(task.RequestId) +
                 ",\"requester_id\":" + task.RequesterId.ToString(CultureInfo.InvariantCulture) +
@@ -691,6 +753,7 @@ namespace SpaceEngineers.Services.Broker
                 ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) +
                 ",\"lease_expires_utc_ticks\":" + task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture) +
                 ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
+                (candidate == null ? "" : ",\"shared_ore_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
                 ",\"details\":" + task.RequestJson + "}";
             SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             task.Attempts++;
@@ -779,7 +842,7 @@ namespace SpaceEngineers.Services.Broker
             }
 
             if (_retired || _sequence != 0 || _tasks.Count != 0 || _completedRequestIds.Count != 0 ||
-                _cancelledRequestIds.Count != 0 || _commits.Count != 0)
+                _cancelledRequestIds.Count != 0 || _commits.Count != 0 || _sharedDeposits.Count != 0)
             {
                 Echo("Import requires an empty broker.");
                 return;
@@ -822,6 +885,7 @@ namespace SpaceEngineers.Services.Broker
             _cancelledRequestIds.Clear();
             _completedRequestIds.Clear();
             _surveyReports.Clear();
+            _sharedDeposits.Clear();
             _commits.Clear();
             _sequence = 0;
             _paused = false;
@@ -859,6 +923,12 @@ namespace SpaceEngineers.Services.Broker
                 if (parts.Length == 2 && parts[0] == "CANCEL")
                 {
                     try { AddCancelledRequest(TaskBusIgcHelper.DecodeStorage(parts[1])); }
+                    catch (FormatException) { }
+                    continue;
+                }
+                if (parts.Length == 2 && parts[0] == "DEPOSIT" && _sharedDeposits.Count < MaxSharedDeposits)
+                {
+                    try { _sharedDeposits.Add(TaskBusIgcHelper.DecodeStorage(parts[1].Trim())); }
                     catch (FormatException) { }
                     continue;
                 }
@@ -967,6 +1037,8 @@ namespace SpaceEngineers.Services.Broker
             }
             if (_retired)
                 storage.AppendLine("RETIRED|1");
+            foreach (var deposit in _sharedDeposits)
+                storage.AppendLine("DEPOSIT|" + TaskBusIgcHelper.EncodeStorage(deposit));
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)
