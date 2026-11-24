@@ -408,6 +408,13 @@ Automatic retreat uses the same start checks as `mine retreat`. Fault
 stops and PB restarts require a manual decision. Use `ore stop` or
 `mine drills off` to cancel a pending automatic retreat.
 
+Set `MiningAutoReturn=true` to attempt the prepared return route once
+after a supervised retreat reaches its waypoint under the same lease.
+The platform must settle within 2 m of that waypoint. The usual
+`mine return` checks still apply, including an exact match to the
+reviewed reverse route. A failed start requires operator intervention.
+`ore stop` cancels the pending return.
+
 After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
 the station identified by the mining assignment. The platform needs
