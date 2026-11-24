@@ -40,7 +40,8 @@ namespace SpaceEngineers.Apps.FlightControl
                     else if (RemoteAutopilotEnabled())
                         Release("FCS off: remote autopilot took control.");
                     else
-                        status = flight.Update(cockpit, mode, Runtime.TimeSinceLastRun.TotalSeconds);
+                        status = flight.Update(cockpit, mode, Runtime.TimeSinceLastRun.TotalSeconds,
+                            () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2);
                 }
                 catch (Exception error)
                 {
@@ -162,7 +163,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 return true;
             }
 
-            public string Update(IMyCockpit pilot, Mode mode, double dt)
+            public string Update(IMyCockpit pilot, Mode mode, double dt, Func<bool> hasInstructionBudget)
             {
                 var frame = pilot.WorldMatrix;
                 var velocity = pilot.GetShipVelocities();
@@ -197,6 +198,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 var turn = new Vector3D(rotation.X, rotation.Y, pilot.RollIndicator);
                 var request = new Vector3D(Command(input.X), Command(input.Y), Command(input.Z));
                 var target = Vector3D.Zero;
+                var pilotOnly = Vector3D.Zero;
+                var stabilization = Vector3D.Zero;
                 bool risk = false;
                 bool saturated = false;
 
@@ -222,6 +225,7 @@ namespace SpaceEngineers.Apps.FlightControl
                         // On an active axis, assistance can add force only along the input.
                         double physicalLimit = command > 0 ? forward : reverse;
                         double pilotForce = Math.Min(1, Math.Abs(axisInput)) * physicalLimit;
+                        pilotOnly.SetDim(axis, Math.Sign(command) * pilotForce);
                         double alignedHelp = Math.Max(0, Math.Sign(command) * support);
                         force = Math.Sign(command) * Math.Min(physicalLimit, pilotForce + alignedHelp);
                         saturated |= pilotForce + alignedHelp > physicalLimit || physicalLimit <= 0;
@@ -251,13 +255,20 @@ namespace SpaceEngineers.Apps.FlightControl
                         saturated |= Math.Abs(desired - force) > 1;
                     }
                     target.SetDim(axis, force);
+                    stabilization.SetDim(axis, overspeed ? force : Clamp(support, -reverse, forward));
                 }
 
                 var gyroMask = new Vector3D(Command(turn.X) == 0 ? 1 : 0,
                     Command(turn.Y) == 0 ? 1 : 0, Command(turn.Z) == 0 ? 1 : 0);
                 var requestedRate = new Vector3D(Rotation(turn.X, 0), Rotation(turn.Y, 0), Rotation(turn.Z, 0));
-                bool turnRisk = !HasSupportDuringTurn(hold, requestedRate);
-                if (mode == Mode.Normal && (risk || turnRisk))
+                bool turnRisk = !HasSupportDuringTurn(hold, target - hold, requestedRate, hasInstructionBudget);
+                bool balanceChecked = hasInstructionBudget();
+                bool balanceRisk = balanceChecked && !HasBalancedThrust(target, gyroMask);
+                if (mode == Mode.Normal && (!balanceChecked || balanceRisk))
+                    target = stabilization;
+                if (mode == Mode.Manual && balanceRisk && request.LengthSquared() > 0)
+                    target = pilotOnly;
+                if (mode == Mode.Normal && (risk || turnRisk || balanceRisk || !balanceChecked))
                 {
                     turn = Vector3D.Zero;
                     gyroMask = Vector3D.One;
@@ -285,6 +296,8 @@ namespace SpaceEngineers.Apps.FlightControl
                     (risk ? "\nWarning: insufficient support or braking reserve." : "") +
                     (turnRisk ? "\nWarning: the requested turn reduces support reserve." : "") +
                     (saturated ? "\nThrust saturated." : "") +
+                    (balanceRisk ? "\nWarning: limited moment compensation for the requested thrust." : "") +
+                    (!balanceChecked ? "\nThrust balance check skipped: instruction budget." : "") +
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
@@ -342,7 +355,15 @@ namespace SpaceEngineers.Apps.FlightControl
                 return roundedLimit + " kg (" + (remaining > 0 ? "+" : "") + remaining + " kg margin)";
             }
 
-            private bool HasSupportDuringTurn(Vector3D support, Vector3D rate)
+            private bool HasBalancedThrust(Vector3D force, Vector3D torqueMask)
+            {
+                var moment = thrust.Solve(force, torqueMask) * torqueMask;
+                return moment.LengthSquared() <= force.LengthSquared() *
+                    MaximumResidualLeverArm * MaximumResidualLeverArm;
+            }
+
+            private bool HasSupportDuringTurn(Vector3D support, Vector3D maneuverForce,
+                Vector3D rate, Func<bool> hasInstructionBudget)
             {
                 double speed = rate.Length();
                 if (speed < 0.001)
@@ -351,7 +372,10 @@ namespace SpaceEngineers.Apps.FlightControl
                 // Check intermediate attitudes over one second of the rate command.
                 for (int sample = 1; sample <= 4; sample++)
                 {
-                    var next = Vector3D.TransformNormal(support,
+                    if (!hasInstructionBudget())
+                        return false;
+
+                    var next = maneuverForce + Vector3D.TransformNormal(support,
                         MatrixD.CreateFromAxisAngle(rate / speed, -speed * sample / 4));
                     for (int axis = 0; axis < 3; axis++)
                     {
@@ -360,6 +384,8 @@ namespace SpaceEngineers.Apps.FlightControl
                         if (Math.Abs(force) > available * (1 - ThrustReserve))
                             return false;
                     }
+                    if (!HasBalancedThrust(next, Vector3D.One))
+                        return false;
                 }
                 return true;
             }
