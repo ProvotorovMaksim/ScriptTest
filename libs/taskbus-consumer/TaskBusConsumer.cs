@@ -357,6 +357,23 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
+        public bool TryGetSurveyCandidate(out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            string lease;
+            string ore;
+            string details;
+            string raw;
+            string gps;
+            string name;
+            return TryGetSurveyLease(out lease, out ore) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out gps) &&
+                TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) &&
+                string.Equals(name, ore, StringComparison.OrdinalIgnoreCase);
+        }
+
         public bool TryGetMiningPoint(out long grid)
         {
             grid = 0;

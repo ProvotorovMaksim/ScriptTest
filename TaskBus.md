@@ -269,7 +269,13 @@ from completed mining children matching their parent resource. This
 shared catalog survives restart and queue handoff. When a mining point
 reports its position, the broker can attach a candidate within 5 km.
 The point passes it to the scout for verification when it has no
-usable local entry. Shared coordinates do not supply a flight corridor.
+usable local entry. Shared coordinates do not supply a flight corridor. In space, use
+`ore task` and `ore candidate 40 25` to prepare a sweep along a ray
+toward the candidate. A scout camera must detect an asteroid surface
+within 150 m of that GPS and farther from the camera than the specified
+stand-off. The generated grid sits 40 m before the surface with 25 m
+spacing in this example. This command only prepares the grid. Review it
+before running `ore sweep`.
 To seed it from an already verified deposit, run
 `site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:` on the automatic
 mining point. Supply both the ore and its distinct, reviewed entry

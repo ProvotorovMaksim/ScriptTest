@@ -338,13 +338,16 @@ namespace TaskBus.Tests
             var worker = Start();
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
                 "{\"task_id\":\"survey-1\",\"lease_epoch\":1,\"group_id\":\"Scouts\"," +
-                "\"details\":{\"resource\":\"Ore/Iron\",\"steps\":[\"survey\"]}}", targetId: 42);
+                "\"details\":{\"resource\":\"Ore/Iron\",\"ore_candidate_gps\":\"GPS:Iron:10:20:30:\",\"steps\":[\"survey\"]}}", targetId: 42);
             worker.ProcessIncomingMessage(1, assignment);
             Assert.True(worker.TryGetSurveyLease(out var lease, out var ore));
             Assert.Equal("Iron", ore);
+            Assert.True(worker.TryGetSurveyCandidate(out var x, out var y, out var z));
+            Assert.Equal((10d, 20d, 30d), (x, y, z));
 
             worker = Start();
             Assert.False(worker.TryGetSurveyLease(out _, out _));
+            Assert.False(worker.TryGetSurveyCandidate(out _, out _, out _));
             worker.ProcessIncomingMessage(1, assignment);
             Assert.True(worker.TryGetSurveyLease(out var restored, out _));
             Assert.Equal(lease, restored);

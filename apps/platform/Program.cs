@@ -249,6 +249,8 @@ namespace SpaceEngineers.Apps.Platform
                 SubmitOreSurvey();
             else if (command.StartsWith("ore plan ", StringComparison.OrdinalIgnoreCase))
                 PlanSurvey(command.Substring(9).Trim());
+            else if (command.StartsWith("ore candidate ", StringComparison.OrdinalIgnoreCase))
+                PlanSurveyCandidate(command.Substring(14));
             else if (command.StartsWith("ore refine ", StringComparison.OrdinalIgnoreCase))
                 PlanPerimeterSurvey(command.Substring(11).Trim());
             else if (command.StartsWith("ore bracket ", StringComparison.OrdinalIgnoreCase))
@@ -1053,6 +1055,62 @@ namespace SpaceEngineers.Apps.Platform
             }
             _lastProbe = "Automatic asteroid survey waiting for a camera to detect a surface beyond the stand-off distance.";
             return false;
+        }
+
+        private void PlanSurveyCandidate(string argument)
+        {
+            var parts = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            double standOff;
+            double spacing;
+            if (parts.Length != 2 ||
+                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out standOff) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out spacing) ||
+                !(standOff >= 10 && standOff <= 500 && spacing >= MinimumViewSeparation && spacing <= 500))
+            {
+                Echo("Use ore candidate <stand-off> <spacing>, both in metres from 10 to 500.");
+                return;
+            }
+            var controller = FindSurveyPlanningController();
+            if (controller == null)
+                return;
+            double x;
+            double y;
+            double z;
+            if (controller.GetNaturalGravity().LengthSquared() > 0.0001 || controller.GetShipSpeed() > 0.25 ||
+                !_worker.TryGetSurveyCandidate(out x, out y, out z))
+            {
+                Echo("Candidate planning needs a matching ore GPS and a stationary platform outside natural gravity.");
+                return;
+            }
+
+            var candidate = new Vector3D(x, y, z);
+            _surveyCameras.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyCameras, camera =>
+                camera.CubeGrid == Me.CubeGrid && camera.IsWorking &&
+                camera.CustomName.StartsWith(CameraName, StringComparison.Ordinal));
+            foreach (var camera in _surveyCameras)
+            {
+                camera.EnableRaycast = true;
+                var origin = camera.GetPosition();
+                if (Vector3D.DistanceSquared(candidate, origin) > 5000.0 * 5000 || !camera.CanScan(candidate))
+                    continue;
+                var hit = camera.Raycast(candidate);
+                if (hit.Type != MyDetectedEntityType.Asteroid || !hit.HitPosition.HasValue ||
+                    Vector3D.DistanceSquared(hit.HitPosition.Value, candidate) > 150.0 * 150)
+                    continue;
+
+                var offset = hit.HitPosition.Value - origin;
+                if (offset.LengthSquared() <= standOff * standOff)
+                    continue;
+                var direction = Vector3D.Normalize(offset);
+                var reference = Math.Abs(Vector3D.Dot(direction, Vector3D.Up)) < 0.9
+                    ? Vector3D.Up : Vector3D.Right;
+                var right = Vector3D.Normalize(Vector3D.Cross(direction, reference));
+                var up = Vector3D.Cross(right, direction);
+                SaveSurveyGrid(spacing, hit.HitPosition.Value - direction * standOff, right, up);
+                return;
+            }
+            Echo("No camera confirmed a nearby asteroid surface along the candidate ray. Check alignment and raycast charge.");
         }
 
         private void SaveSurveyGrid(double spacing, Vector3D center, Vector3D right, Vector3D across)
