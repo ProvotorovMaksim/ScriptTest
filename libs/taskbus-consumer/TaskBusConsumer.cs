@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
@@ -33,7 +32,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
     {
         private const int DefaultPollIntervalTicks = 30;
 
-        private readonly string _communicationTag;
         private readonly int _pollIntervalTicks;
         private readonly ConsumerSendDelegate _send;
         private readonly ConsumerGetStorageDelegate _getStorage;
@@ -41,8 +39,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly ConsumerEchoDelegate _echo;
         private readonly long _entityId;
         private readonly string _gridName;
-
-        private IMyBroadcastListener _listener;
 
         private string _consumerGroup = "default";
         private string _activeTaskId;
@@ -57,7 +53,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
 
         public TaskBusConsumer(
-            string communicationTag,
             ConsumerSendDelegate send,
             ConsumerGetStorageDelegate getStorage,
             ConsumerSetStorageDelegate setStorage,
@@ -66,7 +61,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks)
         {
-            _communicationTag = communicationTag ?? throw new ArgumentNullException(nameof(communicationTag));
             _send = send ?? throw new ArgumentNullException(nameof(send));
             _getStorage = getStorage ?? throw new ArgumentNullException(nameof(getStorage));
             _setStorage = setStorage ?? throw new ArgumentNullException(nameof(setStorage));
@@ -74,16 +68,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _entityId = entityId;
             _gridName = gridName ?? string.Empty;
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
-        }
-
-        /// <summary>
-        /// Initializes the consumer: registers the IGC listener, creates the producer
-        /// and loads durable state from Storage. Call once from the PB Program constructor.
-        /// </summary>
-        /// <param name="registerListener">Callback that registers an IGC broadcast listener.</param>
-        public void Initialize(Func<string, IMyBroadcastListener> registerListener)
-        {
-            _listener = registerListener(_communicationTag);
             LoadState();
         }
 
@@ -467,19 +451,5 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _send(envelope, targetId);
         }
 
-        /// <summary>
-        /// Pumps all pending IGC messages through the consumer. Call from Program.Main each tick.
-        /// </summary>
-        public void PumpMessages()
-        {
-            while (_listener.HasPendingMessage)
-            {
-                var message = _listener.AcceptMessage();
-                if (message.Source == _entityId)
-                    continue;
-                var json = message.Data as string;
-                ProcessIncomingMessage(message.Source, json);
-            }
-        }
     }
 }

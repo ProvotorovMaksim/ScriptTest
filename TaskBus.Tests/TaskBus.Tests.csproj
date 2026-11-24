@@ -11,7 +11,10 @@
 
   <ItemGroup>
     <Compile Include="../libs/igc-core/TaskBusProtocol.cs" />
+    <Compile Include="../libs/igc-core/TaskBusIgcHelper.cs" />
+    <Compile Include="../libs/taskbus-consumer/TaskBusConsumer.cs" />
     <Compile Include="TaskBusProtocolTests.cs" />
+    <Compile Include="TaskBusConsumerTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

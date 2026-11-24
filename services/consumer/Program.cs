@@ -13,6 +13,7 @@ namespace SpaceEngineers.Services.Consumer
         private const int PollIntervalTicks = 30;
 
         private readonly TaskBusConsumer _consumer;
+        private readonly IMyBroadcastListener _listener;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
 
         public Program()
@@ -20,7 +21,6 @@ namespace SpaceEngineers.Services.Consumer
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
             _consumer = new TaskBusConsumer(
-                communicationTag: CommunicationTag,
                 send: (envelope, targetId) =>
                     IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
                 getStorage: () => Storage,
@@ -30,7 +30,7 @@ namespace SpaceEngineers.Services.Consumer
                 gridName: Me.CubeGrid.CustomName,
                 pollIntervalTicks: PollIntervalTicks);
 
-            _consumer.Initialize(tag => IGC.RegisterBroadcastListener(tag));
+            _listener = IGC.RegisterBroadcastListener(CommunicationTag);
         }
 
         public void Main(string argument)
@@ -46,7 +46,12 @@ namespace SpaceEngineers.Services.Consumer
             }
 
             _consumer.Tick();
-            _consumer.PumpMessages();
+            while (_listener.HasPendingMessage)
+            {
+                var message = _listener.AcceptMessage();
+                if (message.Source != Me.EntityId)
+                    _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
+            }
 
             Echo(_consumer.GetStatus());
         }
