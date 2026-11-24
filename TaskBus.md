@@ -86,7 +86,10 @@ after a relay restart. The relay retries on its own schedule when an
 application submits the same pending message again. Delivery is retried
 until acknowledgement or until
 the five-minute UTC deadline
-expires. Upgrade all relays together. Older diagnostic packets without
+expires. Lease polls, assignments, receipt notices and empty-queue replies
+expire after 20 seconds and use the short-lived queue limit. Later polls
+refresh the current lease state. Requests and completion messages keep
+the regular deadline. Upgrade all relays together. Older diagnostic packets without
 a deadline are discarded. The receiver retains up to 64 delivery IDs until their original deadlines
 for duplicate suppression across restarts. Once 48 slots are occupied,
 only addressed TaskBus messages can claim a remaining slot. If every

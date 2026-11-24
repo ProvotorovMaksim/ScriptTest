@@ -30,6 +30,7 @@ namespace SpaceEngineers.Services.Galnet
         private const int ReservedPending = 4;
         private const int MaxReceived = 64;
         private const int ReservedTaskReceipts = 16;
+        private static readonly long LeaseTrafficLifetime = TimeSpan.FromSeconds(20).Ticks;
         private readonly List<string> _outbox = new List<string>();
         private readonly Dictionary<string, long> _received = new Dictionary<string, long>();
         private string _lastDelivery = "No message received.";
@@ -313,14 +314,18 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             var payload = argument.Substring(split + 1);
-            long applicationId;
-            if (destination == Me.EntityId &&
-                (kind != "APP" || !TryReadApplicationTarget(payload, out applicationId) ||
-                    !_localApplications.Contains(applicationId)))
+            TaskBusEnvelope application = null;
+            bool addressed = kind == "APP" && TryReadTaskBusApplication(payload, out application);
+            if (destination == Me.EntityId && (!addressed || !_localApplications.Contains(application.TargetId)))
             {
                 Echo("Local delivery requires an allowed addressed TaskBus application.");
                 return;
             }
+            bool leaseTraffic = addressed && (application.EventType == "TASK_POLL" ||
+                application.EventType == "TASK_ASSIGN" || application.EventType == "TASK_RECEIVED" ||
+                application.EventType == "QUEUE_EMPTY");
+            if (leaseTraffic)
+                expires = Math.Min(expires, now + LeaseTrafficLifetime);
 
             int expired = _outbox.RemoveAll(pending => !IsCurrentPacket(pending, now));
             var encoded = TaskBusIgcHelper.EncodeStorage(payload);
@@ -340,12 +345,13 @@ namespace SpaceEngineers.Services.Galnet
                 }
             }
 
-            int limit = deadline.HasValue ? MaxPending - ReservedPending : MaxPending;
+            bool shortLived = deadline.HasValue || leaseTraffic;
+            int limit = shortLived ? MaxPending - ReservedPending : MaxPending;
             if (_outbox.Count >= limit)
             {
                 if (expired > 0)
                     SaveConfiguration();
-                Echo(deadline.HasValue ? "Timed delivery queue limit reached." : "Outbox full.");
+                Echo(shortLived ? "Timed delivery queue limit reached." : "Outbox full.");
                 return;
             }
 
@@ -442,16 +448,21 @@ namespace SpaceEngineers.Services.Galnet
 
         private static bool TryReadApplicationTarget(string payload, out long target)
         {
-            target = 0;
+            TaskBusEnvelope application;
+            bool addressed = TryReadTaskBusApplication(payload, out application);
+            target = addressed ? application.TargetId : 0;
+            return addressed;
+        }
+
+        private static bool TryReadTaskBusApplication(string payload, out TaskBusEnvelope application)
+        {
+            application = null;
             if (!payload.StartsWith("taskbus ", StringComparison.Ordinal))
                 return false;
 
             int separator = payload.IndexOf(' ', 8);
-            TaskBusEnvelope envelope;
-            if (separator < 0 || !TaskBusProtocol.TryParseEnvelope(payload.Substring(separator + 1), out envelope))
-                return false;
-            target = envelope.TargetId;
-            return target != 0;
+            return separator >= 0 && TaskBusProtocol.TryParseEnvelope(payload.Substring(separator + 1), out application) &&
+                application.TargetId != 0;
         }
 
         private bool DeliverApplication(long origin, string id, string payload)

@@ -281,6 +281,22 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void LeaseTrafficExpiresSoonerThanCompletionMessages()
+        {
+            var relay = Start(4, "0\n1");
+            long started = DateTime.UtcNow.Ticks;
+            foreach (var eventType in new[] { "TASK_POLL", "TASK_ASSIGN", "TASK_RECEIVED", "QUEUE_EMPTY", "TASK_DONE" })
+                relay.Main("app 1 taskbus 12 " + TaskBusProtocol.CreateEnvelope(eventType, "{}", targetId: 44), UpdateType.Terminal);
+
+            var packets = relay.Storage.Split('\n').Where(line => line.StartsWith("SEND:")).ToArray();
+            Assert.Equal(5, packets.Length);
+            foreach (var packet in packets.Take(4))
+                Assert.InRange(long.Parse(packet.Split('|')[5]) - started,
+                    TimeSpan.FromSeconds(20).Ticks, TimeSpan.FromSeconds(22).Ticks);
+            Assert.True(long.Parse(packets[4].Split('|')[5]) - started >= TimeSpan.FromMinutes(5).Ticks);
+        }
+
+        [Fact]
         public void TimedApplicationsLeaveSpaceForRegularDelivery()
         {
             var relay = Start(4, "0\n1");
