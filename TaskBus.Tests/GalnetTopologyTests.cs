@@ -48,6 +48,24 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void RouteUsesAlternateHopWhenPrimaryIsUnavailableOrAlreadyTraversed()
+        {
+            var topology = new GalnetTopology();
+            topology.Observe(1, 1, 1, 100, new long[] { 2, 3 }, 0);
+            topology.Observe(2, 1, 1, 100, new long[] { 1, 4 }, 0);
+            topology.Observe(3, 1, 1, 100, new long[] { 1, 4 }, 0);
+            topology.Observe(4, 1, 1, 100, new long[] { 2, 3 }, 0);
+
+            Assert.True(topology.TryGetNextHop(1, 4, 1, out var hop));
+            Assert.Equal(2, hop);
+            Assert.True(topology.TryGetNextHop(1, 4, 1, out hop, firstHopAvailable: id => id != 2));
+            Assert.Equal(3, hop);
+            Assert.True(topology.TryGetNextHop(1, 4, 1, out hop, previousHop: 2));
+            Assert.Equal(3, hop);
+            Assert.False(topology.TryGetNextHop(1, 4, 1, out _, previousHop: 2, firstHopAvailable: id => id != 3));
+        }
+
+        [Fact]
         public void ALinkNeedsCurrentAdvertisementsFromBothEndpoints()
         {
             var topology = new GalnetTopology();

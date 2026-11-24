@@ -107,7 +107,9 @@ backup must fit in one text panel.
 ### Galnet routing core
 
 `GalnetTopology` computes next hops from current, reciprocal neighbor
-advertisements. The shortest path wins, with node ID as the tie-breaker.
+advertisements. The shortest path wins, with node ID as the tie-breaker. Route computation
+skips locally unavailable next hops and excludes the previous hop during
+forwarding, so it can use an alternative while link advertisements converge.
 A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
 up to 128 node versions and accepts up to 32 neighbors per node. When

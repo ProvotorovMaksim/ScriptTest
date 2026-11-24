@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace SpaceEngineers.Libs.IgcCore
@@ -63,7 +64,8 @@ namespace SpaceEngineers.Libs.IgcCore
             return oldestNode != 0 && _links.Remove(oldestNode);
         }
 
-        public bool TryGetNextHop(long source, long destination, long now, out long nextHop)
+        public bool TryGetNextHop(long source, long destination, long now, out long nextHop,
+            long previousHop = 0, Func<long, bool> firstHopAvailable = null)
         {
             nextHop = 0;
             if (source == destination)
@@ -82,7 +84,9 @@ namespace SpaceEngineers.Libs.IgcCore
                 foreach (var neighbor in current.Neighbors)
                 {
                     Advertisement peer;
-                    if (firstHop.ContainsKey(neighbor) || !_links.TryGetValue(neighbor, out peer) ||
+                    if (neighbor == previousHop || firstHop.ContainsKey(neighbor) ||
+                        (node == source && firstHopAvailable != null && !firstHopAvailable(neighbor)) ||
+                        !_links.TryGetValue(neighbor, out peer) ||
                         peer.ExpiresAt <= now || !peer.Neighbors.Contains(node))
                         continue;
 

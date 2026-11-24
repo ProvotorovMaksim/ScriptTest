@@ -174,9 +174,9 @@ namespace SpaceEngineers.Services.Galnet
                 Echo(peer.Key + (IsLive(peer.Key) ? " direct online" : " direct offline"));
         }
 
-        private bool TryGetLiveRoute(long destination, out long hop)
+        private bool TryGetLiveRoute(long destination, out long hop, long previousHop = 0)
         {
-            return _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop) && IsLive(hop);
+            return _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop, previousHop, IsLive);
         }
 
         private void ShowNetworkStatus()
@@ -396,8 +396,7 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             long nextHop;
-            if (hops <= 1 || !TryGetLiveRoute(destination, out nextHop) ||
-                nextHop == previousHop)
+            if (hops <= 1 || !TryGetLiveRoute(destination, out nextHop, previousHop))
                 return;
 
             if (previousHop != 0)
