@@ -326,7 +326,11 @@ named conveyor-connected buffer. The platform counts the measured decrease
 in its cargo and increase in the buffer, bounded by the attempted quantity.
 The tally resumes after confirmation of the same lease. With
 `MiningUnloadTo` configured, `stage mine` and `mine finish` require
-the full recorded deposit and a connection to the assigned point. A restart during the transfer itself
+the full recorded deposit and a connection to the assigned point.
+Run `mine unload auto` to repeat confirmed transfers and complete the
+mining stage when the full quantity is deposited. It stops on lease or
+connection loss, a transfer without measured progress, or a PB restart.
+Use `mine unload stop` to stop it manually. A restart during the transfer itself
 can require manual inventory reconciliation.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.

@@ -19,6 +19,9 @@ namespace SpaceEngineers.Apps.Platform
         private const string DrillPrefix = "[AMN DRILL]";
         private readonly List<IMyShipDrill> _managedDrills = new List<IMyShipDrill>();
         private string _drillingLease;
+        private bool _autoMiningUnload;
+        private string _autoMiningUnloadLease;
+        private int _miningUnloadTicks;
         private readonly string _miningCargoName;
         private readonly string _miningUnloadTo;
         private readonly List<IMyCargoContainer> _miningBuffers = new List<IMyCargoContainer>();
@@ -99,7 +102,7 @@ namespace SpaceEngineers.Apps.Platform
             if (camera != null) camera.EnableRaycast = true;
         }
 
-        public void Main(string argument)
+        public void Main(string argument, UpdateType updateSource)
         {
             var command = (argument ?? "").Trim();
             if (_galnet.TryReceive(command, (source, envelope) => _worker.ProcessIncomingMessage(source, envelope)))
@@ -167,6 +170,17 @@ namespace SpaceEngineers.Apps.Platform
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
                 UnloadMiningCargo();
+            else if (string.Equals(command, "mine unload auto", StringComparison.OrdinalIgnoreCase))
+            {
+                _miningUnloadTicks = 0;
+                _autoMiningUnloadLease = _worker.ConfirmedLeaseIdentity;
+                _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
+            }
+            else if (string.Equals(command, "mine unload stop", StringComparison.OrdinalIgnoreCase))
+            {
+                _autoMiningUnload = false;
+                Echo("Automatic mining unload stopped.");
+            }
             else if (string.Equals(command, "mine finish", StringComparison.OrdinalIgnoreCase) ||
                 (_miningUnloadTo != null && command.StartsWith("stage ", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(command.Substring(6).Trim(), "mine", StringComparison.OrdinalIgnoreCase)))
@@ -178,6 +192,16 @@ namespace SpaceEngineers.Apps.Platform
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
+            if (_autoMiningUnload && _autoMiningUnloadLease != _worker.ConfirmedLeaseIdentity)
+            {
+                _autoMiningUnload = false;
+                Echo("Automatic mining unload stopped: the lease changed.");
+            }
+            if (_autoMiningUnload && (updateSource & UpdateType.Update10) != 0 && ++_miningUnloadTicks >= 6)
+            {
+                _miningUnloadTicks = 0;
+                _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
+            }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
             CheckSurveyFlight();
@@ -187,6 +211,8 @@ namespace SpaceEngineers.Apps.Platform
             Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
                 online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
+            if (_autoMiningUnload)
+                Echo("Automatic mining unload active.");
             if (_drillingLease != null)
                 Echo("Managed drills enabled for the current mining lease.");
             if (_surveyOre != null)
@@ -210,7 +236,7 @@ namespace SpaceEngineers.Apps.Platform
             return null;
         }
 
-        private void UnloadMiningCargo()
+        private bool UnloadMiningCargo(bool completeWhenReady = false)
         {
             long grid;
             string resource;
@@ -219,20 +245,20 @@ namespace SpaceEngineers.Apps.Platform
                 !_worker.TryGetMiningCargoTarget(out resource, out amount))
             {
                 Echo("Stop the drills and confirm the mining assignment before unloading.");
-                return;
+                return false;
             }
 
             if (!IsDockedAtMiningPoint(grid))
             {
                 Echo("Dock at the assigned mining point before unloading.");
-                return;
+                return false;
             }
 
             var source = FindMiningInventory();
             if (source == null || string.IsNullOrEmpty(_miningUnloadTo))
             {
                 Echo("Configure MiningCargo and MiningUnloadTo before unloading.");
-                return;
+                return false;
             }
             _miningBuffers.Clear();
             GridTerminalSystem.GetBlocksOfType(_miningBuffers, container =>
@@ -242,14 +268,17 @@ namespace SpaceEngineers.Apps.Platform
             if (destination == null || !source.IsConnectedTo(destination))
             {
                 Echo("The assigned mining point needs a unique, conveyor-connected unload container.");
-                return;
+                return false;
             }
 
             double remaining = amount - _worker.MiningDeposited;
             if (remaining <= 0.0000001)
             {
-                Echo("The requested mining quantity has already been unloaded.");
-                return;
+                if (completeWhenReady)
+                    FinishMiningDeposit();
+                else
+                    Echo("The requested mining quantity has already been unloaded.");
+                return false;
             }
 
             double bufferBefore = MeasureMiningCargo(destination, resource);
@@ -277,9 +306,16 @@ namespace SpaceEngineers.Apps.Platform
                 _worker.RecordMiningDeposit(transferred);
                 Echo("Mining deposit: " + _worker.MiningDeposited.ToString("G", CultureInfo.InvariantCulture) +
                     " / " + amount.ToString("G", CultureInfo.InvariantCulture) + " " + resource + ".");
+                if (completeWhenReady && _worker.MiningDeposited + 0.0000001 >= amount)
+                {
+                    FinishMiningDeposit();
+                    return false;
+                }
+                return true;
             }
-            else
-                Echo("No requested ore transferred. Check cargo, available space and conveyor permissions.");
+
+            Echo("No requested ore transferred. Check cargo, available space and conveyor permissions.");
+            return false;
         }
 
         private bool IsDockedAtMiningPoint(long grid)
