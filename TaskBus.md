@@ -320,6 +320,12 @@ If the completed survey needs another flight, run `survey retry` on the
 mining point. It clears the current site and approach selections and
 issues a new survey child under the same parent lease.
 
+Run `ore plan 25 GPS:Center:X:Y:Z:` during a confirmed task survey to
+list a 3×3 sweep around an operator-selected clear center. The plane is
+perpendicular to local gravity, or aligned with the ship's up axis in
+space. Previously sampled positions are omitted. The GPS points are for
+route review and do not have terrain clearance checks.
+
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use

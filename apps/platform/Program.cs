@@ -117,6 +117,8 @@ namespace SpaceEngineers.Apps.Platform
                 ScheduleOreSample();
             else if (string.Equals(command, "ore report", StringComparison.OrdinalIgnoreCase))
                 SubmitOreSurvey();
+            else if (command.StartsWith("ore plan ", StringComparison.OrdinalIgnoreCase))
+                PlanSurvey(command.Substring(9).Trim());
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
@@ -272,6 +274,73 @@ namespace SpaceEngineers.Apps.Platform
             _autoSample = false;
         }
 
+        private void PlanSurvey(string argument)
+        {
+            int split = argument.IndexOf(' ');
+            double spacing;
+            double x;
+            double y;
+            double z;
+            string label;
+            if (split < 1 || !double.TryParse(argument.Substring(0, split), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out spacing) || !(spacing >= MinimumViewSeparation && spacing <= 500) ||
+                !TaskBusIgcHelper.TryReadOreGps(argument.Substring(split + 1), out label, out x, out y, out z))
+            {
+                Echo("Use ore plan <spacing in metres, 10 to 500> GPS:Center:X:Y:Z:.");
+                return;
+            }
+
+            if (_surveyLease == null || !SurveyLeaseIsCurrent())
+            {
+                Echo("Start a confirmed task survey with ore task before planning.");
+                return;
+            }
+            var controller = GridTerminalSystem.GetBlockWithName(ControllerName) as IMyShipController;
+            if (controller == null || controller.CubeGrid != Me.CubeGrid || !controller.IsWorking)
+            {
+                Echo("Planning requires a working local " + ControllerName + ".");
+                return;
+            }
+
+            var gravity = controller.GetNaturalGravity();
+            var frame = controller.WorldMatrix;
+            bool inGravity = gravity.LengthSquared() > 0.0001;
+            var up = inGravity ? Vector3D.Normalize(-gravity) : frame.Up;
+            var right = frame.Right - up * Vector3D.Dot(frame.Right, up);
+            if (right.LengthSquared() < 0.01)
+                right = frame.Forward - up * Vector3D.Dot(frame.Forward, up);
+            right = Vector3D.Normalize(right);
+            var across = Vector3D.Cross(up, right);
+            var center = new Vector3D(x, y, z);
+            Echo(inGravity ? "Survey plan aligned to local gravity." : "Survey plan aligned to ship orientation.");
+            int index = 0;
+            int remaining = 0;
+            for (int row = -1; row <= 1; row++)
+            {
+                for (int column = -1; column <= 1; column++)
+                {
+                    int sweep = row == 0 ? -column : column;
+                    var point = center + spacing * (sweep * right + row * across);
+                    index++;
+                    if (!IsNewSurveyPosition(point))
+                        continue;
+                    Echo(FormatSurveyGps("Survey " + index, point));
+                    remaining++;
+                }
+            }
+            Echo("Unvisited points: " + remaining + ". Review terrain and approach clearance.");
+        }
+
+        private bool IsNewSurveyPosition(Vector3D position)
+        {
+            foreach (var view in _surveyViews)
+            {
+                if (Vector3D.DistanceSquared(view, position) < MinimumViewSeparation * MinimumViewSeparation)
+                    return false;
+            }
+            return true;
+        }
+
         private void ShowOreBounds()
         {
             if (_oreHits.Count == 0)
@@ -342,14 +411,11 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             var position = detector.GetPosition();
-            foreach (var view in _surveyViews)
+            if (!IsNewSurveyPosition(position))
             {
-                if (Vector3D.DistanceSquared(view, position) < MinimumViewSeparation * MinimumViewSeparation)
-                {
-                    if (!automatic)
-                        _lastProbe = "Move at least 10 m from previous survey positions.";
-                    return;
-                }
+                if (!automatic)
+                    _lastProbe = "Move at least 10 m from previous survey positions.";
+                return;
             }
             _sampleDetector = detector;
             _samplePosition = position;
