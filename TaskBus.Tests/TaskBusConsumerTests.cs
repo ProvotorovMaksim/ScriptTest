@@ -8,6 +8,26 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void TransportAssignmentIncludesPickupAndDeliveryPositions()
+        {
+            var sent = new List<string>();
+            var point = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { }, _ => { },
+                42, "Mining point", 1, getGridPositionJson: () => "{\"x\":10,\"y\":20,\"z\":30}");
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":1,\"details\":{\"steps\":[\"transport\"]," +
+                "\"base_position\":{\"x\":40,\"y\":50,\"z\":60}}}", targetId: 42);
+            point.ProcessIncomingMessage(1, parent);
+            point.Tick();
+
+            Assert.Contains("\"group_id\":\"Haulers\"", sent[sent.Count - 1]);
+            Assert.Contains("\"pickup_name\":\"Mining point\"", sent[sent.Count - 1]);
+            Assert.Contains("\"pickup_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
+            Assert.Contains("\"base_position\":{\"x\":40,\"y\":50,\"z\":60}", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void SurveyLeaseRequiresConfirmationAfterRestart()
         {
             string storage = "";

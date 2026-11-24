@@ -69,6 +69,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private long _leaseConfirmationSource;
 
 
+        private readonly Func<string> _getGridPositionJson;
+
         public TaskBusConsumer(
             ConsumerSendDelegate send,
             ConsumerGetStorageDelegate getStorage,
@@ -76,7 +78,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             ConsumerEchoDelegate echo,
             long entityId,
             string gridName,
-            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false)
+            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -90,6 +92,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _gridName = gridName ?? string.Empty;
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
             _miningPlatform = miningPlatform;
+            _getGridPositionJson = getGridPositionJson;
             LoadState();
         }
 
@@ -598,6 +601,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (CurrentStage() == "mine" && _oreSite != null && _oreApproach != null)
                 payload.Append(",\"ore_position\":").Append(_oreSite)
                     .Append(",\"approach_position\":").Append(_oreApproach);
+            if (childStage == "deliver" && _getGridPositionJson != null)
+                payload.Append(",\"pickup_position\":").Append(_getGridPositionJson())
+                    .Append(",\"pickup_name\":").Append(TaskBusIgcHelper.ToJsonString(_gridName));
             SendMessage("TASK_PUBLISH", payload.Append('}').ToString());
         }
 
@@ -867,6 +873,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 TaskBusIgcHelper.TryReadJsonString(candidateJson, out candidate))
                 summary.Append("\nOre candidate to verify: " + candidate);
 
+            string pickupNameJson;
+            string pickupName;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "pickup_name", out pickupNameJson) &&
+                TaskBusIgcHelper.TryReadJsonString(pickupNameJson, out pickupName))
+                summary.Append("\nPickup point: " + pickupName);
+            AppendPosition(summary, details, "pickup_position", "Pickup at dispatch time");
             AppendPosition(summary, details, "base_position", "Base at request time");
             AppendPosition(summary, details, "approach_position", "Mining approach");
             AppendPosition(summary, details, "ore_position", "Ore deposit");

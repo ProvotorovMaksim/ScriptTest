@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
+using System.Globalization;
 using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.TaskBusConsumer;
 
@@ -36,7 +37,8 @@ namespace SpaceEngineers.Services.Consumer
                 echo: message => Echo(message),
                 entityId: Me.EntityId,
                 gridName: Me.CubeGrid.CustomName,
-                pollIntervalTicks: PollIntervalTicks);
+                pollIntervalTicks: PollIntervalTicks,
+                getGridPositionJson: ReadGridPositionJson);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
@@ -73,6 +75,15 @@ namespace SpaceEngineers.Services.Consumer
                 _monitorTicks = 0;
                 UpdateMonitor(status);
             }
+        }
+
+        private string ReadGridPositionJson()
+        {
+            var position = Me.CubeGrid.GetPosition();
+            var culture = CultureInfo.InvariantCulture;
+            return "{\"x\":" + position.X.ToString("R", culture) +
+                ",\"y\":" + position.Y.ToString("R", culture) +
+                ",\"z\":" + position.Z.ToString("R", culture) + "}";
         }
 
         private void UpdateMonitor(string status)

@@ -216,6 +216,11 @@ its inventory scan first reaches the requested minimum. It repeats stock
 checks while the parent request is open, so a temporary loss of Galnet
 does not prevent the broker from later recording a qualifying reading.
 
+Transport assignments list the mining point and its position at dispatch
+alongside the delivery base and its position at request time. These positions
+are grid references for route planning. Configure docking approach waypoints
+separately.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both
