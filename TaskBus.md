@@ -424,6 +424,14 @@ once after it settles within 2 m of the final prepared return waypoint
 under the same lease and with flight controls idle. Place that
 waypoint inside the FCS final approach envelope. FCS runs its usual
 docking checks. `ore stop` cancels a pending request before the handoff.
+Set `MiningAutoUnloadOnDock=true` to arm automatic unloading when the
+platform requests FCS docking. The platform waits up to 180 scheduled
+updates for its connector to report a physical connection to the
+assigned mining point under the same lease. It then uses the existing
+automatic unloading and completion checks. `mine unload stop` cancels the
+wait or stops an ongoing unload. Configure both cargo container names.
+The pending wait does not survive a PB restart.
+
 Set `MiningUnloadTo=<mining point cargo container name>` and run
 `mine unload` while docked there with drills off. Each command transfers
 up to one stack of the requested resource from `MiningCargo` into the

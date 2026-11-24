@@ -19,6 +19,10 @@ namespace SpaceEngineers.Apps.Platform
         private const string DrillPrefix = "[AMN DRILL]";
         private readonly List<IMyShipDrill> _managedDrills = new List<IMyShipDrill>();
         private string _drillingLease;
+        private readonly bool _unloadOnDock;
+        private string _pendingUnloadDockLease;
+        private long _pendingUnloadDockGrid;
+        private int _unloadDockUpdates;
         private bool _autoMiningUnload;
         private string _autoMiningUnloadLease;
         private int _miningUnloadTicks;
@@ -121,6 +125,7 @@ namespace SpaceEngineers.Apps.Platform
                     && radius >= 1 && radius <= 100 ? radius : double.NaN;
             }
             _miningUnloadTo = ReadSetting("MiningUnloadTo=");
+            _unloadOnDock = string.Equals(ReadSetting("MiningAutoUnloadOnDock="), "true", StringComparison.OrdinalIgnoreCase);
             _listener = IGC.RegisterBroadcastListener(Channel);
             _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
@@ -220,6 +225,7 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingRetreatLease = null;
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
+                _pendingUnloadDockLease = null;
                 CheckPlatformFlight();
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
@@ -251,13 +257,13 @@ namespace SpaceEngineers.Apps.Platform
                 UnloadMiningCargo();
             else if (string.Equals(command, "mine unload auto", StringComparison.OrdinalIgnoreCase))
             {
-                _miningUnloadTicks = 0;
-                _autoMiningUnloadLease = _worker.ConfirmedLeaseIdentity;
-                _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
+                _pendingUnloadDockLease = null;
+                BeginAutomaticMiningUnload();
             }
             else if (string.Equals(command, "mine unload stop", StringComparison.OrdinalIgnoreCase))
             {
                 _autoMiningUnload = false;
+                _pendingUnloadDockLease = null;
                 Echo("Automatic mining unload stopped.");
             }
             else if (string.Equals(command, "mine finish", StringComparison.OrdinalIgnoreCase) ||
@@ -291,6 +297,7 @@ namespace SpaceEngineers.Apps.Platform
                 UpdateAutomaticRetreat();
                 UpdateAutomaticMiningReturn();
                 UpdateAutomaticMiningDock();
+                UpdateUnloadAfterMiningDock();
             }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
@@ -303,6 +310,8 @@ namespace SpaceEngineers.Apps.Platform
             Echo(_lastProbe);
             if (_autoMiningUnload)
                 Echo("Automatic mining unload active.");
+            else if (_pendingUnloadDockLease != null)
+                Echo("Automatic unload waiting for docking at grid " + _pendingUnloadDockGrid + ".");
             if (_drillingLease != null)
                 Echo("Managed drills enabled for the current mining lease.");
             if (_surveyOre != null)
@@ -324,6 +333,36 @@ namespace SpaceEngineers.Apps.Platform
                     return line.Substring(key.Length).Trim();
             }
             return null;
+        }
+
+        private void BeginAutomaticMiningUnload()
+        {
+            _miningUnloadTicks = 0;
+            _autoMiningUnloadLease = _worker.ConfirmedLeaseIdentity;
+            _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
+        }
+
+        private void UpdateUnloadAfterMiningDock()
+        {
+            if (_pendingUnloadDockLease == null)
+                return;
+            if (_pendingUnloadDockLease != _worker.ConfirmedLeaseIdentity ||
+                _worker.SupervisedCruiseRemote != 0 || _drillingLease != null)
+            {
+                _pendingUnloadDockLease = null;
+                Echo("Automatic unload cancelled: mining lease or flight state changed.");
+                return;
+            }
+            if (IsDockedAtMiningPoint(_pendingUnloadDockGrid))
+            {
+                _pendingUnloadDockLease = null;
+                BeginAutomaticMiningUnload();
+            }
+            else if (++_unloadDockUpdates >= 180)
+            {
+                _pendingUnloadDockLease = null;
+                Echo("Automatic unload cancelled: docking was not confirmed at the assigned mining point.");
+            }
         }
 
         private bool UnloadMiningCargo(bool completeWhenReady = false)
@@ -445,6 +484,12 @@ namespace SpaceEngineers.Apps.Platform
             {
                 Echo("Could not send docking to the local [AMN FCS] block.");
                 return;
+            }
+            if (_unloadOnDock && _miningUnloadTo != null && _miningCargoName != null)
+            {
+                _pendingUnloadDockLease = _worker.ConfirmedLeaseIdentity;
+                _pendingUnloadDockGrid = grid;
+                _unloadDockUpdates = 0;
             }
             Echo("FCS docking requested at mining point grid " + grid + ". Check the FCS status.");
         }
