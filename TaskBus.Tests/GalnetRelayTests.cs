@@ -141,6 +141,30 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void RepeatedApplicationWaitsForTheRelayRetryInterval()
+        {
+            var relay = Start(4, "0\n1");
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "LINK|1|1|1|8|4"));
+            relay.Main("", UpdateType.Update10);
+            relay.Main("app 1 repeated payload", UpdateType.Terminal);
+            var packet = Assert.Single(relay.IGC.UnicastOutbox.Where(item => item.Data.StartsWith("APP|")));
+            relay.IGC.UnicastOutbox.Clear();
+
+            for (int i = 0; i < 10; i++)
+            {
+                relay.Main("app 1 repeated payload", UpdateType.Terminal);
+                relay.Main("", UpdateType.Update10);
+            }
+            Assert.DoesNotContain(relay.IGC.UnicastOutbox, item => item.Data.StartsWith("APP|"));
+
+            relay.Main("", UpdateType.Update10);
+            relay.Main("", UpdateType.Update10);
+            var retry = Assert.Single(relay.IGC.UnicastOutbox.Where(item => item.Data.StartsWith("APP|")));
+            Assert.Equal(packet.Data, retry.Data);
+        }
+
+        [Fact]
         public void TimedApplicationsLeaveSpaceForRegularDelivery()
         {
             var relay = Start(4, "0\n1");

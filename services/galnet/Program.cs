@@ -315,7 +315,6 @@ namespace SpaceEngineers.Services.Galnet
                     {
                         if (expired > 0)
                             SaveConfiguration();
-                        ForwardMessage(pending, 0);
                         return;
                     }
                 }
