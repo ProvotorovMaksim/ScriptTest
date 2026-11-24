@@ -333,7 +333,9 @@ endpoint in a local `[AMN MINE PASS]` Remote Control, set One Way and a
 speed limit at or below 1 m/s, then settle within 5 m of the approach.
 Run `mine pass` to start both the drills and the controller. The pass
 stops on completion, lease loss, lane or cargo limits, or speed above
-1.5 m/s. Use `mine drills off` to stop the drills and the supervised pass.
+1.5 m/s. It also stops if it advances less than 0.5 m toward its endpoint
+over 60 scheduled updates (about 10 seconds at normal simulation speed).
+Use `mine drills off` to stop the drills and the supervised pass.
 Review ship alignment, drill coverage and controller collision settings
 before starting.
 

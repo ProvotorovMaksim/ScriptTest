@@ -37,6 +37,11 @@ namespace SpaceEngineers.Apps.Platform
         private string _platformFlightLease;
         private bool _platformSurveyFlight;
         private bool _platformMiningPass;
+        private const int MiningProgressCheckUpdates = 60;
+        private const double MinimumMiningProgress = 0.5;
+        private int _miningProgressTicks;
+        private Vector3D _miningPassEndpoint;
+        private double _miningPassDistance;
         private const string MiningPassRemoteName = "[AMN MINE PASS]";
         private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
@@ -132,6 +137,8 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
+            if ((updateSource & UpdateType.Update10) != 0)
+                CheckMiningPassProgress();
             CheckPlatformFlight();
             CheckMiningLease();
             UpdateOreSample();
@@ -877,6 +884,9 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             _platformMiningPass = true;
+            _miningPassEndpoint = _surveyWaypoints[0].Coords;
+            _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
+            _miningProgressTicks = 0;
             try
             {
                 if (StartManagedDrills())
@@ -887,6 +897,27 @@ namespace SpaceEngineers.Apps.Platform
                 if (_worker.SupervisedCruiseRemote == 0 || !remote.IsAutoPilotEnabled)
                     FinishMiningPass();
             }
+        }
+
+        private void CheckMiningPassProgress()
+        {
+            if (!_platformMiningPass || ++_miningProgressTicks < MiningProgressCheckUpdates)
+                return;
+
+            _miningProgressTicks = 0;
+            var remote = GridTerminalSystem.GetBlockWithId(_worker.SupervisedCruiseRemote) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
+                return;
+
+            double distance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
+            if (_miningPassDistance - distance >= MinimumMiningProgress)
+            {
+                _miningPassDistance = distance;
+                return;
+            }
+
+            StopManagedDrills();
+            _lastProbe = "Mining pass halted: no progress toward the endpoint.";
         }
 
         private void FinishMiningPass()
