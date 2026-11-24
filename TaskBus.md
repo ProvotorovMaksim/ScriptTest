@@ -343,6 +343,11 @@ assigned approach and a speed limit at or below 1 m/s. Stop the drills,
 align the controller's rear with the approach and run `mine retreat`.
 Supervision stops retreat on lease loss, lane exit, excessive speed or
 lack of progress. Use `ore stop` to cancel the supervised flight.
+Set `MiningAutoRetreat=true` to attempt the reviewed retreat once when
+a supervised pass ends within 2 m of its endpoint and the ship settles.
+Automatic retreat uses the same start checks as `mine retreat`. Fault
+stops and PB restarts require a manual decision. Use `ore stop` or
+`mine drills off` to cancel a pending automatic retreat.
 
 After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at

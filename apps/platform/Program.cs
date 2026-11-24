@@ -38,6 +38,9 @@ namespace SpaceEngineers.Apps.Platform
         private bool _platformSurveyFlight;
         private bool _platformMiningPass;
         private bool _platformMiningRetreat;
+        private readonly bool _autoMiningRetreat;
+        private string _pendingRetreatLease;
+        private int _retreatSettleUpdates;
         private const string MiningRetreatRemoteName = "[AMN MINE RETREAT]";
         private const int MiningProgressCheckUpdates = 60;
         private const double MinimumMiningProgress = 0.5;
@@ -84,6 +87,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _miningCargoName = ReadSetting("MiningCargo=");
+            _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
             var laneSetting = ReadSetting("MiningLaneRadius=");
             if (laneSetting != null)
             {
@@ -182,6 +186,7 @@ namespace SpaceEngineers.Apps.Platform
                 _surveySweep = false;
                 _sampleDetector = null;
                 _platformFlightLease = null;
+                _pendingRetreatLease = null;
                 CheckPlatformFlight();
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
@@ -189,7 +194,10 @@ namespace SpaceEngineers.Apps.Platform
             else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
                 StartMiningPass();
             else if (string.Equals(command, "mine retreat", StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingRetreatLease = null;
                 StartMiningRetreat();
+            }
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
@@ -214,7 +222,10 @@ namespace SpaceEngineers.Apps.Platform
                     string.Equals(command.Substring(6).Trim(), "mine", StringComparison.OrdinalIgnoreCase)))
                 FinishMiningDeposit();
             else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingRetreatLease = null;
                 StopManagedDrills();
+            }
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
@@ -230,6 +241,8 @@ namespace SpaceEngineers.Apps.Platform
                 _miningUnloadTicks = 0;
                 _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
             }
+            if ((updateSource & UpdateType.Update10) != 0)
+                UpdateAutomaticRetreat();
             UpdateSurveySweep();
             UpdateAutomaticSampling();
             CheckPlatformFlight();
@@ -1003,6 +1016,14 @@ namespace SpaceEngineers.Apps.Platform
             var remote = GridTerminalSystem.GetBlockWithId(id) as IMyRemoteControl;
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
             {
+                if (_autoMiningRetreat && _platformMiningPass && remote != null &&
+                    remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
+                    _drillingLease != null && _drillingLease == _worker.ConfirmedLeaseIdentity &&
+                    Vector3D.DistanceSquared(remote.GetPosition(), _miningPassEndpoint) <= 4)
+                {
+                    _pendingRetreatLease = _drillingLease;
+                    _retreatSettleUpdates = 0;
+                }
                 _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
                 _platformMiningRetreat = false;
@@ -1027,6 +1048,29 @@ namespace SpaceEngineers.Apps.Platform
                 _platformMiningRetreat = false;
                 if (!_lastProbe.StartsWith("Mining movement halted", StringComparison.Ordinal))
                     _lastProbe = "Platform flight stopped. Check the lease and flight conditions.";
+            }
+        }
+
+        private void UpdateAutomaticRetreat()
+        {
+            if (_pendingRetreatLease == null)
+                return;
+            if (_pendingRetreatLease != _worker.ConfirmedLeaseIdentity || _worker.SupervisedCruiseRemote != 0)
+            {
+                _pendingRetreatLease = null;
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithName(MiningRetreatRemoteName) as IMyRemoteControl;
+            if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking && remote.GetShipSpeed() <= 0.25)
+            {
+                _pendingRetreatLease = null;
+                StartMiningRetreat();
+            }
+            else if (++_retreatSettleUpdates >= 30)
+            {
+                _pendingRetreatLease = null;
+                _lastProbe = "Automatic retreat cancelled: the platform did not settle or the retreat controller is unavailable.";
             }
         }
 
