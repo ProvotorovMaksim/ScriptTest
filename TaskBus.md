@@ -536,6 +536,16 @@ each new survey, including in space. `ore stop` suppresses automatic
 launch for the current lease, and a started sweep stays stopped
 after a PB restart until manually restarted.
 
+For a camera-directed survey in space, configure `SurveyAutoAsteroid=1500
+40 25` as a single line. The values are scan range, stand-off distance
+and grid spacing in metres. The platform waits for low speed outside
+natural gravity, then looks along the working `[AMN SCOUT]` cameras'
+forward axes. The first asteroid surface hit beyond stand-off seeds a
+grid in the camera plane. The existing sweep checks each leg before
+flight, and stops if camera clearance or sampling fails. Fit the cameras
+to cover the survey directions. A configured `SurveyAutoSweep` center
+takes precedence.
+
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use

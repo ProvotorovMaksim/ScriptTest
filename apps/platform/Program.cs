@@ -112,6 +112,10 @@ namespace SpaceEngineers.Apps.Platform
         private bool _reportOnSweepCompletion;
         private readonly double _automaticSurveySpacing;
         private readonly Vector3D _automaticSurveyCenter;
+        private readonly double _asteroidScanRange;
+        private readonly double _asteroidStandOff;
+        private readonly double _asteroidSurveySpacing;
+        private int _asteroidScanTicks;
         private string _suppressedAutomaticSurveyLease;
         private bool _sweepLegStarted;
         private bool _sweepSampleStarted;
@@ -128,6 +132,10 @@ namespace SpaceEngineers.Apps.Platform
             if (automaticSurvey != null &&
                 !TryReadSurveyPlan(automaticSurvey, out _automaticSurveySpacing, out _automaticSurveyCenter))
                 Echo("Use SurveyAutoSweep=<10 to 500 metres> GPS:Center:X:Y:Z:.");
+            var asteroidSurvey = ReadSetting("SurveyAutoAsteroid=");
+            if (asteroidSurvey != null &&
+                !TryReadAsteroidSurvey(asteroidSurvey, out _asteroidScanRange, out _asteroidStandOff, out _asteroidSurveySpacing))
+                Echo("Use SurveyAutoAsteroid=<scan metres> <stand-off metres> <spacing metres>.");
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
@@ -934,7 +942,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             string lease;
             string ore;
-            if (_automaticSurveySpacing == 0 || _surveySweep || _sampleDetector != null ||
+            if ((_automaticSurveySpacing == 0 && _asteroidScanRange == 0) || _surveySweep || _sampleDetector != null ||
                 _worker.SupervisedCruiseRemote != 0 || !_worker.TryGetSurveyLease(out lease, out ore) ||
                 lease == _surveyLease || lease == _suppressedAutomaticSurveyLease)
                 return;
@@ -948,10 +956,26 @@ namespace SpaceEngineers.Apps.Platform
                 !CanStartPlatformFlight())
                 return;
 
-            BeginOreSurvey(ore, lease);
-            PlanSurveyGrid(controller, _automaticSurveySpacing, _automaticSurveyCenter);
+            if (_automaticSurveySpacing != 0)
+            {
+                BeginOreSurvey(ore, lease);
+                PlanSurveyGrid(controller, _automaticSurveySpacing, _automaticSurveyCenter);
+                _lastProbe = "Automatic survey started for the configured area.";
+            }
+            else
+            {
+                if (controller.GetNaturalGravity().LengthSquared() > 0.0001 || controller.GetShipSpeed() > 0.25)
+                {
+                    _lastProbe = "Automatic asteroid survey waits for a stationary platform outside natural gravity.";
+                    return;
+                }
+                if (++_asteroidScanTicks < 6)
+                    return;
+                _asteroidScanTicks = 0;
+                if (!PlanAsteroidSurvey(ore, lease))
+                    return;
+            }
             BeginSurveySweep(reportOnCompletion: true);
-            _lastProbe = "Automatic survey started for the configured area.";
         }
 
         private void PlanSurveyGrid(IMyShipController controller, double spacing, Vector3D center)
@@ -961,6 +985,58 @@ namespace SpaceEngineers.Apps.Platform
             Vector3D across;
             bool inGravity = GetSurveyAxes(controller, out up, out right, out across);
             Echo(inGravity ? "Survey plan aligned to local gravity." : "Survey plan aligned to ship orientation.");
+            SaveSurveyGrid(spacing, center, right, across);
+        }
+
+        private static bool TryReadAsteroidSurvey(string setting, out double range, out double standOff, out double spacing)
+        {
+            range = standOff = spacing = 0;
+            var parts = setting.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            double parsedRange;
+            double parsedStandOff;
+            double parsedSpacing;
+            if (parts.Length != 3 ||
+                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedRange) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedStandOff) ||
+                !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedSpacing) ||
+                !(parsedRange <= 5000 && parsedStandOff >= 10 && parsedStandOff < parsedRange &&
+                    parsedSpacing >= MinimumViewSeparation && parsedSpacing <= 500))
+                return false;
+            range = parsedRange;
+            standOff = parsedStandOff;
+            spacing = parsedSpacing;
+            return true;
+        }
+
+        private bool PlanAsteroidSurvey(string ore, string lease)
+        {
+            _surveyCameras.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyCameras, camera =>
+                camera.CubeGrid == Me.CubeGrid && camera.IsWorking &&
+                camera.CustomName.StartsWith(CameraName, StringComparison.Ordinal));
+            foreach (var camera in _surveyCameras)
+            {
+                camera.EnableRaycast = true;
+                if (!camera.CanScan(_asteroidScanRange))
+                    continue;
+                var hit = camera.Raycast(_asteroidScanRange);
+                if (hit.Type != MyDetectedEntityType.Asteroid || !hit.HitPosition.HasValue ||
+                    Vector3D.DistanceSquared(hit.HitPosition.Value, camera.GetPosition()) <= _asteroidStandOff * _asteroidStandOff)
+                    continue;
+
+                var frame = camera.WorldMatrix;
+                var center = hit.HitPosition.Value - frame.Forward * _asteroidStandOff;
+                BeginOreSurvey(ore, lease);
+                SaveSurveyGrid(_asteroidSurveySpacing, center, frame.Right, frame.Up);
+                _lastProbe = "Automatic asteroid survey started from a camera hit.";
+                return true;
+            }
+            _lastProbe = "Automatic asteroid survey waiting for a camera to detect a surface beyond the stand-off distance.";
+            return false;
+        }
+
+        private void SaveSurveyGrid(double spacing, Vector3D center, Vector3D right, Vector3D across)
+        {
             int index = 0;
             _surveyPlan.Clear();
             for (int row = -1; row <= 1; row++)
