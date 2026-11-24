@@ -11,6 +11,33 @@ namespace TaskBus.Tests
     public sealed class TaskBusDeliveryTests
     {
         [Fact]
+        public void BrokerPauseSurvivesRestartAndFencesThePreviousWorker()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"default\"}", targetId: 1);
+            Dispatch(broker, 42, poll);
+            TakeResponse(broker, "TASK_ASSIGN", 42);
+
+            broker.Main("broker pause");
+            Assert.Contains("PAUSED|1", broker.Storage);
+            Assert.Contains("|QUEUED|", broker.Storage);
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 43, poll);
+            Assert.Empty(broker.IGC.Outbox);
+
+            broker.Main("broker resume");
+            var oldDone = TaskBusProtocol.CreateEnvelope("TASK_DONE",
+                "{\"task_id\":\"9-1\",\"lease_epoch\":1}", targetId: 1);
+            Dispatch(broker, 42, oldDone);
+            TakeResponse(broker, "TASK_REVOKED", 42);
+            Dispatch(broker, 43, poll);
+            Assert.Contains("\"lease_epoch\":3", TakeResponse(broker, "TASK_ASSIGN", 43).PayloadJson);
+        }
+
+        [Fact]
         public void BrokerRestartDoesNotRenewExpiredWallClockLease()
         {
             var broker = StartBroker("");

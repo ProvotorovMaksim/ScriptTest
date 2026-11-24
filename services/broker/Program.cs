@@ -23,6 +23,7 @@ namespace SpaceEngineers.Services.Broker
         private static readonly long LeaseTimeoutUtc = TimeSpan.FromSeconds(30).Ticks;
         private int _tick;
         private int _sequence;
+        private bool _paused;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
         private readonly List<string> _cancelledRequestIds = new List<string>();
         private readonly List<string> _completedRequestIds = new List<string>();
@@ -72,13 +73,41 @@ namespace SpaceEngineers.Services.Broker
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _producer = new TaskBusProducer(CommunicationTag, SendEnvelope);
             LoadQueue();
-            ExpireConsumerLeases();
+            if (!_paused)
+                ExpireConsumerLeases();
             SaveAfterParentLeaseChange(false);
         }
 
         public void Main(string argument)
         {
             var command = argument ?? string.Empty;
+            if (string.Equals(command, "broker pause", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!_paused)
+                {
+                    _paused = true;
+                    _galnetReplies.Clear();
+                    ExpireConsumerLeases(force: true);
+                    SaveAfterParentLeaseChange(false);
+                    SaveQueue();
+                }
+                ShowStatus();
+                return;
+            }
+            if (_paused)
+            {
+                for (int i = 0; i < 32 && _listener.HasPendingMessage; i++)
+                    _listener.AcceptMessage();
+                if (string.Equals(command, "broker resume", StringComparison.OrdinalIgnoreCase))
+                {
+                    _paused = false;
+                    SaveQueue();
+                    Echo("Broker resumed.");
+                }
+                else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
+                    ShowStatus();
+                return;
+            }
             if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
             {
                 ExpireConsumerLeases();
@@ -488,14 +517,14 @@ namespace SpaceEngineers.Services.Broker
             task.LeaseExpiresUtc = Math.Max(task.LeaseExpiresUtc + 1, DateTime.UtcNow.Ticks + LeaseTimeoutUtc);
         }
 
-        private void ExpireConsumerLeases()
+        private void ExpireConsumerLeases(bool force = false)
         {
             var changed = false;
             var parentChanged = false;
             long now = DateTime.UtcNow.Ticks;
             foreach (var task in _tasks.Where(entry => entry.State == "LEASED" || entry.State == "ACTIVE"))
             {
-                if (_tick - task.LastDispatchTick <= LeaseTimeoutTicks &&
+                if (!force && _tick - task.LastDispatchTick <= LeaseTimeoutTicks &&
                     (task.LeaseExpiresUtc == 0 || now < task.LeaseExpiresUtc))
                     continue;
 
@@ -507,7 +536,7 @@ namespace SpaceEngineers.Services.Broker
                 parentChanged |= task.GroupId == "MiningPoints";
                 Echo("Lease expired; requeued " + task.Id);
             }
-            if (parentChanged)
+            if (parentChanged && !_paused)
                 SaveAfterParentLeaseChange(true);
             else if (changed)
                 SaveQueue();
@@ -630,7 +659,7 @@ namespace SpaceEngineers.Services.Broker
         private void ShowStatus()
         {
             Echo("Broker block ID: " + Me.EntityId);
-            Echo("Tasks: " + _tasks.Count);
+            Echo((_paused ? "Paused. " : "Active. ") + "Tasks: " + _tasks.Count);
             foreach (var task in _tasks)
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);
         }
@@ -649,6 +678,11 @@ namespace SpaceEngineers.Services.Broker
             foreach (var line in Storage.Split('\n'))
             {
                 var parts = line.Split('|');
+                if (parts.Length == 2 && parts[0] == "PAUSED")
+                {
+                    _paused = parts[1].Trim() == "1";
+                    continue;
+                }
                 if (parts.Length == 2 && parts[0] == "SEQ")
                 {
                     int.TryParse(parts[1], out _sequence);
@@ -748,6 +782,8 @@ namespace SpaceEngineers.Services.Broker
         {
             var storage = new StringBuilder();
             storage.AppendLine("SEQ|" + _sequence.ToString(CultureInfo.InvariantCulture));
+            if (_paused)
+                storage.AppendLine("PAUSED|1");
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)

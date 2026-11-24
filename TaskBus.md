@@ -71,6 +71,13 @@ even before receiving a revocation. A delayed older refresh cannot replace
 a newer deadline for the same broker, task and lease epoch. Workers save
 the latest deadline and require a newer confirmation after a restart.
 
+Use `broker pause` on the broker PB before planned maintenance. It returns
+leased parent and standalone work to the queue, removes children from the
+old parent leases, and stops accepting traffic. Pause survives recompiles.
+Workers with previously delivered assignments may take until their
+confirmation deadline to stop. Use `broker resume` on the same PB to
+start issuing work again.
+
 ### Galnet routing core
 
 `GalnetTopology` computes next hops from current, reciprocal neighbor
