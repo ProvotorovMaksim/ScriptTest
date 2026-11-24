@@ -288,7 +288,11 @@ so the ship arrives inside the FCS final approach envelope. Use
 With `HaulerDock` configured, use `route depart` after pickup while still
 connected to the assigned mining point. FCS checks the selected berth and
 the departure charge before disconnecting. If charge is low, repeat the
-command after charging. The hauler does not schedule a delayed departure.
+command after charging. For automatic retries, set `HaulerAutoDepart=true` or run
+`route depart auto`. The hauler rechecks the lease and the pickup
+connection before each request. Use `route stop` to suspend automatic
+departure for the current session. Starting the delivery cruise remains
+a separate command.
 
 ### AMN platform worker
 

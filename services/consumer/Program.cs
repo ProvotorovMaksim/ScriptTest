@@ -16,6 +16,8 @@ namespace SpaceEngineers.Services.Consumer
         private const int PollIntervalTicks = 30;
         private const string MonitorName = "[AMN STATUS]";
         private int _monitorTicks;
+        private int _departureTicks;
+        private bool _autoDepart;
         private readonly string _haulerCargo;
         private readonly string _haulerDock;
         private readonly string _haulerUnloadTo;
@@ -42,6 +44,7 @@ namespace SpaceEngineers.Services.Consumer
             _haulerDock = ReadSetting("HaulerDock=");
             _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
             _haulerLoadFrom = ReadSetting("HaulerLoadFrom=");
+            _autoDepart = string.Equals(ReadSetting("HaulerAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
                 getStorage: () => Storage,
@@ -69,7 +72,7 @@ namespace SpaceEngineers.Services.Consumer
             _routes.CheckCruiseLease();
         }
 
-        public void Main(string argument)
+        public void Main(string argument, UpdateType updateSource)
         {
             var command = (argument ?? "").Trim();
             if (_galnet.TryReceive(command, (source, envelope) => _consumer.ProcessIncomingMessage(source, envelope)))
@@ -91,13 +94,28 @@ namespace SpaceEngineers.Services.Consumer
                 StartHaulerDock();
             else if (string.Equals(command, "route depart", StringComparison.OrdinalIgnoreCase))
                 DepartHaulerPickup();
-            else if (!_routes.TryHandle(command))
-                _consumer.ProcessCommand(argument);
+            else if (string.Equals(command, "route depart auto", StringComparison.OrdinalIgnoreCase))
+                _autoDepart = true;
+            else
+            {
+                if (string.Equals(command, "route stop", StringComparison.OrdinalIgnoreCase))
+                    _autoDepart = false;
+                if (!_routes.TryHandle(command))
+                    _consumer.ProcessCommand(argument);
+            }
+            if (_autoDepart && (updateSource & UpdateType.Update10) != 0 && ++_departureTicks >= 12)
+            {
+                _departureTicks = 0;
+                if (_consumer.CanDepartHaulerPickup())
+                    RequestFcs("dock depart ready");
+            }
             _routes.CheckCruiseLease();
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
             if (!connected)
                 status = (viaGalnet ? "Galnet relay unavailable or misconfigured.\n" : "Radio unavailable.\n") + status;
+            if (_autoDepart)
+                status += "\nAutomatic pickup departure enabled.";
             Echo(status);
 
             if (++_monitorTicks >= 6 || !string.IsNullOrWhiteSpace(argument))
