@@ -506,6 +506,12 @@ on the sending ShipLink. The recipient display shows the sender relay and
 coordinates for up to 30 seconds from the send time. Fleet names filter the
 display and do not authenticate the sender.
 
+Use `contact track <relay ID> <mark name>` to keep an active fleet mark
+in the cockpit display. ShipLink shows its age, range and coordinates
+relative to the cockpit axes. An expired selection remains visible as
+`LAST KNOWN` until it is refreshed by the same source or cleared with
+`contact untrack`.
+
 For ongoing fleet heartbeat through Galnet, put up to four
 `GalnetFleetPeer=<wingmate relay ID>` entries in ShipLink Custom Data and
 configure each peer reciprocally under the same fleet name. ShipLink sends

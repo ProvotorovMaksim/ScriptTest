@@ -48,6 +48,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public Vector3D Position;
         }
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
+        private FleetContact _trackedContact;
 
         private string _fleetName;
         private bool _needsAssistance;
@@ -119,6 +120,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 _galnetPeers.Clear();
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
+                _trackedContact = null;
             }
 
             else if (command.StartsWith("worker ", StringComparison.OrdinalIgnoreCase))
@@ -160,6 +162,13 @@ namespace SpaceEngineers.Apps.ShipLink
 
             else if (command.StartsWith("assist send ", StringComparison.OrdinalIgnoreCase))
                 SendAssistance(command.Substring(12).Trim());
+            else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
+                TrackFleetContact(command.Substring(14).Trim());
+            else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase))
+            {
+                _trackedContact = null;
+                _displayTick = DisplayUpdateIntervalTicks;
+            }
             else if (command.StartsWith("contact ", StringComparison.OrdinalIgnoreCase))
                 SendContact(command.Substring(8));
 
@@ -228,6 +237,30 @@ namespace SpaceEngineers.Apps.ShipLink
             var relay = GridTerminalSystem.GetBlockWithName(RelayName) as IMyProgrammableBlock;
             return relay != null && relay.CubeGrid == Me.CubeGrid && relay.IsWorking && relay.EntityId != Me.EntityId
                 ? relay : null;
+        }
+
+        private void TrackFleetContact(string argument)
+        {
+            int delimiter = argument.IndexOf(' ');
+            long relay;
+            if (delimiter < 1 || !long.TryParse(argument.Substring(0, delimiter), out relay))
+            {
+                Echo("Use contact track <relay ID> <mark name>.");
+                return;
+            }
+
+            string name = argument.Substring(delimiter + 1).Trim();
+            long now = DateTime.UtcNow.Ticks;
+            var mark = _contacts.Where(contact => contact.Source == relay && contact.Name == name && contact.Expires > now)
+                .OrderBy(contact => contact.Assistance).FirstOrDefault();
+            if (mark == null)
+            {
+                Echo("No active mark with that relay ID and name.");
+                return;
+            }
+
+            _trackedContact = mark;
+            _displayTick = DisplayUpdateIntervalTicks;
         }
 
         private void SendContact(string argument)
@@ -418,6 +451,33 @@ namespace SpaceEngineers.Apps.ShipLink
             status.SeenTick = _tick;
         }
 
+        private void AppendTrackedContact(StringBuilder display, long now)
+        {
+            if (_trackedContact == null)
+                return;
+
+            var fresh = _contacts.FirstOrDefault(contact => contact.Source == _trackedContact.Source &&
+                contact.Name == _trackedContact.Name && contact.Assistance == _trackedContact.Assistance);
+            if (fresh != null && fresh.Expires >= _trackedContact.Expires)
+                _trackedContact = fresh;
+
+            var mark = _trackedContact;
+            bool stale = mark.Expires <= now;
+            long age = Math.Max(0L, (now - (mark.Expires - ContactLifetime)) / TimeSpan.TicksPerSecond);
+            display.AppendLine("=== TRACKED FLEET MARK ===");
+            display.AppendLine(mark.Name + " | relay " + mark.Source + " | " + age + " s old" +
+                (stale ? " | LAST KNOWN" : ""));
+            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
+            var delta = mark.Position - (cockpit == null ? Me.CubeGrid.GetPosition() : cockpit.GetPosition());
+            display.AppendLine("Range to reported position: " + Math.Round(delta.Length()) + " m");
+            if (cockpit != null)
+            {
+                var frame = cockpit.WorldMatrix;
+                display.AppendLine("Right / Up / Forward: " + Math.Round(Vector3D.Dot(delta, frame.Right)) + " / " +
+                    Math.Round(Vector3D.Dot(delta, frame.Up)) + " / " + Math.Round(Vector3D.Dot(delta, frame.Forward)) + " m");
+            }
+        }
+
         private void SaveSettings()
         {
             Storage = _fleetName + "\n" + _workerId.ToString(CultureInfo.InvariantCulture) +
@@ -598,6 +658,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 }
             }
             _contacts.RemoveAll(contact => contact.Expires <= now);
+            AppendTrackedContact(display, now);
             if (_contacts.Count > 0)
             {
                 display.AppendLine("=== GALNET FLEET MARKS ===");
