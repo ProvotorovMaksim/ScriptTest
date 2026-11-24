@@ -11,6 +11,7 @@ projects=(
   "services/consumer/consumer.csproj"
   "services/producer/producer.csproj"
   "apps/amn/amn.csproj"
+  "apps/platform/platform.csproj"
   "apps/fcs/fcs.csproj"
   "apps/ship-link/ship-link.csproj"
   "apps/sample/sample.csproj"
@@ -94,6 +95,7 @@ package_taskbus_pb services/broker TaskBroker "$producer"
 package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusConsumer.cs
 package_taskbus_pb services/producer TaskProducer "$producer"
 package_taskbus_pb apps/amn AMN.Base "$producer"
+package_taskbus_pb apps/platform AmnPlatform libs/taskbus-consumer/TaskBusConsumer.cs
 package_taskbus_pb apps/sample SampleMain libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
 package_taskbus_pb apps/ship-link ShipLink
 

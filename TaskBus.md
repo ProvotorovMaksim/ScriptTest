@@ -34,7 +34,7 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 ./build.sh
 ```
 
-Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
+Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the eight PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
 
 ### Mining workflow reference
 
@@ -125,6 +125,17 @@ Name a text panel on the point consumer's grid exactly `[AMN STATUS]`
 to show the parent task, current stage, lease and last broker state for the
 child request. The panel also shows when the local radio is unavailable.
 The resource amount shown is the requested amount.
+
+### AMN platform worker
+
+Install `AmnPlatform.pb.cs` on a scout or drilling ship. Use
+`group Scouts` or `group MiningFleet` to select its assigned role and
+`broker <ID>` if the world has multiple brokers. Name a local flight
+controller `[AMN PLATFORM]` and a forward camera `[AMN SCOUT]`.
+`probe <metres>` samples the camera ray and reports whether the ship is
+in natural gravity, the detected entity type and the hit position.
+Camera hits identify geometry. Ore observations come from the ore
+detector adapter. The platform does not start flight or drills yet.
 
 ### Mining dispatch acceptance test
 
