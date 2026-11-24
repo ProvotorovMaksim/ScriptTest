@@ -52,6 +52,12 @@ engaging. The controller starts off after compilation or reload.
 - `aero on` enables experimental external-force estimation for free-flight
   trials. Use `aero off` before docking, landing contact, or mining. It starts
   disabled and does not require a Workshop API.
+- `mass` reports current mass and estimated lift limits for level flight and
+  nose-down extraction. It uses the current center of mass and available thrust,
+  with a 10% force reserve, 1 m/s² of climb authority, and a modeled residual
+  torque equivalent to at most a 5 cm offset. This is a lift estimate for the
+  current equipment and load distribution, with no allowance for rock contact
+  or future cargo shifts.
 - `off` releases the actuators and restores cockpit thruster and dampener
   settings. Leaving the cockpit also releases control while the PB is running.
 

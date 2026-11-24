@@ -24,6 +24,10 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "aero on": flight.EstimateAerodynamics = true; break;
                 case "aero off": flight.EstimateAerodynamics = false; break;
                 case "manual": Activate(Mode.Manual); break;
+                case "mass":
+                    Echo(mode == Mode.Off ? "Engage FCS before requesting mass limits." :
+                        flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
+                    return;
                 case "off": Release("FCS off."); break;
             }
 
@@ -131,6 +135,9 @@ namespace SpaceEngineers.Apps.FlightControl
             private const double Acceleration = 5;
             private const double BrakingDistance = 50;
             private const double GyroLimit = 1.2;
+            private const double ThrustReserve = 0.10;
+            private const double LiftAccelerationReserve = 1.0;
+            private const double MaximumResidualLeverArm = 0.05;
             private readonly ThrustAllocator thrust = new ThrustAllocator();
             private readonly List<IMyGyro> gyros = new List<IMyGyro>();
             private readonly double[] capacity = new double[6];
@@ -225,8 +232,8 @@ namespace SpaceEngineers.Apps.FlightControl
                         double upper = forward;
                         if (mode == Mode.Normal)
                         {
-                            lower *= 0.9;
-                            upper *= 0.9;
+                            lower *= 1 - ThrustReserve;
+                            upper *= 1 - ThrustReserve;
                             if (overspeed || buildsSpeedWithoutBrake)
                             {
                                 double correction = Math.Max(0, Math.Abs(speed) - safeSpeed) * mass * 0.8;
@@ -255,7 +262,8 @@ namespace SpaceEngineers.Apps.FlightControl
                     turn = Vector3D.Zero;
                     gyroMask = Vector3D.One;
                 }
-                var residualMoment = thrust.Apply(target, gyroMask);
+                var residualMoment = thrust.Solve(target, gyroMask);
+                thrust.Apply();
                 var localAngularVelocity = Vector3D.TransformNormal(velocity.AngularVelocity, worldToLocal);
                 var rotationCommand = new Vector3D(
                     Rotation(turn.X, localAngularVelocity.X),
@@ -280,6 +288,60 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
+            public string AssessMass(IMyCockpit pilot, Func<bool> hasInstructionBudget)
+            {
+                double gravity = pilot.GetNaturalGravity().Length();
+                double mass = pilot.CalculateShipMass().PhysicalMass;
+                if (gravity < 0.05)
+                    return "Mass: " + Math.Round(mass) + " kg. Natural gravity too low for a lift estimate.";
+
+                // This only samples blocks and computes hypothetical commands.
+                thrust.Measure(pilot.WorldMatrix, pilot.CenterOfMass, capacity);
+                double requiredAcceleration = gravity + LiftAccelerationReserve;
+                double level = EstimateLiftLimit(Vector3D.Up, capacity[2], requiredAcceleration, hasInstructionBudget);
+                double extraction = EstimateLiftLimit(Vector3D.Backward, capacity[4], requiredAcceleration,
+                    hasInstructionBudget);
+
+                return "Mass: " + Math.Round(mass) + " kg" +
+                    "\nLevel flight: " + FormatLiftLimit(level, mass) +
+                    "\nNose-down extraction: " + FormatLiftLimit(extraction, mass);
+            }
+
+            private double EstimateLiftLimit(Vector3D direction, double axialThrust, double acceleration,
+                Func<bool> hasInstructionBudget)
+            {
+                double lower = 0;
+                double upper = axialThrust * (1 - ThrustReserve);
+                if (upper <= 0)
+                    return 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    if (!hasInstructionBudget())
+                        return double.NaN;
+                    // Check the full reserved limit first so balanced frames can finish in one solve.
+                    double force = i == 0 ? upper : (lower + upper) / 2;
+                    var moment = thrust.Solve(direction * force, Vector3D.One);
+                    if (moment.LengthSquared() <= force * force * MaximumResidualLeverArm * MaximumResidualLeverArm)
+                    {
+                        lower = force;
+                        if (i == 0)
+                            break;
+                    }
+                    else
+                        upper = force;
+                }
+                return lower / acceleration;
+            }
+
+            private static string FormatLiftLimit(double limit, double currentMass)
+            {
+                if (double.IsNaN(limit))
+                    return "instruction budget reached";
+                double roundedLimit = Math.Floor(limit);
+                double remaining = Math.Floor(limit - currentMass);
+                return roundedLimit + " kg (" + (remaining > 0 ? "+" : "") + remaining + " kg margin)";
+            }
+
             private bool HasSupportDuringTurn(Vector3D support, Vector3D rate)
             {
                 double speed = rate.Length();
@@ -295,7 +357,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     {
                         double force = next.GetDim(axis);
                         double available = capacity[axis * 2 + (force < 0 ? 1 : 0)];
-                        if (Math.Abs(force) > available * 0.9)
+                        if (Math.Abs(force) > available * (1 - ThrustReserve))
                             return false;
                     }
                 }
@@ -384,7 +446,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 return force;
             }
 
-            public Vector3D Apply(Vector3D target, Vector3D torqueMask)
+            public Vector3D Solve(Vector3D target, Vector3D torqueMask)
             {
                 var moment = Vector3D.Zero;
                 for (int group = 0; group < groups.Length; group++)
@@ -424,11 +486,15 @@ namespace SpaceEngineers.Apps.FlightControl
                             moment += change * transfer;
                         }
 
+                return moment;
+            }
+
+            public void Apply()
+            {
                 foreach (var group in groups)
                     foreach (var engine in group)
                         engine.Block.ThrustOverridePercentage = engine.Available > 0
                             ? (float)Clamp(engine.Force / engine.Available, 0, 1) : 0;
-                return moment;
             }
 
             public void Release()
