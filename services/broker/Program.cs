@@ -485,7 +485,7 @@ namespace SpaceEngineers.Services.Broker
         private void RenewLease(TaskRecord task)
         {
             task.LastDispatchTick = _tick;
-            task.LeaseExpiresUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
+            task.LeaseExpiresUtc = Math.Max(task.LeaseExpiresUtc + 1, DateTime.UtcNow.Ticks + LeaseTimeoutUtc);
         }
 
         private void ExpireConsumerLeases()

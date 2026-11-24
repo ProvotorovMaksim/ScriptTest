@@ -434,7 +434,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     expires <= DateTime.UtcNow.Ticks || expires > DateTime.MaxValue.Ticks))
                 return;
             if (taskId == _activeTaskId && leaseEpoch == _leaseEpoch && sourceId == _leaseConfirmationSource &&
-                expires < _leaseExpiresUtc)
+                _leaseExpiresUtc != 0 && expires <= _leaseExpiresUtc)
                 return;
 
             if (taskId == _lastRevokedTaskId && leaseEpoch <= _lastRevokedEpoch)
@@ -449,7 +449,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            if (_activeTaskId != taskId)
+            bool newTask = _activeTaskId != taskId;
+            bool changedLease = newTask || leaseEpoch > _leaseEpoch;
+            if (newTask)
             {
                 if (!string.IsNullOrEmpty(_activeTaskId))
                 {
@@ -470,8 +472,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _stageIndex = 0;
                 _leaseEpoch = leaseEpoch;
                 ReuseKnownSite();
-                SaveState();
-                _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
             }
             else if (leaseEpoch > _leaseEpoch)
             {
@@ -481,7 +481,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _childSurveyReport = null;
                 _childState = null;
                 _activeTaskJson = taskJson;
-                SaveState();
             }
             else if (leaseEpoch < _leaseEpoch)
                 return;
@@ -492,6 +491,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _leaseExpiresUtc = expires;
             _leaseConfirmationSource = sourceId;
             _lastLeaseConfirmationTick = _tick;
+            if (changedLease || expires != 0)
+                SaveState();
+            if (newTask)
+                _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
         }
@@ -1266,6 +1269,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     else if (key == "CHILD_COMPLETED") _completedChildRequest = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "CHILD_SURVEY_RESULT") _childSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "LEASE_DEADLINE")
+                        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseExpiresUtc);
+                    else if (key == "LEASE_SOURCE")
+                        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseConfirmationSource);
                     else if (key == "LEASE_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseEpoch);
                     else if (key == "COMPLETED_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _pendingCompletedEpoch);
                 }
@@ -1301,6 +1308,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
+                if (_leaseExpiresUtc != 0)
+                {
+                    storage.AppendLine("LEASE_DEADLINE|" + _leaseExpiresUtc.ToString(CultureInfo.InvariantCulture));
+                    storage.AppendLine("LEASE_SOURCE|" + _leaseConfirmationSource.ToString(CultureInfo.InvariantCulture));
+                }
             }
             foreach (var site in _knownSites)
                 storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Key) +

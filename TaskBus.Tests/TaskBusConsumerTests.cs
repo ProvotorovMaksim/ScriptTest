@@ -8,6 +8,32 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void RestartedConsumerRequiresANewerLeaseConfirmation()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Worker");
+            var worker = Start();
+            long deadline = System.DateTime.UtcNow.AddSeconds(20).Ticks;
+            string Assignment(long expires) => TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"task\",\"lease_epoch\":1,\"lease_expires_utc_ticks\":" + expires +
+                ",\"details\":{\"steps\":[\"execute\"]}}", targetId: 42);
+
+            worker.ProcessIncomingMessage(1, Assignment(deadline));
+            Assert.Contains("Lease confirmed", worker.GetStatus());
+
+            worker = Start();
+            worker.ProcessIncomingMessage(1, Assignment(deadline));
+            worker.ProcessCommand("stage execute");
+            Assert.Contains("Waiting for lease confirmation", worker.GetStatus());
+            Assert.Contains("Pending completion: none", worker.GetStatus());
+
+            worker.ProcessIncomingMessage(1, Assignment(deadline + 1));
+            worker.ProcessCommand("stage execute");
+            Assert.Contains("Pending completion: task", worker.GetStatus());
+        }
+
+        [Fact]
         public void ConsumerIgnoresExpiredAssignmentAndOlderLeaseRefresh()
         {
             var worker = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { }, 42, "Point", 1);
