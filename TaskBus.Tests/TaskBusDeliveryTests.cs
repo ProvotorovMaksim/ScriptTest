@@ -83,6 +83,56 @@ namespace TaskBus.Tests
             Assert.DoesNotContain("TASK|", broker.Storage);
         }
 
+        [Fact]
+        public void ExpiredWorkerCannotCommitOrResumeLeaseAfterAnotherWorkerTakesOver()
+        {
+            var broker = StartBroker("");
+            string firstStorage = "";
+            string secondStorage = "";
+            TaskBusConsumer StartFirst() => new TaskBusConsumer(
+                (message, _) => broker.IGC.Inbox.Enqueue((42, message)),
+                () => firstStorage, value => firstStorage = value, _ => { }, 42, "First", 1);
+            var second = new TaskBusConsumer(
+                (message, _) => broker.IGC.Inbox.Enqueue((43, message)),
+                () => secondStorage, value => secondStorage = value, _ => { }, 43, "Second", 1);
+
+            var publication = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore-3\",\"key\":\"Ore/Iron\"}", targetId: 1);
+            Dispatch(broker, 9, publication);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+
+            var first = StartFirst();
+            first.Tick();
+            broker.Main("");
+            var earlyAssignment = TakeResponse(broker, "TASK_ASSIGN", 42);
+            DeliverToWorker(first, earlyAssignment);
+            broker.Main("");
+            first.ProcessCommand("stage execute");
+            var delayedCompletion = broker.IGC.Inbox.Dequeue();
+
+            for (int tick = 0; tick < 181; tick++)
+                broker.Main("");
+            second.Tick();
+            broker.Main("");
+            DeliverToWorker(second, TakeResponse(broker, "TASK_ASSIGN", 43));
+            broker.Main("");
+
+            Dispatch(broker, delayedCompletion.Source, (string)delayedCompletion.Data);
+            DeliverToWorker(first, TakeResponse(broker, "TASK_REVOKED", 42));
+            first = StartFirst();
+            Assert.Contains("Pending completion: none", first.GetStatus());
+            DeliverToWorker(first, earlyAssignment);
+            Assert.False(first.HasActiveTask);
+            Assert.True(second.HasActiveTask);
+            Assert.Contains("TASK|", broker.Storage);
+
+            second.ProcessCommand("stage execute");
+            broker.Main("");
+            DeliverToWorker(second, TakeResponse(broker, "TASK_DONE_ACK", 43));
+            Assert.Contains("Pending completion: none", second.GetStatus());
+            Assert.DoesNotContain("TASK|", broker.Storage);
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

@@ -48,6 +48,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly List<string> _stages = new List<string>();
         private int _stageIndex;
         private string _lastRevokedTaskId;
+        private int _lastRevokedEpoch = -1;
         private string _pendingCompletedTaskId;
         private int _leaseEpoch;
         private int _pendingCompletedEpoch;
@@ -136,9 +137,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     _echo("Usage: broker <block ID>, or broker 0 for broadcast.");
                 else if (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId))
                     _echo("Change broker only after the current task and completion are resolved.");
-                else
+                else if (_brokerId != brokerId)
                 {
                     _brokerId = brokerId;
+                    _lastRevokedTaskId = null;
+                    _lastRevokedEpoch = -1;
                     SaveState();
                 }
                 return;
@@ -225,6 +228,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
                 return;
 
+            if (taskId == _lastRevokedTaskId && leaseEpoch <= _lastRevokedEpoch)
+                return;
+
             if (!string.IsNullOrEmpty(_pendingCompletedTaskId))
             {
                 if (_pendingCompletedTaskId == taskId && _pendingCompletedEpoch == leaseEpoch)
@@ -248,7 +254,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
                 _leaseEpoch = leaseEpoch;
-                _lastRevokedTaskId = null;
                 SaveState();
                 _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
             }
@@ -384,6 +389,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _pendingCompletedTaskId = null;
                 _pendingCompletedEpoch = 0;
                 _lastRevokedTaskId = taskId;
+                _lastRevokedEpoch = leaseEpoch;
                 SaveState();
                 _echo("Broker revoked the completion lease for " + taskId);
                 return;
@@ -393,6 +399,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
 
             _lastRevokedTaskId = taskId;
+            _lastRevokedEpoch = leaseEpoch;
             _activeTaskId = null;
             _activeTaskJson = null;
             _leaseEpoch = 0;
@@ -499,6 +506,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     }
                     else if (key == "BROKER") long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "REVOKED_EPOCH")
+                    {
+                        int revokedEpoch;
+                        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out revokedEpoch))
+                            _lastRevokedEpoch = revokedEpoch;
+                    }
                     else if (key == "REVOKED") _lastRevokedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "LEASE_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseEpoch);
@@ -532,7 +545,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));
             if (!string.IsNullOrEmpty(_lastRevokedTaskId))
+            {
                 storage.AppendLine("REVOKED|" + TaskBusIgcHelper.EncodeStorage(_lastRevokedTaskId));
+                storage.AppendLine("REVOKED_EPOCH|" + _lastRevokedEpoch.ToString(CultureInfo.InvariantCulture));
+            }
             if (!string.IsNullOrEmpty(_pendingCompletedTaskId))
             {
                 storage.AppendLine("COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_pendingCompletedTaskId));
