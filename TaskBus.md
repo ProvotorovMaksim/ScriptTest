@@ -727,8 +727,12 @@ grid to Recharge before starting the success timer. Use `dock depart` when
 the mining workflow is ready to leave. FCS sets those batteries to Auto
 before requesting disconnect. If the connector releases separately while the programmable block stays
 powered, FCS sets the batteries to Auto on its next power check. The
-charging state survives a programmable-block recompile. Test the cycle
-with the base powered and verify both charge modes at the drone terminal.
+charging state survives a programmable-block recompile. While still
+connected to the recorded port, the power check restores Recharge after
+a failed or changed battery setting. A saved disconnect continues with
+Auto. If the connected port changes, FCS restores Auto and clears the old
+departure request. Verify both charge modes at the drone terminal with
+the base powered.
 
 The uncrewed charge cycle defaults to a 95% departure threshold, measured
 across enabled, functional ship batteries by stored energy. Set it with

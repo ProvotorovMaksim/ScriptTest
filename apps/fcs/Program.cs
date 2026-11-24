@@ -619,7 +619,13 @@ namespace SpaceEngineers.Apps.FlightControl
                 bool allSet = true;
                 foreach (var battery in batteries)
                 {
-                    try { battery.ChargeMode = chargeMode; }
+                    try
+                    {
+                        if (battery.ChargeMode != chargeMode)
+                            battery.ChargeMode = chargeMode;
+                        if (battery.ChargeMode != chargeMode)
+                            allSet = false;
+                    }
                     catch (Exception) { allSet = false; }
                 }
                 if (allSet)
@@ -660,6 +666,25 @@ namespace SpaceEngineers.Apps.FlightControl
                 var connector = FindDockConnector();
                 if (connector != null && connector.Status == MyShipConnectorStatus.Connected)
                 {
+                    var port = connector.OtherConnector;
+                    if (port == null)
+                    {
+                        status = "FCS: waiting for the connected port to become available.";
+                        return;
+                    }
+                    if (port.EntityId != dockPortId)
+                    {
+                        if (SetDockBatteryMode(ChargeMode.Auto))
+                        {
+                            CompleteDeparture(false);
+                            status = "FCS: recorded berth changed. Ship batteries set to Auto.";
+                        }
+                        return;
+                    }
+
+                    // A persisted disconnect is already committed to Auto, even after restart.
+                    if (!disconnectPending && !SetDockBatteryMode(ChargeMode.Recharge))
+                        return;
                     if ((departureRequested || disconnectPending) && mode == Mode.Off)
                         DepartBerth(false);
                     return;
