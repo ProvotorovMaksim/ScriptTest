@@ -8,6 +8,25 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void MiningStatusShowsQuantityAndDeliveryBaseAfterRestart()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { },
+                () => storage, value => storage = value, _ => { }, 42, "Worker");
+            var worker = Start();
+            var payload = "{\"task_id\":\"ore-1\",\"lease_epoch\":1,\"key\":\"Ore/Iron\",\"details\":{" +
+                "\"resource\":\"Ore/Iron\",\"amount\":12.5,\"base_grid_name\":\"Refinery\"," +
+                "\"base_position\":{\"x\":100,\"y\":-200.25,\"z\":300},\"steps\":[\"survey\"]}}";
+            worker.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_ASSIGN", payload, targetId: 42));
+
+            var status = Start().GetStatus();
+            Assert.Contains("Resource: Ore/Iron", status);
+            Assert.Contains("Requested amount: 12.5", status);
+            Assert.Contains("Delivery base: Refinery", status);
+            Assert.Contains("Base at request time (X, Y, Z): 100, -200.25, 300", status);
+        }
+
+        [Fact]
         public void StageWaitsForLeaseConfirmationAfterRestartAndTimeout()
         {
             string storage = "";

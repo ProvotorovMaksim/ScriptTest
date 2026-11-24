@@ -391,13 +391,54 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             string keyJson;
             string key;
-            string amountJson;
-            if (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "key", out keyJson) &&
-                TaskBusIgcHelper.TryReadJsonString(keyJson, out key) &&
-                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out amountJson))
-                return key + " details=" + amountJson;
+            string details;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "key", out keyJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(keyJson, out key) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details))
+                return _activeTaskJson;
 
-            return _activeTaskJson;
+            string resourceJson;
+            string resource;
+            double amount;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out resourceJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(resourceJson, out resource) ||
+                !TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
+                return key + " details=" + details;
+
+            var summary = new StringBuilder();
+            summary.AppendLine("Resource: " + resource);
+            summary.Append("Requested amount: " + amount.ToString("G", CultureInfo.InvariantCulture));
+
+            string baseNameJson;
+            string baseName;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_grid_name", out baseNameJson) &&
+                TaskBusIgcHelper.TryReadJsonString(baseNameJson, out baseName))
+                summary.Append("\nDelivery base: " + baseName);
+
+            string position;
+            double x;
+            double y;
+            double z;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_position", out position) &&
+                TryReadFiniteNumber(position, "x", out x) &&
+                TryReadFiniteNumber(position, "y", out y) &&
+                TryReadFiniteNumber(position, "z", out z))
+            {
+                var culture = CultureInfo.InvariantCulture;
+                summary.Append("\nBase at request time (X, Y, Z): " +
+                    x.ToString("0.##", culture) + ", " + y.ToString("0.##", culture) + ", " + z.ToString("0.##", culture));
+            }
+
+            return summary.ToString();
+        }
+
+        private static bool TryReadFiniteNumber(string json, string key, out double value)
+        {
+            value = 0;
+            string raw;
+            return TaskBusIgcHelper.TryGetJsonProperty(json, key, out raw) &&
+                double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+                !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         private void ShowStatus()

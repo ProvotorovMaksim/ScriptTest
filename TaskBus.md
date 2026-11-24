@@ -52,6 +52,8 @@ ship attached only by a connector is outside that inventory scope.
 1. Start below the threshold. Run `status` on the broker and record the task
    ID. Leave the shortage in place through a publication retry. The worker
    should retain the same task ID and the broker should show one open task.
+   Check that the worker status shows the requested amount and the base's
+   name and coordinates at the time of the request.
 2. Run `stage survey` on the worker. Recompile its Programmable Block without
    clearing Storage. Wait for the broker to confirm the lease again. Verify
    that the worker restores the same task and displays `mine` as the next stage. Run `stage mine`, `stage intermediate` and
