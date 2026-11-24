@@ -560,13 +560,35 @@ namespace TaskBus.Tests
             source.Main("broker pause");
             source.Main("broker export");
             Assert.DoesNotContain("RETIRED|1", source.Storage);
-            source.Main("broker handoff");
+            var regularBackup = panel.Text;
+            Assert.StartsWith("TASKBUS-BACKUP-1|", regularBackup);
+            panel.RejectWrites = true;
+            source.Main("broker handoff 2");
+            Assert.Equal(regularBackup, panel.Text);
+            panel.RejectWrites = false;
+            Assert.Contains("HANDOFF_TARGET|2", source.Storage);
             Assert.Contains("RETIRED|1", source.Storage);
-            source = StartBroker(AfterResumeDeadline(source.Storage));
-            source.Main("broker resume");
-            Assert.Contains("PAUSED|1", source.Storage);
+            var retiredAfterDeadline = StartBroker(AfterResumeDeadline(source.Storage));
+            retiredAfterDeadline.Main("broker resume");
+            Assert.Contains("PAUSED|1", retiredAfterDeadline.Storage);
+            source = StartBroker(source.Storage);
 
-            var destination = StartBroker("");
+            source.GridTerminalSystem.BackupPanel = panel;
+            source.Main("broker export");
+            Assert.StartsWith("TASKBUS-BACKUP-2|", panel.Text);
+            Assert.Contains("HANDOFF_TARGET|2", panel.Text);
+            var exported = panel.Text;
+            source.Main("broker handoff 3");
+            Assert.Equal(exported, panel.Text);
+
+            var wrongDestination = StartBroker("", 3);
+            wrongDestination.GridTerminalSystem.BackupPanel = panel;
+            wrongDestination.Main("broker pause");
+            var wrongStorage = wrongDestination.Storage;
+            wrongDestination.Main("broker import");
+            Assert.Equal(wrongStorage, wrongDestination.Storage);
+
+            var destination = StartBroker("", 2);
             destination.GridTerminalSystem.BackupPanel = panel;
             destination.Main("broker pause");
             var empty = destination.Storage;
@@ -578,16 +600,17 @@ namespace TaskBus.Tests
 
             destination.Main("broker import");
             Assert.DoesNotContain("RETIRED|1", destination.Storage);
+            Assert.DoesNotContain("HANDOFF_TARGET|", destination.Storage);
             Assert.Contains("PAUSED|1", destination.Storage);
             Assert.Contains("TASK|9-1|", destination.Storage);
             var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL",
-                "{\"group_id\":\"MiningPoints\"}", targetId: 1);
+                "{\"group_id\":\"MiningPoints\"}", targetId: 2);
             Dispatch(destination, 42, poll);
             Assert.Empty(destination.IGC.Outbox);
 
             destination.Main("broker resume");
             Assert.Contains("PAUSED|1", destination.Storage);
-            destination = StartBroker(AfterResumeDeadline(destination.Storage));
+            destination = StartBroker(AfterResumeDeadline(destination.Storage), 2);
             destination.Main("broker resume");
             Dispatch(destination, 42, poll);
             Assert.Contains("9-1", TakeResponse(destination, "TASK_ASSIGN", 42).PayloadJson);
@@ -598,10 +621,13 @@ namespace TaskBus.Tests
             public long CubeGrid => 1;
             public bool IsWorking => true;
             public string Text = "";
+            public bool RejectWrites;
             public string GetText() => Text;
 
             public bool WriteText(string text, bool append)
             {
+                if (RejectWrites)
+                    return false;
                 Text = append ? Text + text : text;
                 return true;
             }

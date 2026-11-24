@@ -15,6 +15,7 @@ namespace SpaceEngineers.Services.Broker
         #endregion
         private const string BackupPanelName = "[TASKBUS BACKUP]";
         private const string BackupVersion = "TASKBUS-BACKUP-1|";
+        private const string HandoffVersion = "TASKBUS-BACKUP-2|";
         private const string GalnetRelayName = "[GALNET RELAY]";
         private readonly Dictionary<long, long> _galnetRoutes = new Dictionary<long, long>();
         private readonly Queue<string> _galnetReplies = new Queue<string>();
@@ -27,6 +28,8 @@ namespace SpaceEngineers.Services.Broker
         private int _sequence;
         private bool _paused;
         private bool _retired;
+        private long _handoffTarget;
+        private const string HandoffField = "HANDOFF_TARGET|";
         private long _resumeAfterUtc;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
         private readonly List<string> _cancelledRequestIds = new List<string>();
@@ -131,8 +134,19 @@ namespace SpaceEngineers.Services.Broker
                 }
                 else if (string.Equals(command, "broker export", StringComparison.OrdinalIgnoreCase))
                     TransferBackup(import: false);
-                else if (string.Equals(command, "broker handoff", StringComparison.OrdinalIgnoreCase))
-                    TransferBackup(import: false, retire: true);
+                else if (command.StartsWith("broker handoff", StringComparison.OrdinalIgnoreCase))
+                {
+                    const string prefix = "broker handoff ";
+                    long target;
+                    if (!command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                        !long.TryParse(command.Substring(prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out target) ||
+                        target == 0 || target == Me.EntityId)
+                        Echo("Use broker handoff <destination PB ID>.");
+                    else if (_handoffTarget != 0 && _handoffTarget != target)
+                        Echo("This source is already retired for a different destination.");
+                    else
+                        TransferBackup(import: false, retireTo: target);
+                }
                 else if (string.Equals(command, "broker import", StringComparison.OrdinalIgnoreCase))
                     TransferBackup(import: true);
                 else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
@@ -815,7 +829,7 @@ namespace SpaceEngineers.Services.Broker
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);
         }
 
-        private void TransferBackup(bool import, bool retire = false)
+        private void TransferBackup(bool import, long retireTo = 0)
         {
             var panel = GridTerminalSystem.GetBlockWithName(BackupPanelName) as IMyTextPanel;
             if (panel == null || !panel.IsWorking || panel.CubeGrid != Me.CubeGrid)
@@ -827,23 +841,27 @@ namespace SpaceEngineers.Services.Broker
             if (!import)
             {
                 var existing = panel.GetText();
-                if (existing.Length != 0 && !existing.StartsWith(BackupVersion, StringComparison.Ordinal))
+                if (existing.Length != 0 && !existing.StartsWith(BackupVersion, StringComparison.Ordinal) &&
+                    !existing.StartsWith(HandoffVersion, StringComparison.Ordinal))
                 {
                     Echo("Backup panel contains unrelated text.");
                     return;
                 }
-                var queueText = Storage.Replace("\r\n", "\n").Replace("\nRETIRED|1\n", "\n");
-                var backup = BackupVersion + BackupChecksum(queueText) + "\n" + queueText;
-                if (!panel.WriteText(backup, false) || panel.GetText().Replace("\r\n", "\n") != backup)
-                    Echo("Backup write failed verification.");
-                else if (retire)
+                if (retireTo != 0 && _handoffTarget == 0)
                 {
                     _retired = true;
+                    _handoffTarget = retireTo;
                     SaveQueue();
-                    Echo("Broker backup exported. Source is retired.");
                 }
+
+                var queueText = Storage.Replace("\r\n", "\n").Replace("\nRETIRED|1\n", "\n");
+                var version = _handoffTarget == 0 ? BackupVersion : HandoffVersion;
+                var backup = version + BackupChecksum(queueText) + "\n" + queueText;
+                if (!panel.WriteText(backup, false) || panel.GetText().Replace("\r\n", "\n") != backup)
+                    Echo(_retired ? "Backup write failed. Source remains retired. Retry broker export." :
+                        "Backup write failed verification.");
                 else
-                    Echo("Broker backup exported.");
+                    Echo(_retired ? "Broker backup exported. Source is retired." : "Broker backup exported.");
                 return;
             }
 
@@ -856,19 +874,41 @@ namespace SpaceEngineers.Services.Broker
 
             var snapshot = panel.GetText().Replace("\r\n", "\n");
             var separator = snapshot.IndexOf('\n');
-            if (separator <= BackupVersion.Length || !snapshot.StartsWith(BackupVersion, StringComparison.Ordinal))
+            bool targeted = snapshot.StartsWith(HandoffVersion, StringComparison.Ordinal);
+            var header = targeted ? HandoffVersion : BackupVersion;
+            if (separator <= header.Length || !snapshot.StartsWith(header, StringComparison.Ordinal))
             {
                 Echo("Unrecognized broker backup.");
                 return;
             }
             var queue = snapshot.Substring(separator + 1);
-            if (snapshot.Substring(BackupVersion.Length, separator - BackupVersion.Length) != BackupChecksum(queue) ||
+            if (snapshot.Substring(header.Length, separator - header.Length) != BackupChecksum(queue) ||
                 !queue.StartsWith("SEQ|", StringComparison.Ordinal) ||
                 queue.IndexOf("\nPAUSED|1\n", StringComparison.Ordinal) < 0 ||
                 queue.IndexOf("\nRETIRED|1\n", StringComparison.Ordinal) >= 0)
             {
                 Echo("Broker backup failed verification.");
                 return;
+            }
+
+            int targetStart = queue.IndexOf("\n" + HandoffField, StringComparison.Ordinal);
+            if (targeted != (targetStart >= 0))
+            {
+                Echo("Backup format does not match the handoff destination field.");
+                return;
+            }
+            if (targeted)
+            {
+                int valueStart = targetStart + 1 + HandoffField.Length;
+                int targetEnd = queue.IndexOf('\n', valueStart);
+                long target;
+                if (targetEnd != queue.Length - 1 || !long.TryParse(queue.Substring(valueStart, targetEnd - valueStart),
+                    NumberStyles.Integer, CultureInfo.InvariantCulture, out target) || target != Me.EntityId)
+                {
+                    Echo("This broker is not the handoff destination.");
+                    return;
+                }
+                queue = queue.Substring(0, targetStart + 1);
             }
 
             Storage = queue;
@@ -896,6 +936,7 @@ namespace SpaceEngineers.Services.Broker
             _sequence = 0;
             _paused = false;
             _retired = false;
+            _handoffTarget = 0;
             _resumeAfterUtc = -1;
             if (string.IsNullOrWhiteSpace(Storage))
                 return;
@@ -906,6 +947,12 @@ namespace SpaceEngineers.Services.Broker
                 if (parts.Length == 2 && parts[0] == "PAUSED")
                 {
                     _paused = parts[1].Trim() == "1";
+                    continue;
+                }
+                if (line.StartsWith(HandoffField, StringComparison.Ordinal))
+                {
+                    long.TryParse(line.Substring(HandoffField.Length), NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out _handoffTarget);
                     continue;
                 }
                 if (parts.Length == 2 && parts[0] == "RETIRED")
@@ -1027,6 +1074,7 @@ namespace SpaceEngineers.Services.Broker
                     continue;
                 }
             }
+            _retired |= _handoffTarget != 0;
             _paused |= _retired;
             if (_paused && _resumeAfterUtc < 0)
                 _resumeAfterUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
@@ -1076,6 +1124,8 @@ namespace SpaceEngineers.Services.Broker
                     storage.Append('|').Append(task.CompletedMiningPhase.ToString(CultureInfo.InvariantCulture));
                 storage.AppendLine();
             }
+            if (_retired && _handoffTarget != 0)
+                storage.AppendLine(HandoffField + _handoffTarget.ToString(CultureInfo.InvariantCulture));
             Storage = storage.ToString();
         }
 

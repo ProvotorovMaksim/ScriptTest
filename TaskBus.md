@@ -81,11 +81,16 @@ start issuing work again.
 
 For a planned handoff, add a dedicated `[TASKBUS BACKUP]` text panel to
 the source and destination grids. A shared panel works when both brokers
-are on the same grid. Pause the source and run `broker handoff`. It
-exports a verified snapshot and durably retires the source. Check that
-`status` reports Retired before activating the destination. A retired
-broker can export its data again and rejects resume and import. Use
-`broker export` for a backup when you intend to keep using the source.
+are on the same grid. Pause the source and run
+`broker handoff <destination PB ID>`. It exports a verified snapshot for
+that broker ID after durably retiring the source. Other brokers reject
+the snapshot. A planned handoff requires both brokers to run code that
+supports the version 2 snapshot format. Before importing, verify that
+`status` reports Retired on the source and the LCD text starts with
+`TASKBUS-BACKUP-2|`. A retired broker rejects resume and import. If the LCD write
+fails, retry `broker export` on the source. The exported snapshot keeps
+the original destination ID. Use `broker export` before initiating
+handoff for a backup when you intend to keep using the source.
 If using two panels, copy the complete text without editing it. Pause a fresh empty
 destination and run `broker import`. A successful import restores the
 queue and its deduplication history and leaves the destination paused.
