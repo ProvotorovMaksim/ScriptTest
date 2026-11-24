@@ -20,6 +20,9 @@ namespace SpaceEngineers.Apps.Platform
         private const string SurveyWaypointName = "AMN survey sample";
         private const int MaxSurveyPlanPoints = 9;
         private readonly List<Vector3D> _surveyPlan = new List<Vector3D>();
+        private readonly List<IMyShipController> _surveyControllers = new List<IMyShipController>();
+        private readonly List<IMyShipConnector> _surveyConnectors = new List<IMyShipConnector>();
+        private string _surveyFlightLease;
         private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -74,6 +77,7 @@ namespace SpaceEngineers.Apps.Platform
                 }, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
+            CheckSurveyFlight();
             var camera = FindCamera();
             if (camera != null) camera.EnableRaycast = true;
         }
@@ -97,6 +101,7 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
+            CheckSurveyFlight();
             UpdateOreSample();
             if (command.StartsWith("probe ", StringComparison.OrdinalIgnoreCase))
                 Probe(command.Substring(6));
@@ -126,12 +131,22 @@ namespace SpaceEngineers.Apps.Platform
                 PlanSurvey(command.Substring(9).Trim());
             else if (string.Equals(command, "ore route", StringComparison.OrdinalIgnoreCase))
                 LoadNextSurveyWaypoint();
+            else if (string.Equals(command, "ore fly", StringComparison.OrdinalIgnoreCase))
+                StartSurveyFlight();
+            else if (string.Equals(command, "ore stop", StringComparison.OrdinalIgnoreCase))
+            {
+                _autoSample = false;
+                _sampleDetector = null;
+                _surveyFlightLease = null;
+                CheckSurveyFlight();
+            }
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
             UpdateAutomaticSampling();
+            CheckSurveyFlight();
             _galnet.Flush();
             Echo(_worker.GetStatus());
             Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
@@ -302,9 +317,9 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            if (_surveyLease == null || !SurveyLeaseIsCurrent())
+            if (_worker.SupervisedCruiseRemote != 0 || _surveyLease == null || !SurveyLeaseIsCurrent())
             {
-                Echo("Start a confirmed task survey with ore task before planning.");
+                Echo("Stop the current flight and start a confirmed task survey before planning.");
                 return;
             }
             var controller = GridTerminalSystem.GetBlockWithName(ControllerName) as IMyShipController;
@@ -382,6 +397,74 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Survey waypoint ready. Review clearance before starting the one-way flight.");
         }
 
+        private void StartSurveyFlight()
+        {
+            var remote = FindSurveyRemote();
+            if (_worker.SupervisedCruiseRemote != 0 || _surveyPlan.Count == 0 || _surveyLease == null ||
+                !SurveyLeaseIsCurrent() || _sampleDetector != null || remote == null || remote.FlightMode != FlightMode.OneWay)
+            {
+                Echo("A confirmed survey plan, a One Way survey controller and no active sample or leg are required.");
+                return;
+            }
+
+            _surveyControllers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyControllers, controller => controller.CubeGrid == Me.CubeGrid);
+            foreach (var controller in _surveyControllers)
+            {
+                var otherRemote = controller as IMyRemoteControl;
+                if (controller.IsUnderControl || (otherRemote != null && otherRemote.IsAutoPilotEnabled))
+                {
+                    Echo("Release pilot control and stop other autopilots before survey flight.");
+                    return;
+                }
+            }
+            _surveyConnectors.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
+                connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
+            if (_surveyConnectors.Count != 0)
+            {
+                Echo("Undock before survey flight.");
+                return;
+            }
+
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count != 1 || _surveyWaypoints[0].Name != SurveyWaypointName ||
+                _surveyWaypoints[0].Coords != _surveyPlan[0])
+            {
+                Echo("Load and review the next waypoint with ore route.");
+                return;
+            }
+
+            _worker.SetSupervisedCruiseRemote(remote.EntityId);
+            _surveyFlightLease = _surveyLease;
+            remote.SetAutoPilotEnabled(true);
+            if (!remote.IsAutoPilotEnabled)
+                _worker.SetSupervisedCruiseRemote(0);
+            Echo(remote.IsAutoPilotEnabled ? "Survey leg started." : "Survey autopilot did not engage.");
+        }
+
+        private void CheckSurveyFlight()
+        {
+            long id = _worker.SupervisedCruiseRemote;
+            if (id == 0)
+                return;
+
+            var remote = GridTerminalSystem.GetBlockWithId(id) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
+            {
+                _worker.SetSupervisedCruiseRemote(0);
+                return;
+            }
+            if (_surveyFlightLease == null || _surveyFlightLease != _surveyLease || !SurveyLeaseIsCurrent())
+            {
+                remote.SetAutoPilotEnabled(false);
+                if (!remote.IsAutoPilotEnabled)
+                    _worker.SetSupervisedCruiseRemote(0);
+                _lastProbe = "Survey leg stopped. Confirm the lease before starting it again.";
+            }
+        }
+
         private void CompletePlannedSurveyPosition()
         {
             if (_surveyPlan.Count == 0)
@@ -435,7 +518,7 @@ namespace SpaceEngineers.Apps.Platform
 
         private void UpdateAutomaticSampling()
         {
-            if (!_autoSample || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
+            if (!_autoSample || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
                 !SurveyLeaseIsCurrent() || ++_autoSampleTicks < 6)
                 return;
 
@@ -452,7 +535,8 @@ namespace SpaceEngineers.Apps.Platform
 
         private void ScheduleOreSample(bool automatic = false)
         {
-            if (_surveyOre == null || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews)
+            if (_surveyOre == null || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
+                _worker.SupervisedCruiseRemote != 0)
             {
                 _lastProbe = "Start an ore survey, or wait for the current sample.";
                 return;

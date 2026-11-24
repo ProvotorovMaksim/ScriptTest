@@ -327,7 +327,9 @@ space. Previously sampled positions are omitted. The GPS points are for
 route review and do not have terrain clearance checks. The plan is saved
 with the survey. Use `ore route` to load one point into a dedicated local
 Remote Control named `[AMN SURVEY ROUTE]` in One Way mode. Turn autopilot
-off before loading a point, then start the reviewed leg from the remote.
+off before loading a point, then run `ore fly` to start the reviewed leg.
+The platform stops its supervised survey autopilot after lease loss or a
+PB restart. Use `ore stop` to cancel the leg and automatic sampling.
 A completed sample within 2 m of the point, measured at the remote, advances
 the saved plan. Repeat `ore route` for the next point.
 
