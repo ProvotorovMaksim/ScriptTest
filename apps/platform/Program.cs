@@ -244,20 +244,37 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            _miningItems.Clear();
-            source.GetItems(_miningItems);
+            double remaining = amount - _worker.MiningDeposited;
+            if (remaining <= 0.0000001)
+            {
+                Echo("The requested mining quantity has already been unloaded.");
+                return;
+            }
+
+            double before = MeasureMiningCargo(source, resource);
+            bool attempted = false;
             foreach (var item in _miningItems)
             {
                 if (!MatchesMiningResource(item, resource))
                     continue;
 
-                var quantity = (VRage.MyFixedPoint)Math.Min(amount, (double)item.Amount);
-                bool transferred = (double)quantity > 0 && source.TransferItemTo(destination, item, quantity);
-                Echo(transferred ? "Requested ore stack transferred. Verify the mining point inventory." :
-                    "Transfer refused. Check available space and conveyor permissions.");
-                return;
+                var quantity = (VRage.MyFixedPoint)Math.Min(remaining, (double)item.Amount);
+                if ((double)quantity > 0)
+                {
+                    source.TransferItemTo(destination, item, quantity);
+                    attempted = true;
+                }
+                break;
             }
-            Echo("No " + resource + " in the configured mining cargo container.");
+            double transferred = attempted ? before - MeasureMiningCargo(source, resource) : 0;
+            if (transferred > 0)
+            {
+                _worker.RecordMiningDeposit(transferred);
+                Echo("Mining deposit: " + _worker.MiningDeposited.ToString("G", CultureInfo.InvariantCulture) +
+                    " / " + amount.ToString("G", CultureInfo.InvariantCulture) + " " + resource + ".");
+            }
+            else
+                Echo("No requested ore transferred. Check cargo, available space and conveyor permissions.");
         }
 
         private void RequestMiningPointDock()
@@ -353,18 +370,12 @@ namespace SpaceEngineers.Apps.Platform
                 _lastProbe = "Managed drills halted: cargo inventory or mining target unavailable.";
                 return false;
             }
-            double collected = 0;
-            _miningItems.Clear();
-            inventory.GetItems(_miningItems);
-            foreach (var item in _miningItems)
-            {
-                if (MatchesMiningResource(item, resource))
-                    collected += (double)item.Amount;
-            }
-
+            double collected = MeasureMiningCargo(inventory, resource);
+            double deposited = _worker.MiningDeposited;
             _lastProbe = "Mining cargo " + resource + ": " + collected.ToString("G", CultureInfo.InvariantCulture) +
-                " / " + target.ToString("G", CultureInfo.InvariantCulture);
-            if (collected >= target)
+                " aboard, " + deposited.ToString("G", CultureInfo.InvariantCulture) +
+                " deposited / " + target.ToString("G", CultureInfo.InvariantCulture);
+            if (collected + deposited >= target)
             {
                 _lastProbe += ". Target reached; drills halted.";
                 return false;
@@ -375,6 +386,19 @@ namespace SpaceEngineers.Apps.Platform
                 return false;
             }
             return true;
+        }
+
+        private double MeasureMiningCargo(IMyInventory inventory, string resource)
+        {
+            double total = 0;
+            _miningItems.Clear();
+            inventory.GetItems(_miningItems);
+            foreach (var item in _miningItems)
+            {
+                if (MatchesMiningResource(item, resource))
+                    total += (double)item.Amount;
+            }
+            return total;
         }
 
         private IMyInventory FindMiningInventory()

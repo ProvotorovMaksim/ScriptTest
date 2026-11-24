@@ -798,6 +798,28 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
+        private string _miningDepositLease;
+        private double _miningDeposited;
+
+        public double MiningDeposited
+        {
+            get
+            {
+                return _miningDepositLease != null && _miningDepositLease == ConfirmedLeaseIdentity ? _miningDeposited : 0;
+            }
+        }
+
+        public void RecordMiningDeposit(double transferred)
+        {
+            string resource;
+            double target;
+            if (!(transferred > 0) || double.IsInfinity(transferred) || !TryGetMiningCargoTarget(out resource, out target))
+                return;
+            _miningDeposited = Math.Min(target, MiningDeposited + transferred);
+            _miningDepositLease = ConfirmedLeaseIdentity;
+            SaveState();
+        }
+
         public long SupervisedCruiseRemote { get; private set; }
 
         public void SetSupervisedCruiseRemote(long remoteId)
@@ -1150,6 +1172,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                             cargo >= 0 && !double.IsInfinity(cargo))
                             _pickupCargo = cargo;
                     }
+                    else if (key == "MINING_DEPOSIT")
+                    {
+                        var fields = value.Split('|');
+                        double deposited;
+                        if (fields.Length == 2 && double.TryParse(fields[1], NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out deposited) && deposited > 0 && !double.IsInfinity(deposited))
+                        {
+                            _miningDepositLease = TaskBusIgcHelper.DecodeStorage(fields[0]);
+                            _miningDeposited = deposited;
+                        }
+                    }
                     else if (key == "CRUISE_REMOTE")
                     {
                         long remoteId;
@@ -1211,6 +1244,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             foreach (var site in _knownSites)
                 storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Key) +
                     "|" + TaskBusIgcHelper.EncodeStorage(site.Value));
+            if (_miningDepositLease != null)
+                storage.AppendLine("MINING_DEPOSIT|" + TaskBusIgcHelper.EncodeStorage(_miningDepositLease) +
+                    "|" + _miningDeposited.ToString("R", CultureInfo.InvariantCulture));
             if (SupervisedCruiseRemote != 0)
                 storage.AppendLine("CRUISE_REMOTE|" + SupervisedCruiseRemote.ToString(CultureInfo.InvariantCulture));
             if (_autoPoint) storage.AppendLine("POINT_AUTO|1");

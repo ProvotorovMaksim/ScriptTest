@@ -8,6 +8,28 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void MiningDepositIsRestoredOnlyForTheSameConfirmedLease()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Platform", miningPlatform: true);
+            var platform = Start();
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"mine\",\"lease_epoch\":1,\"group_id\":\"MiningFleet\"," +
+                "\"details\":{\"resource\":\"Ore/Iron\",\"amount\":100,\"steps\":[\"mine\"]}}", targetId: 42);
+            platform.ProcessIncomingMessage(1, assignment);
+            platform.RecordMiningDeposit(60);
+            platform = Start();
+            Assert.Equal(0, platform.MiningDeposited);
+            platform.ProcessIncomingMessage(1, assignment);
+            Assert.Equal(60, platform.MiningDeposited);
+            platform.RecordMiningDeposit(60);
+            Assert.Equal(100, platform.MiningDeposited);
+            platform.ProcessIncomingMessage(1, assignment.Replace("\"lease_epoch\":1", "\"lease_epoch\":2"));
+            Assert.Equal(0, platform.MiningDeposited);
+        }
+
+        [Fact]
         public void PlatformUsesMiningPointOnlyUnderAConfirmedLease()
         {
             var platform = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { },
