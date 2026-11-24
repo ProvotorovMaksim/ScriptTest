@@ -19,7 +19,8 @@ namespace SpaceEngineers.Services.Consumer
         private readonly string _haulerCargo;
         private readonly string _haulerDock;
         private readonly string _haulerUnloadTo;
-        private readonly List<IMyCargoContainer> _unloadContainers = new List<IMyCargoContainer>();
+        private readonly string _haulerLoadFrom;
+        private readonly List<IMyCargoContainer> _stationContainers = new List<IMyCargoContainer>();
         private readonly List<MyInventoryItem> _cargoItems = new List<MyInventoryItem>();
 
         private readonly GalnetWorkerBridge _galnet;
@@ -39,6 +40,7 @@ namespace SpaceEngineers.Services.Consumer
             _haulerCargo = ReadSetting("HaulerCargo=");
             _haulerDock = ReadSetting("HaulerDock=");
             _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
+            _haulerLoadFrom = ReadSetting("HaulerLoadFrom=");
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
                 getStorage: () => Storage,
@@ -53,7 +55,9 @@ namespace SpaceEngineers.Services.Consumer
                 readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid,
                 autoHauler: string.Equals(ReadSetting("HaulerAuto="), "true", StringComparison.OrdinalIgnoreCase),
                 unloadHaulerCargo: string.IsNullOrEmpty(_haulerUnloadTo)
-                    ? null : (Action<long, string, double>)UnloadHaulerCargo);
+                    ? null : (Action<long, string, double>)UnloadHaulerCargo,
+                loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
+                    ? null : (Action<long, string, double>)LoadHaulerCargo);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
@@ -145,24 +149,33 @@ namespace SpaceEngineers.Services.Consumer
             return string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase);
         }
 
+        private void LoadHaulerCargo(long gridId, string resource, double amount)
+        {
+            var source = FindDockedStationInventory(gridId, _haulerLoadFrom);
+            TransferHaulerCargo(source, FindHaulerInventory(), resource, amount);
+        }
+
         private void UnloadHaulerCargo(long gridId, string resource, double amount)
         {
-            if (gridId == 0 || gridId == Me.CubeGrid.EntityId || ReadDockedGrid() != gridId || amount <= 0)
-                return;
+            var destination = FindDockedStationInventory(gridId, _haulerUnloadTo);
+            TransferHaulerCargo(FindHaulerInventory(), destination, resource, amount);
+        }
 
-            var source = FindHaulerInventory();
-            if (source == null)
-                return;
+        private IMyInventory FindDockedStationInventory(long gridId, string containerName)
+        {
+            if (gridId == 0 || gridId == Me.CubeGrid.EntityId || ReadDockedGrid() != gridId)
+                return null;
 
-            _unloadContainers.Clear();
-            GridTerminalSystem.GetBlocksOfType(_unloadContainers, container =>
+            _stationContainers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_stationContainers, container =>
                 container.CubeGrid.EntityId == gridId && container.IsFunctional &&
-                string.Equals(container.CustomName, _haulerUnloadTo, StringComparison.Ordinal));
-            if (_unloadContainers.Count != 1)
-                return;
+                string.Equals(container.CustomName, containerName, StringComparison.Ordinal));
+            return _stationContainers.Count == 1 ? _stationContainers[0].GetInventory() : null;
+        }
 
-            var destination = _unloadContainers[0].GetInventory();
-            if (destination == null || !source.IsConnectedTo(destination))
+        private void TransferHaulerCargo(IMyInventory source, IMyInventory destination, string resource, double amount)
+        {
+            if (amount <= 0 || source == null || destination == null || !source.IsConnectedTo(destination))
                 return;
 
             _cargoItems.Clear();

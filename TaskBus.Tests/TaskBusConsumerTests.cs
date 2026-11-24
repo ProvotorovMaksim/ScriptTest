@@ -113,9 +113,10 @@ namespace TaskBus.Tests
         public void AutomaticHaulerAdvancesOnlyWithDockAndCargoEvidence()
         {
             var sent = new List<string>();
-            double cargo = 50;
+            double cargo = 20;
             long dock = 600;
             int unloadCalls = 0;
+            int loadCalls = 0;
             var hauler = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { },
                 _ => { }, 42, "Hauler", 1, readHaulerCargo: _ => cargo, readDockedGrid: () => dock,
                 autoHauler: true, unloadHaulerCargo: (grid, resource, remaining) =>
@@ -125,6 +126,13 @@ namespace TaskBus.Tests
                     Assert.Equal(50, remaining);
                     unloadCalls++;
                     cargo -= remaining;
+                }, loadHaulerCargo: (grid, resource, remaining) =>
+                {
+                    Assert.Equal(500, grid);
+                    Assert.Equal("Ore/Iron", resource);
+                    Assert.Equal(30, remaining);
+                    loadCalls++;
+                    cargo += remaining;
                 });
             hauler.ProcessCommand("group Haulers");
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
@@ -133,9 +141,14 @@ namespace TaskBus.Tests
             hauler.ProcessIncomingMessage(1, assignment);
             hauler.Tick();
             Assert.Contains("Stage: pickup", hauler.GetStatus());
+            Assert.Equal(0, loadCalls);
 
             dock = 500;
             hauler.Tick();
+            Assert.Equal(1, loadCalls);
+            Assert.Contains("Stage: pickup", hauler.GetStatus());
+            hauler.Tick();
+            Assert.Equal(1, loadCalls);
             Assert.Contains("Stage: deliver", hauler.GetStatus());
             dock = 600;
             hauler.Tick();

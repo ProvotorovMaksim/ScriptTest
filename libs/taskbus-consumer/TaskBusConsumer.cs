@@ -76,6 +76,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Func<long> _readDockedGrid;
         private readonly bool _autoHauler;
         private readonly Action<long, string, double> _unloadHaulerCargo;
+        private readonly Action<long, string, double> _loadHaulerCargo;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -86,7 +87,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
             Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
-            Action<long, string, double> unloadHaulerCargo = null)
+            Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -105,6 +106,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _gridId = gridId;
             _readDockedGrid = readDockedGrid;
             _unloadHaulerCargo = unloadHaulerCargo;
+            _loadHaulerCargo = loadHaulerCargo;
             _autoHauler = autoHauler && _readDockedGrid != null && _readHaulerCargo != null;
             LoadState();
         }
@@ -818,7 +820,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 if (loaded.Value < amount)
                 {
-                    if (!automatic)
+                    if (automatic && _loadHaulerCargo != null)
+                        _loadHaulerCargo(_readDockedGrid(), resource, amount - loaded.Value);
+                    else if (!automatic)
                         _echo("Load at least " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource + ".");
                     return false;
                 }

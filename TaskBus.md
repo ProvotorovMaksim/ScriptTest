@@ -243,6 +243,11 @@ to confirm pickup and delivery automatically when the required checks pass
 under a recently confirmed lease. A delivery without a saved pickup
 measurement still needs operator confirmation.
 
+Set `HaulerLoadFrom=<mining point cargo container name>` to load
+automatically while docked at the assigned mining grid. The hauler moves
+only the shortage for the requested resource and confirms pickup after
+measuring the resulting load.
+
 Set `HaulerUnloadTo=<base cargo container name>` to transfer cargo
 automatically during delivery. The container must be uniquely named on the
 assigned base grid and connected through the conveyor system. Transfers
