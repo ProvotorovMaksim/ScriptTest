@@ -462,6 +462,13 @@ once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use
 `ore auto off` to stop automatic sampling. Re-enable it after a recompile.
 
+Use `ore perimeter` to list the convex outline of the reported ore GPS
+positions and their vertical span. The outline uses the local gravity
+plane or, in space, the ship plane at the time of the command. Vertices
+are displayed at the midpoint of the reported heights. Use the outline
+to plan more samples. The area between reports is unverified and the
+vertices do not define a cleared flight route or a drill plan.
+
 For standalone surveys use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits

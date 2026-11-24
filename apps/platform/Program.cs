@@ -228,6 +228,8 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
+            else if (string.Equals(command, "ore perimeter", StringComparison.OrdinalIgnoreCase))
+                ShowOrePerimeter();
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
@@ -734,15 +736,10 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            var gravity = controller.GetNaturalGravity();
-            var frame = controller.WorldMatrix;
-            bool inGravity = gravity.LengthSquared() > 0.0001;
-            var up = inGravity ? Vector3D.Normalize(-gravity) : frame.Up;
-            var right = frame.Right - up * Vector3D.Dot(frame.Right, up);
-            if (right.LengthSquared() < 0.01)
-                right = frame.Forward - up * Vector3D.Dot(frame.Forward, up);
-            right = Vector3D.Normalize(right);
-            var across = Vector3D.Cross(up, right);
+            Vector3D up;
+            Vector3D right;
+            Vector3D across;
+            bool inGravity = GetSurveyAxes(controller, out up, out right, out across);
             var center = new Vector3D(x, y, z);
             Echo(inGravity ? "Survey plan aligned to local gravity." : "Survey plan aligned to ship orientation.");
             int index = 0;
@@ -1240,6 +1237,94 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Box corners are reference points. Coverage between and beyond reports is unknown.");
             if (_oreHits.Count >= MaxOreHits)
                 Echo("Observation limit reached. The box may omit additional reports.");
+        }
+
+        private static bool GetSurveyAxes(IMyShipController controller, out Vector3D up,
+            out Vector3D right, out Vector3D across)
+        {
+            var gravity = controller.GetNaturalGravity();
+            var frame = controller.WorldMatrix;
+            bool inGravity = gravity.LengthSquared() > 0.0001;
+            up = inGravity ? Vector3D.Normalize(-gravity) : frame.Up;
+            right = frame.Right - up * Vector3D.Dot(frame.Right, up);
+            if (right.LengthSquared() < 0.01)
+                right = frame.Forward - up * Vector3D.Dot(frame.Forward, up);
+            right = Vector3D.Normalize(right);
+            across = Vector3D.Cross(up, right);
+            return inGravity;
+        }
+
+        private void ShowOrePerimeter()
+        {
+            var controller = GridTerminalSystem.GetBlockWithName(ControllerName) as IMyShipController;
+            if (controller == null || controller.CubeGrid != Me.CubeGrid || !controller.IsWorking)
+            {
+                Echo("Ore perimeter requires a working local " + ControllerName + ".");
+                return;
+            }
+            if (_oreHits.Count < 3)
+            {
+                Echo("Ore perimeter needs at least three distinct reported positions.");
+                return;
+            }
+
+            Vector3D up;
+            Vector3D right;
+            Vector3D across;
+            bool inGravity = GetSurveyAxes(controller, out up, out right, out across);
+            var origin = controller.GetPosition();
+            var points = new List<Vector3D>(_oreHits.Count);
+            double lowest = double.PositiveInfinity;
+            double highest = double.NegativeInfinity;
+            foreach (var hit in _oreHits)
+            {
+                var offset = hit - origin;
+                double height = Vector3D.Dot(offset, up);
+                lowest = Math.Min(lowest, height);
+                highest = Math.Max(highest, height);
+                points.Add(new Vector3D(Vector3D.Dot(offset, right), Vector3D.Dot(offset, across), 0));
+            }
+            points.Sort((first, second) =>
+                first.X == second.X ? first.Y.CompareTo(second.Y) : first.X.CompareTo(second.X));
+            var hull = new List<Vector3D>();
+            foreach (var point in points)
+                AppendPerimeterPoint(hull, point, 0);
+            int upperStart = hull.Count - 1;
+            for (int i = points.Count - 2; i >= 0; i--)
+                AppendPerimeterPoint(hull, points[i], upperStart);
+            hull.RemoveAt(hull.Count - 1);
+            if (hull.Count < 3)
+            {
+                Echo("Reported positions do not enclose an area in the survey plane.");
+                return;
+            }
+
+            double heightMiddle = (lowest + highest) * 0.5;
+            Echo("Observed " + _surveyOre + " perimeter (" + hull.Count + " vertices, " +
+                (inGravity ? "gravity plane" : "ship plane") + ").");
+            Echo("Reported vertical span: " + (highest - lowest).ToString("0.0", CultureInfo.InvariantCulture) + " m.");
+            for (int i = 0; i < hull.Count; i++)
+            {
+                var point = hull[i];
+                var vertex = origin + point.X * right + point.Y * across + heightMiddle * up;
+                Echo(FormatSurveyGps("Ore perimeter " + (i + 1), vertex));
+            }
+            Echo("Interior coverage is unknown. Use these GPS points for survey planning.");
+        }
+
+        private static void AppendPerimeterPoint(List<Vector3D> hull, Vector3D point, int chainStart)
+        {
+            while (hull.Count >= chainStart + 2)
+            {
+                var corner = hull[hull.Count - 1];
+                var previous = hull[hull.Count - 2];
+                var first = corner - previous;
+                var second = point - corner;
+                if (first.X * second.Y - first.Y * second.X > 0.000001)
+                    break;
+                hull.RemoveAt(hull.Count - 1);
+            }
+            hull.Add(point);
         }
 
         private static string FormatSurveyGps(string label, Vector3D position)
