@@ -109,6 +109,7 @@ namespace SpaceEngineers.Apps.Platform
         private int _positiveViews;
         private bool _autoSample;
         private bool _surveySweep;
+        private bool _reportOnSweepCompletion;
         private bool _sweepLegStarted;
         private bool _sweepSampleStarted;
         private int _sweepSettleTicks;
@@ -222,7 +223,9 @@ namespace SpaceEngineers.Apps.Platform
             else if (string.Equals(command, "ore fly", StringComparison.OrdinalIgnoreCase))
                 StartSurveyFlight();
             else if (string.Equals(command, "ore sweep", StringComparison.OrdinalIgnoreCase))
-                BeginSurveySweep();
+                BeginSurveySweep(reportOnCompletion: false);
+            else if (string.Equals(command, "ore sweep report", StringComparison.OrdinalIgnoreCase))
+                BeginSurveySweep(reportOnCompletion: true);
             else if (string.Equals(command, "ore stop", StringComparison.OrdinalIgnoreCase))
             {
                 _autoSample = false;
@@ -876,6 +879,7 @@ namespace SpaceEngineers.Apps.Platform
                 }
             }
             _worker.CompleteSurvey(report);
+            _lastProbe = "Survey report queued for delivery to the broker.";
             _autoSample = false;
             _surveySweep = false;
         }
@@ -1627,7 +1631,7 @@ namespace SpaceEngineers.Apps.Platform
                 (!_platformMiningRetreat || (remote.GetShipSpeed() <= 1.5 && CheckMiningLane(x, y, z)));
         }
 
-        private void BeginSurveySweep()
+        private void BeginSurveySweep(bool reportOnCompletion)
         {
             if (_surveySweep || _surveyLease == null || !SurveyLeaseIsCurrent() ||
                 _surveyPlan.Count == 0 || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null)
@@ -1641,6 +1645,7 @@ namespace SpaceEngineers.Apps.Platform
             _sweepSampleStarted = false;
             _sweepSettleTicks = 0;
             _sweepScanTicks = 0;
+            _reportOnSweepCompletion = reportOnCompletion;
             _surveySweep = true;
         }
 
@@ -1648,9 +1653,19 @@ namespace SpaceEngineers.Apps.Platform
         {
             if (!_surveySweep)
                 return;
-            if (!SurveyLeaseIsCurrent() || _surveyPlan.Count == 0)
+            if (!SurveyLeaseIsCurrent())
             {
                 _surveySweep = false;
+                _lastProbe = "Survey sweep halted: the survey lease is no longer confirmed.";
+                return;
+            }
+            if (_surveyPlan.Count == 0)
+            {
+                _surveySweep = false;
+                if (_reportOnSweepCompletion)
+                    SubmitOreSurvey();
+                else
+                    _lastProbe = "Survey sweep complete. Review the samples or submit an ore report.";
                 return;
             }
             if (_worker.SupervisedCruiseRemote != 0 || _sampleDetector != null)

@@ -521,6 +521,10 @@ checks one line and the operator still reviews clearance for the hull.
 It advances only after a completed sample
 at the planned waypoint. Lease loss, stopping outside the waypoint tolerance
 or a sample failure stops the sweep. It stays stopped after a restart.
+Use `ore sweep report` to submit the survey automatically after every
+remaining point has been sampled under the same confirmed lease. The
+worker saves the completion and retries delivery until the broker
+confirms or revokes it. A halted sweep waits for operator review.
 
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from
