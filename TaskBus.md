@@ -98,6 +98,14 @@ approach to the configured waypoint list while autopilot is off. A previous
 AMN approach must be removed before loading a different task. Review route
 and terrain clearance before enabling autopilot.
 
+Use a second, empty Remote Control named `[AMN RETURN]` for the return leg.
+With both autopilots off, `route return` copies the configured outbound
+waypoints in reverse order, excluding the final ore approach. The first
+outbound waypoint should be the return handoff position near the mining
+point. Review clearance for the return controller's mounting position,
+the loaded ship and current obstacles before launching. Final docking
+is handled separately by FCS.
+
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
 children only from the block holding that lease in `MiningPoints`.

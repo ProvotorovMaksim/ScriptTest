@@ -14,11 +14,13 @@ namespace SpaceEngineers.Services.Consumer
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int PollIntervalTicks = 30;
         private const string RouteControllerName = "[AMN ROUTE]";
+        private const string ReturnControllerName = "[AMN RETURN]";
         private const string RouteWaypointPrefix = "AMN approach ";
         private const string MonitorName = "[AMN STATUS]";
         private int _monitorTicks;
 
         private readonly List<MyWaypointInfo> _routeWaypoints = new List<MyWaypointInfo>();
+        private readonly List<MyWaypointInfo> _returnWaypoints = new List<MyWaypointInfo>();
         private readonly TaskBusConsumer _consumer;
         private readonly IMyBroadcastListener _listener;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -53,8 +55,11 @@ namespace SpaceEngineers.Services.Consumer
                     _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
-            if (string.Equals((argument ?? "").Trim(), "route approach", StringComparison.OrdinalIgnoreCase))
+            var command = (argument ?? "").Trim();
+            if (string.Equals(command, "route approach", StringComparison.OrdinalIgnoreCase))
                 LoadMiningApproach();
+            else if (string.Equals(command, "route return", StringComparison.OrdinalIgnoreCase))
+                LoadReturnRoute();
             else
                 _consumer.ProcessCommand(argument);
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
@@ -108,6 +113,73 @@ namespace SpaceEngineers.Services.Consumer
             catch (Exception error)
             {
                 Echo("Could not load mining approach: " + error.Message);
+            }
+        }
+
+        private void LoadReturnRoute()
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (!_consumer.TryGetMiningApproach(out taskId, out x, out y, out z))
+            {
+                Echo("A current mining lease with an approach waypoint is required.");
+                return;
+            }
+
+            IMyRemoteControl inbound = null;
+            bool writing = false;
+            try
+            {
+                var outbound = GridTerminalSystem.GetBlockWithName(RouteControllerName) as IMyRemoteControl;
+                inbound = GridTerminalSystem.GetBlockWithName(ReturnControllerName) as IMyRemoteControl;
+                if (outbound == null || inbound == null || outbound.CubeGrid != Me.CubeGrid ||
+                    inbound.CubeGrid != Me.CubeGrid || !outbound.IsWorking || !inbound.IsWorking ||
+                    outbound.IsAutoPilotEnabled || inbound.IsAutoPilotEnabled)
+                {
+                    Echo("Use local AMN route and return controllers with autopilot off.");
+                    return;
+                }
+
+                _routeWaypoints.Clear();
+                outbound.GetWaypointInfo(_routeWaypoints);
+                if (_routeWaypoints.Count < 2)
+                {
+                    Echo("The outbound route needs at least one return waypoint before the AMN approach.");
+                    return;
+                }
+                var last = _routeWaypoints[_routeWaypoints.Count - 1];
+                if (last.Name != RouteWaypointPrefix + taskId || last.Coords != new Vector3D(x, y, z))
+                {
+                    Echo("The outbound route does not end at this assignment's approach.");
+                    return;
+                }
+
+                _returnWaypoints.Clear();
+                inbound.GetWaypointInfo(_returnWaypoints);
+                if (_returnWaypoints.Count != 0)
+                {
+                    Echo("Clear " + ReturnControllerName + " waypoints before loading a return route.");
+                    return;
+                }
+
+                writing = true;
+                for (int i = _routeWaypoints.Count - 2; i >= 0; i--)
+                {
+                    var waypoint = _routeWaypoints[i];
+                    inbound.AddWaypoint(waypoint.Coords, waypoint.Name);
+                }
+                Echo("Return route loaded. Review it before enabling autopilot.");
+            }
+            catch (Exception error)
+            {
+                if (writing)
+                {
+                    try { inbound.ClearWaypoints(); }
+                    catch (Exception cleanup) { Echo("Could not clear incomplete return route: " + cleanup.Message); }
+                }
+                Echo("Could not load return route: " + error.Message);
             }
         }
 
