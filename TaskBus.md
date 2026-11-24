@@ -268,7 +268,10 @@ approach and remove the old AMN waypoint before preparing a new task.
 After reviewing the loaded route and undocking, run `route cruise` to
 start that leg's Remote Control in One Way mode. It checks the final waypoint against
 the confirmed assignment and rejects a connected ship or another
-active controller. Use the Remote Control to supervise or stop cruise.
+active controller. Use `route stop` or the Remote Control to stop cruise. The hauler
+checks the lease and leg while supervising a cruise it started and
+switches that autopilot off if confirmation is lost. Cruise supervision
+lasts until the programmable block is recompiled or restarted.
 
 Name the hauler FCS programmable block `[AMN FCS]` and record each station
 berth with FCS while connected. At the final approach, run `route dock`

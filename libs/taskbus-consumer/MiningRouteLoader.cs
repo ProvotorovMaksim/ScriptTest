@@ -20,6 +20,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Action<string> _echo;
         private readonly Func<long, string> _findStationApproach;
         private readonly Func<bool> _canStartCruise;
+        private IMyRemoteControl _cruiseRemote;
+        private string _cruiseLease;
+        private bool _cruisePickup;
+        private long _cruiseGrid;
 
         public MiningRouteLoader(TaskBusConsumer worker, IMyCubeGrid grid,
             Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null,
@@ -42,6 +46,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             else if (string.Equals(command, "route cruise", StringComparison.OrdinalIgnoreCase) &&
                 _findStationApproach != null && _canStartCruise != null)
                 LoadStationApproach(true);
+            else if (string.Equals(command, "route stop", StringComparison.OrdinalIgnoreCase) && _canStartCruise != null)
+                StopCruise("Cruise stopped.");
             else if (string.Equals(command, "route return", StringComparison.OrdinalIgnoreCase))
                 LoadReturnRoute();
             else
@@ -89,12 +95,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string waypoint = RouteWaypointPrefix + taskId;
             var position = new Vector3D(x, y, z);
             if (startCruise)
-                StartPreparedCruise(controller, waypoint, position);
+                StartPreparedCruise(controller, waypoint, position, pickup, grid);
             else
                 AppendApproach(controller, waypoint, position);
         }
 
-        private void StartPreparedCruise(string controller, string waypoint, Vector3D position)
+        private void StartPreparedCruise(string controller, string waypoint, Vector3D position, bool pickup, long grid)
         {
             try
             {
@@ -121,12 +127,51 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     _echo("Load and review the current station route before starting cruise.");
                     return;
                 }
+                _cruiseRemote = remote;
+                _cruiseLease = _worker.ConfirmedLeaseIdentity;
+                _cruisePickup = pickup;
+                _cruiseGrid = grid;
                 remote.SetAutoPilotEnabled(true);
                 _echo(remote.IsAutoPilotEnabled ? "Cruise autopilot engaged." : "Cruise autopilot did not engage.");
             }
             catch (Exception error)
             {
                 _echo("Could not start cruise: " + error.Message);
+            }
+        }
+
+        public void CheckCruiseLease()
+        {
+            if (_cruiseRemote == null)
+                return;
+
+            string taskId;
+            bool pickup;
+            long grid;
+            if (!_worker.TryGetHaulerDestination(out taskId, out pickup, out grid) ||
+                _worker.ConfirmedLeaseIdentity != _cruiseLease || pickup != _cruisePickup || grid != _cruiseGrid)
+                StopCruise("Cruise stopped: the current leg lost lease confirmation.");
+            else if (!_cruiseRemote.IsAutoPilotEnabled)
+                _cruiseRemote = null;
+        }
+
+        private void StopCruise(string reason)
+        {
+            if (_cruiseRemote == null)
+                return;
+            try
+            {
+                if (_cruiseRemote.IsAutoPilotEnabled)
+                    _cruiseRemote.SetAutoPilotEnabled(false);
+                if (!_cruiseRemote.IsAutoPilotEnabled)
+                {
+                    _cruiseRemote = null;
+                    _echo(reason);
+                }
+            }
+            catch (Exception error)
+            {
+                _echo("Could not stop cruise: " + error.Message);
             }
         }
 

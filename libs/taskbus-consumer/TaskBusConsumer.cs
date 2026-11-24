@@ -771,6 +771,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
+        public string ConfirmedLeaseIdentity => HasActiveTask && HasRecentLeaseConfirmation
+            ? _leaseConfirmationSource.ToString(CultureInfo.InvariantCulture) + ":" +
+                _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _activeTaskId
+            : null;
+
         public bool TryGetHaulerDestination(out string taskId, out bool pickup, out long grid)
         {
             taskId = null;

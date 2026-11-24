@@ -90,6 +90,7 @@ namespace SpaceEngineers.Services.Consumer
                 DepartHaulerPickup();
             else if (!_routes.TryHandle(command))
                 _consumer.ProcessCommand(argument);
+            _routes.CheckCruiseLease();
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
             if (!connected)
