@@ -249,7 +249,12 @@ the reviewed One Way route. The platform compares it with the outbound
 route before launch and stops its autopilot if the lease is lost. The
 platform also stops supervised survey, approach and return legs when
 the controller has moved less than 0.5 m in 60 scheduled updates.
-Use `ore stop` to cancel the supervised flight.
+Use `ore stop` to cancel the supervised flight. After reviewing the
+outbound waypoints, use `mine cruise arm` to start that route once the
+platform is settled and undocked. It works while waiting at the port.
+It cancels if the lease or route changes, or on `ore stop` or a PB
+restart. The FCS departure procedure still controls charging and
+disconnect.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This

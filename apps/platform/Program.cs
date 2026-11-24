@@ -46,6 +46,9 @@ namespace SpaceEngineers.Apps.Platform
         private readonly bool _autoMiningReturn;
         private readonly bool _autoMiningPass;
         private bool _platformMiningApproach;
+        private string _armedMiningCruiseLease;
+        private long _armedMiningCruiseRemote;
+        private readonly List<MyWaypointInfo> _armedMiningCruiseWaypoints = new List<MyWaypointInfo>();
         private string _pendingPassLease;
         private int _passSettleUpdates;
         private readonly bool _autoMiningDock;
@@ -282,6 +285,7 @@ namespace SpaceEngineers.Apps.Platform
                 _platformFlightLease = null;
                 _pendingRetreatLease = null;
                 _pendingPassLease = null;
+                _armedMiningCruiseLease = null;
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
@@ -316,8 +320,13 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingReturnLease = null;
                 StartMiningCruise(returning: true);
             }
+            else if (string.Equals(command, "mine cruise arm", StringComparison.OrdinalIgnoreCase))
+                ArmMiningCruise();
             else if (string.Equals(command, "mine cruise", StringComparison.OrdinalIgnoreCase))
+            {
+                _armedMiningCruiseLease = null;
                 StartMiningCruise(returning: false);
+            }
             else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
                 UnloadMiningCargo();
             else if (string.Equals(command, "mine unload auto", StringComparison.OrdinalIgnoreCase))
@@ -360,6 +369,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             if ((updateSource & UpdateType.Update10) != 0)
             {
+                UpdateArmedMiningCruise();
                 UpdateAutomaticMiningPass();
                 UpdateAutomaticRetreat();
                 UpdateAutomaticMiningReturn();
@@ -378,6 +388,8 @@ namespace SpaceEngineers.Apps.Platform
             Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
                 online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
+            if (_armedMiningCruiseLease != null)
+                Echo("Mining cruise armed. Waiting for an undocked, settled platform.");
             if (_autoMiningUnload)
                 Echo("Automatic mining unload active.");
             else if (_pendingUnloadDockLease != null)
@@ -1431,7 +1443,7 @@ namespace SpaceEngineers.Apps.Platform
             StartPlatformFlight(remote, "Survey leg", true);
         }
 
-        private bool CanStartPlatformFlight()
+        private bool CanStartPlatformFlight(bool describeBlocker = true)
         {
             _surveyControllers.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyControllers, controller => controller.CubeGrid == Me.CubeGrid);
@@ -1440,7 +1452,8 @@ namespace SpaceEngineers.Apps.Platform
                 var otherRemote = controller as IMyRemoteControl;
                 if (controller.IsUnderControl || (otherRemote != null && otherRemote.IsAutoPilotEnabled))
                 {
-                    Echo("Release pilot control and stop other autopilots before starting autopilot.");
+                    if (describeBlocker)
+                        Echo("Release pilot control and stop other autopilots before starting autopilot.");
                     return false;
                 }
             }
@@ -1449,11 +1462,78 @@ namespace SpaceEngineers.Apps.Platform
                 connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
             if (_surveyConnectors.Count != 0)
             {
-                Echo("Undock before starting autopilot.");
+                if (describeBlocker)
+                    Echo("Undock before starting autopilot.");
                 return false;
             }
 
             return true;
+        }
+
+        private void ArmMiningCruise()
+        {
+            _armedMiningCruiseLease = null;
+            if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 || _fcsDockLease != null)
+            {
+                Echo("Stop drilling and finish the current flight or docking before arming a cruise.");
+                return;
+            }
+
+            _routes.LoadMiningApproach(remote =>
+            {
+                _armedMiningCruiseWaypoints.Clear();
+                remote.GetWaypointInfo(_armedMiningCruiseWaypoints);
+                _armedMiningCruiseRemote = remote.EntityId;
+                _armedMiningCruiseLease = _worker.ConfirmedLeaseIdentity;
+            });
+        }
+
+        private void UpdateArmedMiningCruise()
+        {
+            if (_armedMiningCruiseLease == null)
+                return;
+            if (_armedMiningCruiseLease != _worker.ConfirmedLeaseIdentity || _drillingLease != null ||
+                _worker.SupervisedCruiseRemote != 0 || _fcsDockLease != null)
+            {
+                _armedMiningCruiseLease = null;
+                _lastProbe = "Armed mining cruise cancelled: the lease or flight state changed.";
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithId(_armedMiningCruiseRemote) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking)
+            {
+                _armedMiningCruiseLease = null;
+                _lastProbe = "Armed mining cruise cancelled: the reviewed controller is unavailable.";
+                return;
+            }
+            if (remote.GetShipSpeed() > 0.25 || !CanStartPlatformFlight(describeBlocker: false))
+                return;
+
+            _armedMiningCruiseLease = null;
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count != _armedMiningCruiseWaypoints.Count)
+            {
+                _lastProbe = "Armed mining cruise cancelled: the reviewed route changed.";
+                return;
+            }
+            for (int i = 0; i < _surveyWaypoints.Count; i++)
+            {
+                if (_surveyWaypoints[i].Name != _armedMiningCruiseWaypoints[i].Name ||
+                    _surveyWaypoints[i].Coords != _armedMiningCruiseWaypoints[i].Coords)
+                {
+                    _lastProbe = "Armed mining cruise cancelled: the reviewed route changed.";
+                    return;
+                }
+            }
+            _routes.LoadMiningApproach(current =>
+            {
+                if (current.EntityId == remote.EntityId)
+                    StartMiningApproachFlight(current);
+                else
+                    _lastProbe = "Armed mining cruise cancelled: the reviewed controller changed.";
+            });
         }
 
         private void StartMiningCruise(bool returning)
@@ -1467,11 +1547,13 @@ namespace SpaceEngineers.Apps.Platform
             if (returning)
                 _routes.LoadReturnRoute(StartMiningReturnFlight);
             else
-                _routes.LoadMiningApproach(remote =>
-                {
-                    StartPlatformFlight(remote, "Mining approach", false);
-                    _platformMiningApproach = _worker.SupervisedCruiseRemote == remote.EntityId;
-                });
+                _routes.LoadMiningApproach(StartMiningApproachFlight);
+        }
+
+        private void StartMiningApproachFlight(IMyRemoteControl remote)
+        {
+            StartPlatformFlight(remote, "Mining approach", false);
+            _platformMiningApproach = _worker.SupervisedCruiseRemote == remote.EntityId;
         }
 
         private void StartMiningReturnFlight(IMyRemoteControl remote)
