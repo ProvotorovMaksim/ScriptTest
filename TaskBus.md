@@ -506,6 +506,13 @@ on the sending ShipLink. The recipient display shows the sender relay and
 coordinates for up to 30 seconds from the send time. Fleet names filter the
 display and do not authenticate the sender.
 
+For ongoing fleet heartbeat through Galnet, put up to four
+`GalnetFleetPeer=<wingmate relay ID>` entries in ShipLink Custom Data and
+configure each peer reciprocally under the same fleet name. ShipLink sends
+a status snapshot about once every six seconds at normal simulation speed.
+After its 12-second deadline, the last received snapshot stays visible
+as stale without an active assistance flag.
+
 Use `assist send <recipient relay ID>` to send the current ship position
 as a one-time assistance request to a wingmate over Galnet. The receiver
 shows it above other Galnet marks with an `[ASSIST]` label. It expires

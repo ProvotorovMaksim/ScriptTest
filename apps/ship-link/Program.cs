@@ -28,10 +28,16 @@ namespace SpaceEngineers.Apps.ShipLink
             public bool Piloted;
             public bool NeedsAssistance;
             public int SeenTick;
+            public long Expires;
         }
 
         private const string RelayName = "[GALNET RELAY]";
         private const int MaxContacts = 16;
+        private static readonly long HeartbeatLifetime = TimeSpan.FromSeconds(12).Ticks;
+        private const int HeartbeatIntervalTicks = 360;
+        private readonly HashSet<long> _heartbeatRelays = new HashSet<long>();
+        private readonly Dictionary<long, FleetStatus> _galnetPeers = new Dictionary<long, FleetStatus>();
+        private int _lastHeartbeatTick = -HeartbeatIntervalTicks;
         private static readonly long ContactLifetime = TimeSpan.FromSeconds(30).Ticks;
         private sealed class FleetContact
         {
@@ -78,6 +84,14 @@ namespace SpaceEngineers.Apps.ShipLink
                 long.TryParse(settings[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _workerId);
             if (settings.Length > 2)
                 long.TryParse(settings[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
+            const string heartbeatSetting = "GalnetFleetPeer=";
+            foreach (var line in Me.CustomData.Split('\n'))
+            {
+                long peer;
+                if (_heartbeatRelays.Count < 4 && line.StartsWith(heartbeatSetting, StringComparison.OrdinalIgnoreCase) &&
+                    long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
+                    _heartbeatRelays.Add(peer);
+            }
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
@@ -102,6 +116,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 SaveSettings();
                 _needsAssistance = false;
                 _fleetPeers.Clear();
+                _galnetPeers.Clear();
+                _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
             }
 
@@ -254,12 +270,17 @@ namespace SpaceEngineers.Apps.ShipLink
         private void SendFleetMark(long target, string kind, string gps)
         {
             var relay = FindGalnetRelay();
-            long deadline = DateTime.UtcNow.Ticks + ContactLifetime;
-            if (relay == null || target == relay.EntityId || !relay.TryRun(
+            if (relay == null || !SendFleetPacket(relay, target, kind, gps, ContactLifetime))
+                Echo("Could not hand the fleet report to the local Galnet relay.");
+        }
+
+        private bool SendFleetPacket(IMyProgrammableBlock relay, long target, string kind, string payload, long lifetime)
+        {
+            long deadline = DateTime.UtcNow.Ticks + lifetime;
+            return target != relay.EntityId && relay.TryRun(
                 "app-until " + deadline + " " + target + " " + kind + "|" + deadline + "|" +
                 TaskBusIgcHelper.EncodeStorage(_fleetName) + "|" +
-                TaskBusIgcHelper.EncodeStorage(gps)))
-                Echo("Could not hand the fleet report to the local Galnet relay.");
+                TaskBusIgcHelper.EncodeStorage(payload));
         }
 
         private void ReceiveFleetMark(string command)
@@ -274,13 +295,22 @@ namespace SpaceEngineers.Apps.ShipLink
             var fields = envelope[4].Split('|');
             long expiry;
             long now = DateTime.UtcNow.Ticks;
-            if (fields.Length != 4 || (fields[0] != "contact" && fields[0] != "assist") ||
-                !long.TryParse(fields[1], out expiry) || expiry <= now || expiry - now > ContactLifetime)
+            if (fields.Length != 4 || !long.TryParse(fields[1], out expiry) || expiry <= now ||
+                expiry - now > ContactLifetime)
                 return;
             try
             {
                 if (TaskBusIgcHelper.DecodeStorage(fields[2]) != _fleetName)
                     return;
+                if (fields[0] == "heartbeat")
+                {
+                    if (_heartbeatRelays.Contains(source) && expiry - now <= HeartbeatLifetime)
+                        ReceiveFleetStatus(source, TaskBusIgcHelper.DecodeStorage(fields[3]), expiry);
+                    return;
+                }
+                if (fields[0] != "contact" && fields[0] != "assist")
+                    return;
+
                 string name;
                 double x;
                 double y;
@@ -325,7 +355,9 @@ namespace SpaceEngineers.Apps.ShipLink
             foreach (var peer in _fleetPeers.Where(entry => _tick - entry.Value.SeenTick > FleetTimeoutTicks).ToList())
                 _fleetPeers.Remove(peer.Key);
 
-            if (_antennas.Count == 0)
+            bool heartbeatDue = _fleetName.Length <= 64 && _heartbeatRelays.Count != 0 &&
+                _tick - _lastHeartbeatTick >= HeartbeatIntervalTicks;
+            if (_antennas.Count == 0 && !heartbeatDue)
                 return;
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
             var speed = cockpit == null ? "unknown" : cockpit.GetShipSpeed().ToString("0.0", CultureInfo.InvariantCulture);
@@ -334,11 +366,20 @@ namespace SpaceEngineers.Apps.ShipLink
                 ",\"speed\":" + TaskBusIgcHelper.ToJsonString(speed) +
                 ",\"piloted\":" + (cockpit != null && cockpit.IsUnderControl ? "true" : "false") +
                 ",\"needs_assistance\":" + (_needsAssistance ? "true" : "false") + "}";
-            IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload),
-                TransmissionDistance.TransmissionDistanceMax);
+            if (_antennas.Count > 0)
+                IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload),
+                    TransmissionDistance.TransmissionDistanceMax);
+            if (heartbeatDue)
+            {
+                _lastHeartbeatTick = _tick;
+                var relay = FindGalnetRelay();
+                if (relay != null)
+                    foreach (long peer in _heartbeatRelays)
+                        SendFleetPacket(relay, peer, "heartbeat", payload, HeartbeatLifetime);
+            }
         }
 
-        private void ReceiveFleetStatus(long source, string payload)
+        private void ReceiveFleetStatus(long source, string payload, long expiry = 0)
         {
             if (string.IsNullOrEmpty(_fleetName))
                 return;
@@ -357,14 +398,18 @@ namespace SpaceEngineers.Apps.ShipLink
                 (value != "true" && value != "false"))
                 return;
 
+            var peers = expiry == 0 ? _fleetPeers : _galnetPeers;
             FleetStatus status;
-            if (!_fleetPeers.TryGetValue(source, out status))
+            if (!peers.TryGetValue(source, out status))
             {
-                if (_fleetPeers.Count >= MaxFleetPeers)
+                if (peers.Count >= MaxFleetPeers)
                     return;
                 status = new FleetStatus();
-                _fleetPeers.Add(source, status);
+                peers.Add(source, status);
             }
+            else if (expiry != 0 && expiry <= status.Expires)
+                return;
+            status.Expires = expiry;
             status.Name = name;
             status.Speed = speed;
             status.Piloted = value == "true";
@@ -527,7 +572,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (_needsAssistance)
                     display.AppendLine(_antennas.Count > 0 ? "ASSISTANCE REQUEST ACTIVE" :
                         "ASSISTANCE REQUEST WAITING FOR ANTENNA");
-                if (_fleetPeers.Count == 0)
+                if (_fleetPeers.Count == 0 && _galnetPeers.Count == 0)
                     display.AppendLine("No recent wingmate reports.");
                 foreach (var peer in _fleetPeers.OrderByDescending(entry => entry.Value.NeedsAssistance)
                     .ThenBy(entry => entry.Value.Name))
@@ -539,6 +584,19 @@ namespace SpaceEngineers.Apps.ShipLink
                 }
             }
             long now = DateTime.UtcNow.Ticks;
+            if (_galnetPeers.Count > 0)
+            {
+                display.AppendLine("=== GALNET WINGMATES ===");
+                foreach (var peer in _galnetPeers.OrderBy(entry => entry.Key))
+                {
+                    var status = peer.Value;
+                    bool live = status.Expires > now;
+                    long age = Math.Max(0L, (now - (status.Expires - HeartbeatLifetime)) / TimeSpan.TicksPerSecond);
+                    display.AppendLine((live && status.NeedsAssistance ? "[ASSIST] " : "") + status.Name +
+                        " | relay " + peer.Key + " | " + (live ? "online" : "stale") + " | " + age + " s old");
+                    display.AppendLine(status.Speed + " m/s | " + (status.Piloted ? "piloted" : "unoccupied"));
+                }
+            }
             _contacts.RemoveAll(contact => contact.Expires <= now);
             if (_contacts.Count > 0)
             {
