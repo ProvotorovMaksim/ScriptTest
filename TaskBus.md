@@ -94,9 +94,11 @@ identify in the broker output.
 
 To show a worker's TaskBus assignments on a ShipLink cockpit display, run
 `worker <consumer programmable block ID>` on ShipLink. Use the consumer block's
-entity ID shown as `Worker block ID` in the consumer output. The setting persists in Storage. Send `worker 0` to disable task
-monitoring. The display shows the assignment and its first workflow stage.
-Run `status` on the consumer for the actual stage checkpoint.
+entity ID shown as `Worker block ID` in the consumer output. Send `worker 0`
+to disable task monitoring. Both the worker and broker selections persist. In a multi-broker world, run `broker <ID>` on ShipLink with the
+same ID as its worker so another broker's traffic cannot update this display.
+The display shows the assignment and its first workflow stage. Run `status` on
+the consumer for the actual stage checkpoint.
 
 ### Fleet display for Space Engineers combat
 

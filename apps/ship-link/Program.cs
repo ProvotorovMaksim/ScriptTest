@@ -40,6 +40,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private int _lastMessageTick;
         private string _lastEventType;
         private long _workerId;
+        private long _brokerId;
         private int _activeLeaseEpoch;
         private string _activeTaskId;
         private string _activeTaskStage;
@@ -56,10 +57,12 @@ namespace SpaceEngineers.Apps.ShipLink
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
             _shipName = Me.CubeGrid.CustomName;
-            var settings = Storage.Split(new[] { '\n' }, 2);
+            var settings = Storage.Split(new[] { '\n' }, 3);
             _fleetName = settings[0];
-            if (settings.Length == 2)
-                long.TryParse(settings[1], out _workerId);
+            if (settings.Length > 1)
+                long.TryParse(settings[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _workerId);
+            if (settings.Length > 2)
+                long.TryParse(settings[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
@@ -89,12 +92,23 @@ namespace SpaceEngineers.Apps.ShipLink
                 else
                 {
                     _workerId = workerId;
-                    _connectedToBase = false;
-                    ClearTask();
+                    ResetWorkerStatus();
                     SaveSettings();
                 }
             }
 
+            else if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
+            {
+                long brokerId;
+                if (!long.TryParse(command.Substring(7), out brokerId) || brokerId < 0)
+                    Echo("Usage: broker <programmable block ID>, or broker 0 for any broker");
+                else
+                {
+                    _brokerId = brokerId;
+                    ResetWorkerStatus();
+                    SaveSettings();
+                }
+            }
             else if (string.Equals(command, "assist on", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(command, "assist off", StringComparison.OrdinalIgnoreCase))
             {
@@ -132,7 +146,7 @@ namespace SpaceEngineers.Apps.ShipLink
             while (_listener.HasPendingMessage)
             {
                 var message = _listener.AcceptMessage();
-                if (message.Source == Me.EntityId)
+                if (message.Source == Me.EntityId || (_brokerId != 0 && message.Source != _brokerId))
                     continue;
 
                 TaskBusEnvelope envelope;
@@ -225,7 +239,15 @@ namespace SpaceEngineers.Apps.ShipLink
 
         private void SaveSettings()
         {
-            Storage = _fleetName + "\n" + _workerId.ToString(CultureInfo.InvariantCulture);
+            Storage = _fleetName + "\n" + _workerId.ToString(CultureInfo.InvariantCulture) +
+                "\n" + _brokerId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private void ResetWorkerStatus()
+        {
+            _connectedToBase = false;
+            ClearTask();
+            _displayTick = DisplayUpdateIntervalTicks;
         }
 
         private void ReceiveWorkerStatus(TaskBusEnvelope envelope)
@@ -291,6 +313,8 @@ namespace SpaceEngineers.Apps.ShipLink
             display.AppendLine("=== SHIP-LINK STATUS ===");
             display.AppendLine($"Ship: {_shipName}");
             display.AppendLine($"Base: {_baseName}");
+            if (_workerId != 0)
+                display.AppendLine("Broker: " + (_brokerId == 0 ? "any" : _brokerId.ToString(CultureInfo.InvariantCulture)));
             display.AppendLine();
 
             // Connection status
