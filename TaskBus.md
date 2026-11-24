@@ -72,7 +72,9 @@ up to 128 node versions and accepts up to 32 neighbors per node. When
 the table is full, an unfamiliar node can displace the oldest expired
 record. Current records remain eligible for routing. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
 `peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
-shows the current next hop. Relay neighbors are logical unicast peers.
+shows the current next hop. The relay's default peer list reports direct
+heartbeat status. Run `network status` for each queued delivery's current
+route and next hop, or to see that it is waiting for a route.
 Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
 up to 16 pending messages in Storage and retries them via the current
 route until the destination acknowledges or the five-minute UTC deadline

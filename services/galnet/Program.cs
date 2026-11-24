@@ -133,12 +133,14 @@ namespace SpaceEngineers.Services.Galnet
                 QueueMessage("DATA", command.Substring(5), 255);
             else if (command.StartsWith("app ", StringComparison.OrdinalIgnoreCase))
                 QueueMessage("APP", command.Substring(4), MaxApplicationLength);
+            else if (string.Equals(command, "network status", StringComparison.OrdinalIgnoreCase))
+                ShowNetworkStatus();
             else if (command.StartsWith("route ", StringComparison.OrdinalIgnoreCase))
             {
                 long destination;
                 long hop;
                 if (long.TryParse(command.Substring(6), out destination) &&
-                    _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop) && IsLive(hop))
+                    TryGetLiveRoute(destination, out hop))
                     Echo("Next hop: " + hop);
                 else
                     Echo("No current route.");
@@ -147,7 +149,34 @@ namespace SpaceEngineers.Services.Galnet
             Echo("Galnet node: " + Me.EntityId);
             Echo("Pending: " + _outbox.Count + " | " + _lastDelivery);
             foreach (var peer in _peers)
-                Echo(peer.Key + (IsLive(peer.Key) ? " online" : " offline"));
+                Echo(peer.Key + (IsLive(peer.Key) ? " direct online" : " direct offline"));
+        }
+
+        private bool TryGetLiveRoute(long destination, out long hop)
+        {
+            return _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop) && IsLive(hop);
+        }
+
+        private void ShowNetworkStatus()
+        {
+            foreach (var packet in _outbox)
+            {
+                var fields = packet.Split('|');
+                long destination;
+                long expires;
+                if (fields.Length != 7 || !long.TryParse(fields[2], out destination) ||
+                    !long.TryParse(fields[5], out expires))
+                    continue;
+                long hop;
+                string status;
+                if (expires <= DateTime.UtcNow.Ticks)
+                    status = "expired";
+                else if (TryGetLiveRoute(destination, out hop))
+                    status = "route via " + hop + ", awaiting ACK";
+                else
+                    status = "waiting for route";
+                Echo("Delivery " + fields[3] + " to " + destination + ": " + status);
+            }
         }
 
         private IMyLaserAntenna FindLaser(string name)
@@ -295,8 +324,8 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             long nextHop;
-            if (hops <= 1 || !_topology.TryGetNextHop(Me.EntityId, destination, _tick, out nextHop) ||
-                nextHop == previousHop || !IsLive(nextHop))
+            if (hops <= 1 || !TryGetLiveRoute(destination, out nextHop) ||
+                nextHop == previousHop)
                 return;
 
             if (previousHop != 0)

@@ -63,12 +63,16 @@ namespace TaskBus.Tests
             Advance(70);
             Assert.Contains("SEND:", nodes[1].Storage);
             Assert.DoesNotContain("SEEN:", nodes[4].Storage);
+            nodes[1].Main("network status", UpdateType.Terminal);
+            Assert.Contains(nodes[1].Output, line => line.EndsWith("waiting for route"));
 
             offline.Remove(3);
             Advance(50);
             Assert.Contains("SEND:", nodes[1].Storage);
             Assert.Single(nodes[4].Storage.Split('\n').Where(line => line.StartsWith("SEEN:")));
             Assert.True(dataFromReserve > 0);
+            nodes[1].Main("network status", UpdateType.Terminal);
+            Assert.Contains(nodes[1].Output, line => line.EndsWith("route via 3, awaiting ACK"));
 
             nodes[4] = Start(4, nodes[4].Storage);
             dropAck = false;
