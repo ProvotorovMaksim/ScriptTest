@@ -66,6 +66,9 @@ The broker stores the UTC deadline of each newly issued or renewed
 lease alongside the simulation tick check. Loading Storage after downtime
 requeues expired leases and fences their old epochs. Legacy records without
 a UTC deadline keep the existing simulation tick check until renewed.
+Assignments carry this deadline so workers stop acting on expired leases
+even before receiving a revocation. A delayed older refresh cannot replace
+a newer deadline for the same broker, task and lease epoch.
 
 ### Galnet routing core
 

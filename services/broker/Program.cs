@@ -578,6 +578,7 @@ namespace SpaceEngineers.Services.Broker
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(task.Key) +
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(task.GroupId) +
                 ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) +
+                ",\"lease_expires_utc_ticks\":" + task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture) +
                 ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
                 ",\"details\":" + task.RequestJson + "}";
             SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));

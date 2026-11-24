@@ -8,6 +8,27 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void ConsumerIgnoresExpiredAssignmentAndOlderLeaseRefresh()
+        {
+            var worker = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { }, 42, "Point", 1);
+            worker.ProcessCommand("group MiningPoints");
+            worker.ProcessCommand("point auto");
+            string Assignment(long deadline, bool receipt) => TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":1,\"lease_expires_utc_ticks\":" + deadline +
+                ",\"base_stock_confirmed\":" + (receipt ? "true" : "false") +
+                ",\"details\":{\"receipt_required\":true,\"steps\":[\"transport\"]}}", targetId: 42);
+
+            worker.ProcessIncomingMessage(1, Assignment(1, true));
+            Assert.False(worker.HasActiveTask);
+
+            long later = System.DateTime.UtcNow.AddSeconds(30).Ticks;
+            worker.ProcessIncomingMessage(1, Assignment(later, true));
+            worker.ProcessIncomingMessage(1, Assignment(later - 1, false));
+            Assert.Contains("Base stock confirmed", worker.GetStatus());
+            Assert.Contains("Lease confirmed", worker.GetStatus());
+        }
+
+        [Fact]
         public void AutomaticPointDispatchesHaulerOnlyWithCompletedMiningAndEnoughBufferStock()
         {
             double? stock = 100;

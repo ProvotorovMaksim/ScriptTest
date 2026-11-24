@@ -66,6 +66,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private int _pendingCompletedEpoch;
         private int _tick;
         private int? _lastLeaseConfirmationTick;
+        private long _leaseExpiresUtc;
         private long _leaseConfirmationSource;
 
 
@@ -387,7 +388,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         }
 
         private bool HasRecentLeaseConfirmation => _lastLeaseConfirmationTick.HasValue &&
-            _tick - _lastLeaseConfirmationTick.Value < LeaseConfirmationTimeoutTicks;
+            _tick - _lastLeaseConfirmationTick.Value < LeaseConfirmationTimeoutTicks &&
+            (_leaseExpiresUtc == 0 || DateTime.UtcNow.Ticks < _leaseExpiresUtc);
 
         private void PollBroker()
         {
@@ -423,6 +425,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             int leaseEpoch;
             if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "lease_epoch", out epochJson) ||
                 !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                return;
+
+            string deadline;
+            long expires = 0;
+            if (TaskBusIgcHelper.TryGetJsonProperty(taskJson, "lease_expires_utc_ticks", out deadline) &&
+                (!long.TryParse(deadline, NumberStyles.Integer, CultureInfo.InvariantCulture, out expires) ||
+                    expires <= DateTime.UtcNow.Ticks || expires > DateTime.MaxValue.Ticks))
+                return;
+            if (taskId == _activeTaskId && leaseEpoch == _leaseEpoch && sourceId == _leaseConfirmationSource &&
+                expires < _leaseExpiresUtc)
                 return;
 
             if (taskId == _lastRevokedTaskId && leaseEpoch <= _lastRevokedEpoch)
@@ -477,6 +489,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string confirmation;
             _baseStockConfirmed = TaskBusIgcHelper.TryGetJsonProperty(taskJson, "base_stock_confirmed", out confirmation) &&
                 confirmation == "true";
+            _leaseExpiresUtc = expires;
             _leaseConfirmationSource = sourceId;
             _lastLeaseConfirmationTick = _tick;
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
