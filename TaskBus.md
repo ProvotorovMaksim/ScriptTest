@@ -213,7 +213,10 @@ For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 Run `ore survey Iron`, move to the first observation position, and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits
-in memory. Empty readings are recorded as unknown coverage. This command
+in persistent PB storage. A recompile restores completed samples and the
+spacing checks. A sample still waiting for detector refresh must be repeated.
+Starting a new survey replaces the previous survey. Empty readings are
+recorded as unknown coverage. This command
 does not infer that a repeated GPS hit is a fresh detector result.
 Run `ore bounds` to see GPS coordinates for the two corners of the
 axis-aligned box enclosing the distinct ore reports from this survey.

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.TaskBusConsumer;
 using SpaceEngineers.Libs.IgcCore;
@@ -26,6 +27,9 @@ namespace SpaceEngineers.Apps.Platform
         private const double MinimumViewSeparation = 10;
         private const int MaxSurveyViews = 64;
         private const int MaxOreHits = 256;
+        private const string SurveyStorageMarker = "\nAMN_SURVEY_V1\n";
+        private string _workerStorage;
+        private string _surveyStorage = "";
         private readonly List<Vector3D> _surveyViews = new List<Vector3D>();
         private readonly HashSet<Vector3D> _oreHits = new HashSet<Vector3D>();
         private IMyOreDetector _sampleDetector;
@@ -43,9 +47,21 @@ namespace SpaceEngineers.Apps.Platform
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
                 (envelope, _) => IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax),
                 message => Echo(message));
+            int surveyStart = Storage.IndexOf(SurveyStorageMarker, StringComparison.Ordinal);
+            _workerStorage = surveyStart < 0 ? Storage : Storage.Substring(0, surveyStart);
+            if (surveyStart >= 0)
+            {
+                _surveyStorage = Storage.Substring(surveyStart);
+                LoadSurvey(_surveyStorage.Substring(SurveyStorageMarker.Length));
+            }
+
             _worker = new TaskBusConsumer(
                 _galnet.Send,
-                () => Storage, value => Storage = value, message => Echo(message),
+                () => _workerStorage, value =>
+                {
+                    _workerStorage = value;
+                    Storage = _workerStorage + _surveyStorage;
+                }, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             var camera = FindCamera();
@@ -107,7 +123,52 @@ namespace SpaceEngineers.Apps.Platform
             _oreHits.Clear();
             _positiveViews = 0;
             _sampleDetector = null;
+            SaveSurvey();
             _lastProbe = "Survey started. Move to a survey position and run ore sample.";
+        }
+
+        private void LoadSurvey(string saved)
+        {
+            var rows = saved.Split('\n');
+            try
+            {
+                var ore = TaskBusIgcHelper.DecodeStorage(rows[0]);
+                if (string.IsNullOrWhiteSpace(ore) || ore.Length > 64)
+                    return;
+                _surveyOre = ore;
+            }
+            catch (FormatException) { return; }
+
+            for (int i = 2; i < rows.Length; i++)
+            {
+                string kind;
+                double x;
+                double y;
+                double z;
+                if (!TaskBusIgcHelper.TryReadOreGps(rows[i], out kind, out x, out y, out z))
+                    continue;
+                if (kind == "view" && _surveyViews.Count < MaxSurveyViews)
+                    _surveyViews.Add(new Vector3D(x, y, z));
+                else if (kind == "hit" && _oreHits.Count < MaxOreHits)
+                    _oreHits.Add(new Vector3D(x, y, z));
+            }
+            int positives;
+            if (rows.Length > 1 && int.TryParse(rows[1].TrimEnd('\r'), NumberStyles.None, CultureInfo.InvariantCulture, out positives))
+                _positiveViews = Math.Min(positives, _surveyViews.Count);
+            _lastProbe = "Saved survey restored. Move to a new position to resume sampling.";
+        }
+
+        private void SaveSurvey()
+        {
+            var saved = new StringBuilder(SurveyStorageMarker);
+            saved.AppendLine(TaskBusIgcHelper.EncodeStorage(_surveyOre));
+            saved.AppendLine(_positiveViews.ToString(CultureInfo.InvariantCulture));
+            foreach (var view in _surveyViews)
+                saved.AppendLine(FormatSurveyGps("view", view));
+            foreach (var hit in _oreHits)
+                saved.AppendLine(FormatSurveyGps("hit", hit));
+            _surveyStorage = saved.ToString();
+            Storage = _workerStorage + _surveyStorage;
         }
 
         private void ShowOreBounds()
@@ -215,6 +276,7 @@ namespace SpaceEngineers.Apps.Platform
                 _surveyViews.Add(_samplePosition);
                 if (hit)
                     _positiveViews++;
+                SaveSurvey();
                 _lastProbe = hit ? "Detector reported the requested ore." : "No matching report. Coverage unknown.";
             }
             catch (Exception error)
