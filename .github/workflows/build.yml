@@ -86,8 +86,7 @@ jobs:
           dotnet --info | tee build/logs/dotnet.log
           bash build.sh 2>&1 | tee build/logs/build.log
 
-      - name: Upload build logs and results
-        if: always()
+      - name: Upload validated build and results
         uses: actions/upload-artifact@v4
         with:
           name: taskbus-build
@@ -106,3 +105,13 @@ jobs:
             build/output/apps/sample/sample/SampleMain.dll
             build/output/apps/ship-link/ship-link/ShipLink.dll
             build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll
+
+
+      - name: Upload failed build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbus-build-diagnostics
+          path: |
+            build/logs/
+            build/test-results/*.trx
