@@ -110,6 +110,9 @@ namespace SpaceEngineers.Apps.Platform
         private bool _autoSample;
         private bool _surveySweep;
         private bool _reportOnSweepCompletion;
+        private readonly double _automaticSurveySpacing;
+        private readonly Vector3D _automaticSurveyCenter;
+        private string _suppressedAutomaticSurveyLease;
         private bool _sweepLegStarted;
         private bool _sweepSampleStarted;
         private int _sweepSettleTicks;
@@ -121,6 +124,10 @@ namespace SpaceEngineers.Apps.Platform
         public Program()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            var automaticSurvey = ReadSetting("SurveyAutoSweep=");
+            if (automaticSurvey != null &&
+                !TryReadSurveyPlan(automaticSurvey, out _automaticSurveySpacing, out _automaticSurveyCenter))
+                Echo("Use SurveyAutoSweep=<10 to 500 metres> GPS:Center:X:Y:Z:.");
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
@@ -236,6 +243,8 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
+                string surveyOre;
+                _worker.TryGetSurveyLease(out _suppressedAutomaticSurveyLease, out surveyOre);
                 CheckLeasedMiningDock(cancel: true);
                 CheckPlatformFlight();
             }
@@ -310,6 +319,8 @@ namespace SpaceEngineers.Apps.Platform
                 CheckLeasedMiningDock();
                 UpdateAutomaticMiningDock();
                 UpdateUnloadAfterMiningDock();
+                if (command.Length == 0)
+                    TryStartAutomaticSurvey();
             }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
@@ -884,31 +895,71 @@ namespace SpaceEngineers.Apps.Platform
             _surveySweep = false;
         }
 
-        private void PlanSurvey(string argument)
+        private static bool TryReadSurveyPlan(string argument, out double spacing, out Vector3D center)
         {
+            spacing = 0;
+            center = Vector3D.Zero;
             int split = argument.IndexOf(' ');
-            double spacing;
+            double parsedSpacing;
             double x;
             double y;
             double z;
             string label;
             if (split < 1 || !double.TryParse(argument.Substring(0, split), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out spacing) || !(spacing >= MinimumViewSeparation && spacing <= 500) ||
+                CultureInfo.InvariantCulture, out parsedSpacing) ||
+                !(parsedSpacing >= MinimumViewSeparation && parsedSpacing <= 500) ||
                 !TaskBusIgcHelper.TryReadOreGps(argument.Substring(split + 1), out label, out x, out y, out z))
+                return false;
+            spacing = parsedSpacing;
+            center = new Vector3D(x, y, z);
+            return true;
+        }
+
+        private void PlanSurvey(string argument)
+        {
+            double spacing;
+            Vector3D center;
+            if (!TryReadSurveyPlan(argument, out spacing, out center))
             {
                 Echo("Use ore plan <spacing in metres, 10 to 500> GPS:Center:X:Y:Z:.");
                 return;
             }
 
             var controller = FindSurveyPlanningController();
-            if (controller == null)
+            if (controller != null)
+                PlanSurveyGrid(controller, spacing, center);
+        }
+
+        private void TryStartAutomaticSurvey()
+        {
+            string lease;
+            string ore;
+            if (_automaticSurveySpacing == 0 || _surveySweep || _sampleDetector != null ||
+                _worker.SupervisedCruiseRemote != 0 || !_worker.TryGetSurveyLease(out lease, out ore) ||
+                lease == _surveyLease || lease == _suppressedAutomaticSurveyLease)
                 return;
 
+            var controller = GridTerminalSystem.GetBlockWithName(ControllerName) as IMyShipController;
+            var remote = FindSurveyRemote();
+            var detector = GridTerminalSystem.GetBlockWithName(DetectorName) as IMyOreDetector;
+            if (controller == null || controller.CubeGrid != Me.CubeGrid || !controller.IsWorking ||
+                remote == null || remote.FlightMode != FlightMode.OneWay ||
+                detector == null || detector.CubeGrid != Me.CubeGrid || !detector.IsWorking ||
+                !CanStartPlatformFlight())
+                return;
+
+            BeginOreSurvey(ore, lease);
+            PlanSurveyGrid(controller, _automaticSurveySpacing, _automaticSurveyCenter);
+            BeginSurveySweep(reportOnCompletion: true);
+            _lastProbe = "Automatic survey started for the configured area.";
+        }
+
+        private void PlanSurveyGrid(IMyShipController controller, double spacing, Vector3D center)
+        {
             Vector3D up;
             Vector3D right;
             Vector3D across;
             bool inGravity = GetSurveyAxes(controller, out up, out right, out across);
-            var center = new Vector3D(x, y, z);
             Echo(inGravity ? "Survey plan aligned to local gravity." : "Survey plan aligned to ship orientation.");
             int index = 0;
             _surveyPlan.Clear();

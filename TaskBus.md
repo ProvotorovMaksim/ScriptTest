@@ -526,6 +526,16 @@ remaining point has been sampled under the same confirmed lease. The
 worker saves the completion and retries delivery until the broker
 confirms or revokes it. A halted sweep waits for operator review.
 
+Set `SurveyAutoSweep=25 GPS:Center:X:Y:Z:` in platform Custom Data to
+start that grid automatically on a new confirmed survey lease. Use
+a center and spacing whose flight area you have reviewed for the hull.
+The platform waits for the local survey controller, detector and
+idle flight controls, then uses the same per-leg camera checks and
+reports after the final sample. It uses the configured center for
+each new survey, including in space. `ore stop` suppresses automatic
+launch for the current lease, and a started sweep stays stopped
+after a PB restart until manually restarted.
+
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use
