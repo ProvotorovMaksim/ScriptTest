@@ -17,7 +17,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../libs/taskbus-producer/taskbus-producer.csproj" />
     <ProjectReference Include="../../libs/igc-core/igc-core.csproj" />
   </ItemGroup>
 

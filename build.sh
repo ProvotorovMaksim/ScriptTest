@@ -66,7 +66,7 @@ package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusC
 package_taskbus_pb services/producer TaskProducer "$producer"
 package_taskbus_pb apps/amn AMN.Base "$producer"
 package_taskbus_pb apps/sample SampleMain libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
-package_taskbus_pb apps/ship-link ShipLink "$producer"
+package_taskbus_pb apps/ship-link ShipLink
 
 dotnet test TaskBus.Tests/TaskBus.Tests.csproj -c Release --no-build \
   --output "$output_dir/TaskBus.Tests/TaskBus.Tests" \

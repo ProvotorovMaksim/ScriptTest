@@ -68,6 +68,20 @@ Record task IDs, lease epochs and any block errors. Use separate runs for the
 workflow, lease-expiry and cancellation checks so their state is easy to
 identify in the broker output.
 
+### Fleet display for Space Engineers combat
+
+Install `ShipLink.pb.cs` on each wingmate's grid with a working radio antenna
+and a cockpit text surface set to Text and Images. Run `fleet Alpha` on each
+block to enable the roster. It shows each reporting ship's speed and whether
+its cockpit is occupied. Reports expire after about five seconds without an
+update at normal simulation speed. Run `fleet off` to disable the roster and
+stop transmitting status. The setting persists in block Storage.
+
+Fleet names are display filters on the fleet IGC broadcast. Other listeners
+in range can receive the reports. For an in-game check, compare the displays
+on two ships, enter and leave a cockpit, then power down one antenna and
+confirm the other display drops that ship after the timeout.
+
 ### Flight control PB
 
 `apps/fcs` is an opt-in cockpit flight controller. Copy the contents of

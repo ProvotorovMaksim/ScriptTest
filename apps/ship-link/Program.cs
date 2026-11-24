@@ -9,7 +9,6 @@ using VRageMath;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.IgcCore;
-using SpaceEngineers.Libs.TaskBusProducer;
 
 namespace SpaceEngineers.Apps.ShipLink
 {
@@ -17,7 +16,21 @@ namespace SpaceEngineers.Apps.ShipLink
     {
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
+        private const string FleetTag = "SE1-FLEET-STATUS";
         private const int DisplayUpdateIntervalTicks = 60;
+        private const int FleetTimeoutTicks = 300;
+        private const int MaxFleetPeers = 16;
+
+        private sealed class FleetStatus
+        {
+            public string Name;
+            public string Speed;
+            public bool Piloted;
+            public int SeenTick;
+        }
+
+        private string _fleetName;
+        private readonly Dictionary<long, FleetStatus> _fleetPeers = new Dictionary<long, FleetStatus>();
 
         private string _shipName;
         private string _baseName = "Base";
@@ -31,7 +44,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private int _tick;
         private int _displayTick;
         private IMyBroadcastListener _listener;
-        private TaskBusProducer _producer;
+        private IMyBroadcastListener _fleetListener;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly List<IMyCockpit> _cockpits = new List<IMyCockpit>();
         private readonly List<IMyTextSurface> _surfaces = new List<IMyTextSurface>();
@@ -40,9 +53,9 @@ namespace SpaceEngineers.Apps.ShipLink
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
             _shipName = Me.CubeGrid.CustomName;
+            _fleetName = Storage;
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
-            _producer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
-                IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
+            _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
 
         public void Main(string argument)
@@ -53,6 +66,13 @@ namespace SpaceEngineers.Apps.ShipLink
             var command = (argument ?? string.Empty).Trim();
             if (command.StartsWith("base ", StringComparison.OrdinalIgnoreCase))
                 _baseName = command.Substring(5).Trim();
+            else if (command.StartsWith("fleet ", StringComparison.OrdinalIgnoreCase))
+            {
+                var name = command.Substring(6).Trim();
+                _fleetName = string.Equals(name, "off", StringComparison.OrdinalIgnoreCase) ? "" : name;
+                Storage = _fleetName;
+                _fleetPeers.Clear();
+            }
 
             // Scan antennas
             _antennas.Clear();
@@ -118,6 +138,17 @@ namespace SpaceEngineers.Apps.ShipLink
                 }
             }
 
+            while (_fleetListener.HasPendingMessage)
+            {
+                var message = _fleetListener.AcceptMessage();
+                string eventType;
+                string payload;
+                if (message.Source != Me.EntityId && !string.IsNullOrEmpty(_fleetName) &&
+                    TaskBusIgcHelper.TryParseEnvelope(message.Data as string, out eventType, out payload) &&
+                    eventType == "FLEET_STATUS")
+                    ReceiveFleetStatus(message.Source, payload);
+            }
+
             // Connection timeout: if no message for 300 ticks (~5 seconds at Update1)
             if (_tick - _lastMessageTick > 300)
             {
@@ -128,8 +159,62 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_displayTick >= DisplayUpdateIntervalTicks)
             {
                 _displayTick = 0;
+                UpdateFleetStatus();
                 UpdateCockpitDisplay();
             }
+        }
+
+        private void UpdateFleetStatus()
+        {
+            if (string.IsNullOrEmpty(_fleetName))
+                return;
+
+            foreach (var peer in _fleetPeers.Where(entry => _tick - entry.Value.SeenTick > FleetTimeoutTicks).ToList())
+                _fleetPeers.Remove(peer.Key);
+
+            if (_antennas.Count == 0)
+                return;
+            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
+            var speed = cockpit == null ? "unknown" : cockpit.GetShipSpeed().ToString("0.0", CultureInfo.InvariantCulture);
+            var payload = "{\"fleet\":" + TaskBusIgcHelper.ToJsonString(_fleetName) +
+                ",\"name\":" + TaskBusIgcHelper.ToJsonString(_shipName.Substring(0, Math.Min(_shipName.Length, 64))) +
+                ",\"speed\":" + TaskBusIgcHelper.ToJsonString(speed) +
+                ",\"piloted\":" + (cockpit != null && cockpit.IsUnderControl ? "true" : "false") + "}";
+            IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload),
+                TransmissionDistance.TransmissionDistanceMax);
+        }
+
+        private void ReceiveFleetStatus(long source, string payload)
+        {
+            if (string.IsNullOrEmpty(_fleetName))
+                return;
+
+            string value;
+            string fleet;
+            string name;
+            string speed;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(payload, "fleet", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out fleet) || fleet != _fleetName ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "name", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out name) || name.Length > 64 ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "speed", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out speed) || speed.Length > 12 ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "piloted", out value) ||
+                (value != "true" && value != "false"))
+                return;
+
+            FleetStatus status;
+            if (!_fleetPeers.TryGetValue(source, out status))
+            {
+                if (_fleetPeers.Count >= MaxFleetPeers)
+                    return;
+                status = new FleetStatus();
+                _fleetPeers.Add(source, status);
+            }
+            status.Name = name;
+            status.Speed = speed;
+            status.Piloted = value == "true";
+            status.SeenTick = _tick;
         }
 
         private void ParseTaskAssignment(string payloadJson)
@@ -216,6 +301,18 @@ namespace SpaceEngineers.Apps.ShipLink
             }
 
             display.AppendLine();
+            if (!string.IsNullOrEmpty(_fleetName))
+            {
+                display.AppendLine("=== FLEET " + _fleetName + " ===");
+                if (_fleetPeers.Count == 0)
+                    display.AppendLine("No recent wingmate reports.");
+                foreach (var peer in _fleetPeers.OrderBy(entry => entry.Value.Name))
+                {
+                    var status = peer.Value;
+                    display.AppendLine(status.Name + " | " + status.Speed + " m/s | " +
+                        (status.Piloted ? "piloted" : "unoccupied"));
+                }
+            }
             display.AppendLine($"Tick: {_tick}");
 
             var text = display.ToString();
