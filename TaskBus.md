@@ -259,6 +259,13 @@ alongside the delivery base and its position at request time. These positions
 are grid references for route planning. Configure docking approach waypoints
 separately.
 
+Configure a reviewed approach for each station with
+`HaulerApproach.<grid ID>=GPS:Name:X:Y:Z:` in hauler Custom Data. Run
+`route station` under a confirmed lease to append the current station's
+approach to a local Remote Control. Use `[AMN PICKUP]` for the pickup leg
+and `[AMN DELIVERY]` for delivery. Keep autopilot off while loading the
+approach and remove the old AMN waypoint before preparing a new task.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both

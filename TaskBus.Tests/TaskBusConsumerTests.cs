@@ -72,6 +72,9 @@ namespace TaskBus.Tests
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
                 "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50,\"pickup_grid_id\":500,\"base_grid_id\":600,\"steps\":[\"pickup\",\"deliver\"]}}", targetId: 42);
             hauler.ProcessIncomingMessage(1, assignment);
+            Assert.True(hauler.TryGetHaulerDestination(out _, out var pickup, out var grid));
+            Assert.True(pickup);
+            Assert.Equal(500, grid);
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
 
@@ -89,9 +92,13 @@ namespace TaskBus.Tests
             hauler.ProcessCommand("stage pickup");
             hauler = Start();
             Assert.Contains("Stage: deliver", hauler.GetStatus());
+            Assert.False(hauler.TryGetHaulerDestination(out _, out _, out _));
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
             hauler.ProcessIncomingMessage(1, assignment);
+            Assert.True(hauler.TryGetHaulerDestination(out _, out pickup, out grid));
+            Assert.False(pickup);
+            Assert.Equal(600, grid);
             dockedGrid = 600;
             cargo = null;
             hauler.ProcessCommand("stage deliver");

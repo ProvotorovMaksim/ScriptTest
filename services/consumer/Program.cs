@@ -59,7 +59,8 @@ namespace SpaceEngineers.Services.Consumer
                 loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
                     ? null : (Action<long, string, double>)LoadHaulerCargo);
 
-            _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
+            _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
+                gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="));
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
         }
 

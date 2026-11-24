@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using VRageMath;
 using VRage.Game.ModAPI.Ingame;
+using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
 {
@@ -17,20 +18,24 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly IMyCubeGrid _grid;
         private readonly Func<string, IMyTerminalBlock> _findBlock;
         private readonly Action<string> _echo;
+        private readonly Func<long, string> _findStationApproach;
 
         public MiningRouteLoader(TaskBusConsumer worker, IMyCubeGrid grid,
-            Func<string, IMyTerminalBlock> findBlock, Action<string> echo)
+            Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null)
         {
             _worker = worker;
             _grid = grid;
             _findBlock = findBlock;
             _echo = echo;
+            _findStationApproach = findStationApproach;
         }
 
         public bool TryHandle(string command)
         {
             if (string.Equals(command, "route approach", StringComparison.OrdinalIgnoreCase))
                 LoadMiningApproach();
+            else if (string.Equals(command, "route station", StringComparison.OrdinalIgnoreCase) && _findStationApproach != null)
+                LoadStationApproach();
             else if (string.Equals(command, "route return", StringComparison.OrdinalIgnoreCase))
                 LoadReturnRoute();
             else
@@ -50,17 +55,45 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            AppendApproach(RouteControllerName, RouteWaypointPrefix + taskId, new Vector3D(x, y, z));
+        }
+
+        private void LoadStationApproach()
+        {
+            string taskId;
+            bool pickup;
+            long grid;
+            if (!_worker.TryGetHaulerDestination(out taskId, out pickup, out grid))
+            {
+                _echo("A confirmed hauler lease with an assigned station is required.");
+                return;
+            }
+
+            string name;
+            double x;
+            double y;
+            double z;
+            if (!TaskBusIgcHelper.TryReadOreGps(_findStationApproach(grid), out name, out x, out y, out z))
+            {
+                _echo("Set HaulerApproach." + grid + "=GPS:Name:X:Y:Z: for the assigned station.");
+                return;
+            }
+
+            AppendApproach(pickup ? "[AMN PICKUP]" : "[AMN DELIVERY]",
+                RouteWaypointPrefix + taskId, new Vector3D(x, y, z));
+        }
+
+        private void AppendApproach(string controller, string waypointName, Vector3D position)
+        {
             try
             {
-                var remote = _findBlock(RouteControllerName) as IMyRemoteControl;
+                var remote = _findBlock(controller) as IMyRemoteControl;
                 if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking || remote.IsAutoPilotEnabled)
                 {
-                    _echo("Use a working " + RouteControllerName + " remote with autopilot off.");
+                    _echo("Use a working " + controller + " remote with autopilot off.");
                     return;
                 }
 
-                var position = new Vector3D(x, y, z);
-                var waypointName = RouteWaypointPrefix + taskId;
                 _routeWaypoints.Clear();
                 remote.GetWaypointInfo(_routeWaypoints);
                 foreach (var waypoint in _routeWaypoints)
@@ -68,15 +101,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     if (!waypoint.Name.StartsWith(RouteWaypointPrefix, StringComparison.Ordinal))
                         continue;
                     _echo(waypoint.Name == waypointName && waypoint.Coords == position ?
-                        "Mining approach already loaded." : "Remove the previous AMN approach before loading this task.");
+                        "Approach already loaded." : "Remove the previous AMN approach before loading this task.");
                     return;
                 }
                 remote.AddWaypoint(position, waypointName);
-                _echo("Mining approach appended. Review the route before enabling autopilot.");
+                _echo("Approach appended. Review the route before enabling autopilot.");
             }
             catch (Exception error)
             {
-                _echo("Could not load mining approach: " + error.Message);
+                _echo("Could not load approach: " + error.Message);
             }
         }
 

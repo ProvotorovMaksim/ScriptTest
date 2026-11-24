@@ -771,15 +771,34 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private bool CheckHaulerDock(bool pickup, bool automatic)
+        public bool TryGetHaulerDestination(out string taskId, out bool pickup, out long grid)
         {
+            taskId = null;
+            grid = 0;
+            pickup = CurrentStage() == "pickup";
+            if (_consumerGroup != "Haulers" || !HasActiveTask || !HasRecentLeaseConfirmation ||
+                (!pickup && CurrentStage() != "deliver") || !TryReadHaulerGrid(pickup, out grid))
+                return false;
+
+            taskId = _activeTaskId;
+            return true;
+        }
+
+        private bool TryReadHaulerGrid(bool pickup, out long grid)
+        {
+            grid = 0;
             string field = pickup ? "pickup_grid_id" : "base_grid_id";
             string details;
             string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) &&
+                long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out grid) && grid != 0;
+        }
+
+        private bool CheckHaulerDock(bool pickup, bool automatic)
+        {
             long grid;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
-                !TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) ||
-                !long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out grid) || grid == 0)
+            if (!TryReadHaulerGrid(pickup, out grid))
             {
                 if (!automatic)
                     _echo("The assignment has no " + (pickup ? "pickup" : "delivery") + " grid ID to verify.");
