@@ -31,6 +31,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public long Expires;
         }
 
+        private const string HazardCameraName = "[SHIPLINK SCOUT]";
         private const string RelayName = "[GALNET RELAY]";
         private const int MaxContacts = 16;
         private static readonly long HeartbeatLifetime = TimeSpan.FromSeconds(12).Ticks;
@@ -45,6 +46,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public long Source;
             public long Expires;
             public bool Assistance;
+            public bool Hazard;
             public Vector3D Position;
         }
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
@@ -162,6 +164,8 @@ namespace SpaceEngineers.Apps.ShipLink
 
             else if (command.StartsWith("assist send ", StringComparison.OrdinalIgnoreCase))
                 SendAssistance(command.Substring(12).Trim());
+            else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
+                ScanAndShareHazard(command.Substring(12).Trim());
             else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
                 TrackFleetContact(command.Substring(14).Trim());
             else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase))
@@ -283,6 +287,49 @@ namespace SpaceEngineers.Apps.ShipLink
             SendFleetMark(target, "contact", argument.Substring(delimiter + 1));
         }
 
+        private void ScanAndShareHazard(string argument)
+        {
+            var parts = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            long target;
+            double range;
+            if (string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || parts.Length != 2 ||
+                !long.TryParse(parts[0], out target) || !_heartbeatRelays.Contains(target) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out range) ||
+                !(range >= 1 && range <= 5000))
+            {
+                Echo("Use hazard scan <configured wingmate relay ID> <1 to 5000 metres>.");
+                return;
+            }
+            var relay = FindGalnetRelay();
+            var camera = GridTerminalSystem.GetBlockWithName(HazardCameraName) as IMyCameraBlock;
+            if (relay == null || target == relay.EntityId || camera == null ||
+                camera.CubeGrid != Me.CubeGrid || !camera.IsWorking)
+            {
+                Echo("A working local Galnet relay and " + HazardCameraName + " camera are required.");
+                return;
+            }
+
+            camera.EnableRaycast = true;
+            if (!camera.CanScan(range))
+            {
+                Echo("Camera cannot scan the requested distance yet.");
+                return;
+            }
+            var hit = camera.Raycast(range);
+            if (hit.IsEmpty() || !hit.HitPosition.HasValue)
+            {
+                Echo("No obstacle detected along the camera ray.");
+                return;
+            }
+
+            var point = hit.HitPosition.Value;
+            var culture = CultureInfo.InvariantCulture;
+            var gps = "GPS:Obstacle:" + point.X.ToString("R", culture) + ":" +
+                point.Y.ToString("R", culture) + ":" + point.Z.ToString("R", culture) + ":";
+            if (!SendFleetPacket(relay, target, "hazard", gps, ContactLifetime))
+                Echo("Could not hand the observation to the local Galnet relay.");
+        }
+
         private void SendAssistance(string argument)
         {
             long target;
@@ -341,7 +388,8 @@ namespace SpaceEngineers.Apps.ShipLink
                         ReceiveFleetStatus(source, TaskBusIgcHelper.DecodeStorage(fields[3]), expiry);
                     return;
                 }
-                if (fields[0] != "contact" && fields[0] != "assist")
+                bool hazard = fields[0] == "hazard";
+                if (hazard ? !_heartbeatRelays.Contains(source) : fields[0] != "contact" && fields[0] != "assist")
                     return;
 
                 string name;
@@ -355,7 +403,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 bool assistance = fields[0] == "assist";
                 _contacts.RemoveAll(contact => contact.Expires <= now);
                 var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
-                    contact.Assistance == assistance && (assistance || contact.Name == name));
+                    contact.Assistance == assistance && contact.Hazard == hazard && (assistance || contact.Name == name));
                 if (existing == null)
                 {
                     if (_contacts.Count >= MaxContacts)
@@ -367,7 +415,7 @@ namespace SpaceEngineers.Apps.ShipLink
                             return;
                         _contacts.Remove(oldestContact);
                     }
-                    existing = new FleetContact { Source = source, Name = name, Assistance = assistance };
+                    existing = new FleetContact { Source = source, Name = name, Assistance = assistance, Hazard = hazard };
                     _contacts.Add(existing);
                 }
                 else if (existing.Expires >= expiry)
@@ -457,7 +505,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
 
             var fresh = _contacts.FirstOrDefault(contact => contact.Source == _trackedContact.Source &&
-                contact.Name == _trackedContact.Name && contact.Assistance == _trackedContact.Assistance);
+                contact.Name == _trackedContact.Name && contact.Assistance == _trackedContact.Assistance &&
+                contact.Hazard == _trackedContact.Hazard);
             if (fresh != null && fresh.Expires >= _trackedContact.Expires)
                 _trackedContact = fresh;
 
@@ -662,11 +711,11 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_contacts.Count > 0)
             {
                 display.AppendLine("=== GALNET FLEET MARKS ===");
-                foreach (var contact in _contacts.OrderByDescending(entry => entry.Assistance).ThenByDescending(entry => entry.Expires).Take(8))
+                foreach (var contact in _contacts.OrderByDescending(entry => entry.Assistance).ThenByDescending(entry => entry.Hazard).ThenByDescending(entry => entry.Expires).Take(8))
                 {
                     var point = contact.Position;
                     long ageSeconds = Math.Max(0L, (now - (contact.Expires - ContactLifetime)) / TimeSpan.TicksPerSecond);
-                    display.AppendLine((contact.Assistance ? "[ASSIST] " : "") + contact.Name +
+                    display.AppendLine((contact.Assistance ? "[ASSIST] " : contact.Hazard ? "[HAZARD] " : "") + contact.Name +
                         " | relay " + contact.Source + " | " + ageSeconds + " s old");
                     display.AppendLine("X/Y/Z: " + Math.Round(point.X, 1) + " / " +
                         Math.Round(point.Y, 1) + " / " + Math.Round(point.Z, 1));

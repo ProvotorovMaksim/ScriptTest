@@ -519,6 +519,12 @@ a status snapshot about once every six seconds at normal simulation speed.
 After its 12-second deadline, the last received snapshot stays visible
 as stale without an active assistance flag.
 
+Name a local forward camera `[SHIPLINK SCOUT]` and run
+`hazard scan <wingmate relay ID> <metres>` to share one camera hit with
+a configured Galnet fleet peer. The receiver shows a `[HAZARD]` GPS mark
+for up to 30 seconds after sending. A scan with no hit sends no message
+and only describes the checked ray.
+
 Use `assist send <recipient relay ID>` to send the current ship position
 as a one-time assistance request to a wingmate over Galnet. The receiver
 shows it above other Galnet marks with an `[ASSIST]` label. It expires
