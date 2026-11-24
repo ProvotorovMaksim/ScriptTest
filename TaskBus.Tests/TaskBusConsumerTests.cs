@@ -8,6 +8,21 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void PlatformUsesMiningPointOnlyUnderAConfirmedLease()
+        {
+            var platform = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { },
+                42, "Platform", miningPlatform: true);
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"mine\",\"lease_epoch\":1,\"group_id\":\"MiningFleet\"," +
+                "\"details\":{\"mining_point_grid_id\":500,\"steps\":[\"mine\"]}}", targetId: 42);
+            platform.ProcessIncomingMessage(1, assignment);
+            Assert.True(platform.TryGetMiningPoint(out var grid));
+            Assert.Equal(500, grid);
+            platform.Tick(false);
+            Assert.False(platform.TryGetMiningPoint(out _));
+        }
+
+        [Fact]
         public void SupervisedCruiseRemoteSurvivesRestartEvenWithoutAnActiveTask()
         {
             string storage = "";
@@ -277,7 +292,7 @@ namespace TaskBus.Tests
             string storage = "";
             var sent = new List<string>();
             TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
-                () => storage, value => storage = value, _ => { }, 42, "Point", 1);
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1, gridId: 500);
 
             var point = Start();
             point.ProcessCommand("group MiningPoints");
@@ -327,6 +342,7 @@ namespace TaskBus.Tests
             point.Tick();
             Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
             Assert.DoesNotContain("ore_candidate_gps", sent[sent.Count - 1]);
+            Assert.Contains("\"mining_point_grid_id\":500", sent[sent.Count - 1]);
             Assert.Contains("\"ore_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
             Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":60}", sent[sent.Count - 1]);
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",

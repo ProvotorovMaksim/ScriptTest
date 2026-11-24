@@ -320,6 +320,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
+        public bool TryGetMiningPoint(out long grid)
+        {
+            grid = 0;
+            string details;
+            string value;
+            return _miningPlatform && HasActiveTask && CurrentStage() == "mine" && HasRecentLeaseConfirmation &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "mining_point_grid_id", out value) &&
+                long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out grid) && grid != 0;
+        }
+
         public bool TryGetMiningCargoTarget(out string resource, out double amount)
         {
             resource = null;
@@ -652,6 +663,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (childStage == "deliver" && _getGridPositionJson != null)
                 payload.Append(",\"pickup_position\":").Append(_getGridPositionJson())
                     .Append(",\"pickup_name\":").Append(TaskBusIgcHelper.ToJsonString(_gridName));
+            if (childStage == "mine" && _gridId != 0)
+                payload.Append(",\"mining_point_grid_id\":").Append(_gridId.ToString(CultureInfo.InvariantCulture));
             if (childStage == "deliver" && _gridId != 0)
                 payload.Append(",\"pickup_grid_id\":").Append(_gridId.ToString(CultureInfo.InvariantCulture));
             SendMessage("TASK_PUBLISH", payload.Append('}').ToString());

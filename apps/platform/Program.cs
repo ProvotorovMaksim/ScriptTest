@@ -167,6 +167,8 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
                 StartManagedDrills();
+            else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
+                RequestMiningPointDock();
             else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
                 StopManagedDrills();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
@@ -194,6 +196,25 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Automatic sampling active.");
             if (_sampleDetector != null)
                 Echo("Waiting for ore detector refresh.");
+        }
+
+        private void RequestMiningPointDock()
+        {
+            long grid;
+            if (_drillingLease != null || !_worker.TryGetMiningPoint(out grid))
+            {
+                Echo("Stop the drills and confirm an assignment with a mining point before docking.");
+                return;
+            }
+
+            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
+            if (fcs == null || fcs.CubeGrid != Me.CubeGrid || fcs.EntityId == Me.EntityId || !fcs.IsWorking ||
+                !fcs.TryRun("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
+            {
+                Echo("Could not send docking to the local [AMN FCS] block.");
+                return;
+            }
+            Echo("FCS docking requested at mining point grid " + grid + ". Check the FCS status.");
         }
 
         private void FindManagedDrills()

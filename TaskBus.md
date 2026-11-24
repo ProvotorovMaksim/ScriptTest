@@ -315,6 +315,11 @@ requested resource in a dedicated inventory and stop the drills when its
 requested amount is reached or the inventory is at least 95% full. This
 counts existing cargo in that inventory and does not complete the assignment.
 
+After returning to the assigned mining point, stop the drills and enter
+the FCS final approach envelope. Run `mine dock` to request docking at
+the station identified by the mining assignment. The platform needs
+a local `[AMN FCS]` PB and a previously recorded berth for that grid.
+
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 With a confirmed ore survey assignment, run `ore task` to use its ore
 type. Repeating it for the same lease keeps completed samples. Sampling
