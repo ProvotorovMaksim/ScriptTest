@@ -13,9 +13,7 @@ namespace SpaceEngineers.Apps.Platform
     {
         #endregion
         private const string Channel = "SE1-SHIP-LINK";
-        private const string GalnetRelayName = "[GALNET RELAY]";
-        private readonly long _brokerRelayId;
-        private readonly Queue<string> _relayOutbox = new Queue<string>();
+        private readonly GalnetWorkerBridge _galnet;
         private const string ControllerName = "[AMN PLATFORM]";
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -39,15 +37,12 @@ namespace SpaceEngineers.Apps.Platform
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _listener = IGC.RegisterBroadcastListener(Channel);
-            foreach (var line in Me.CustomData.Split('\n'))
-            {
-                const string setting = "GalnetBrokerRelay=";
-                if (line.StartsWith(setting, StringComparison.OrdinalIgnoreCase) &&
-                    long.TryParse(line.Substring(setting.Length), out _brokerRelayId) && _brokerRelayId != 0)
-                    break;
-            }
+            _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
+                () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
+                (envelope, _) => IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax),
+                message => Echo(message));
             _worker = new TaskBusConsumer(
-                SendTaskBus,
+                _galnet.Send,
                 () => Storage, value => Storage = value, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             var camera = FindCamera();
@@ -57,18 +52,14 @@ namespace SpaceEngineers.Apps.Platform
         public void Main(string argument)
         {
             var command = (argument ?? "").Trim();
-            if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
-            {
-                ReceiveGalnet(command);
+            if (_galnet.TryReceive(command, _worker))
                 return;
-            }
 
             _antennas.Clear();
             GridTerminalSystem.GetBlocksOfType(_antennas,
                 block => block.CubeGrid == Me.CubeGrid && block.IsWorking);
-            bool viaGalnet = _brokerRelayId != 0;
-            var relay = viaGalnet ? FindGalnetRelay() : null;
-            bool online = viaGalnet ? relay != null : _antennas.Count > 0;
+            bool viaGalnet = _galnet.IsConfigured;
+            bool online = viaGalnet ? _galnet.IsAvailable : _antennas.Count > 0;
             _worker.Tick(online);
             while (!viaGalnet && online && _listener.HasPendingMessage)
             {
@@ -87,10 +78,9 @@ namespace SpaceEngineers.Apps.Platform
             else
                 _worker.ProcessCommand(command);
 
-            if (relay != null && _relayOutbox.Count > 0 && relay.TryRun(_relayOutbox.Peek()))
-                _relayOutbox.Dequeue();
+            _galnet.Flush();
             Echo(_worker.GetStatus());
-            Echo(viaGalnet ? "Galnet broker relay: " + _brokerRelayId + (online ? "" : " (local relay unavailable)") :
+            Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
                 online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
             if (_surveyOre != null)
@@ -98,46 +88,6 @@ namespace SpaceEngineers.Apps.Platform
                     " views reported ore, " + _oreHits.Count + " distinct positions.");
             if (_sampleDetector != null)
                 Echo("Waiting for ore detector refresh.");
-        }
-
-        private IMyProgrammableBlock FindGalnetRelay()
-        {
-            var relay = GridTerminalSystem.GetBlockWithName(GalnetRelayName) as IMyProgrammableBlock;
-            return relay != null && relay.EntityId != Me.EntityId && relay.CubeGrid == Me.CubeGrid &&
-                relay.IsWorking ? relay : null;
-        }
-
-        private void SendTaskBus(string envelope, long targetId)
-        {
-            if (_brokerRelayId == 0)
-            {
-                IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax);
-                return;
-            }
-            if (targetId == 0)
-            {
-                Echo("Configure broker <TaskBroker PB ID> for Galnet transport.");
-                return;
-            }
-            var command = "app " + _brokerRelayId + " taskbus " + Me.EntityId + " " + envelope;
-            if (_relayOutbox.Count < 16 && !_relayOutbox.Contains(command))
-                _relayOutbox.Enqueue(command);
-        }
-
-        private void ReceiveGalnet(string command)
-        {
-            if (_brokerRelayId == 0 || FindGalnetRelay() == null)
-                return;
-
-            var fields = command.Split(new[] { ' ' }, 7, StringSplitOptions.RemoveEmptyEntries);
-            long origin;
-            long broker;
-            TaskBusEnvelope envelope;
-            if (fields.Length == 7 && fields[4] == "taskbus" &&
-                long.TryParse(fields[2], out origin) && origin == _brokerRelayId &&
-                long.TryParse(fields[5], out broker) && broker != 0 &&
-                TaskBusProtocol.TryParseEnvelope(fields[6], out envelope) && envelope.TargetId == Me.EntityId)
-                _worker.ProcessIncomingMessage(broker, fields[6]);
         }
 
         private void BeginOreSurvey(string ore)

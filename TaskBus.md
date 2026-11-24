@@ -88,11 +88,11 @@ when its grid has a working relay named `[GALNET RELAY]`. Name the broker
 `[GALNET APP]` on that grid so the relay invokes it. Replies are deferred
 until the next broker invocation to avoid calling back into an executing
 relay. Use configured, trusted relays for this test. Application IDs in
-the payload are not cryptographically authenticated. The mining platform can use this bridge. On its grid name the relay
-`[GALNET RELAY]` and the platform PB `[GALNET APP]`. Add
-`GalnetBrokerRelay=<broker-side relay PB ID>` to the platform PB's Custom Data
-and recompile. Run `broker <TaskBroker PB ID>` on the platform while idle.
-The platform queues responses until its next invocation. The local bridge
+the payload are not cryptographically authenticated. The mining platform and TaskConsumer can use this bridge. On its grid name the relay
+`[GALNET RELAY]` and the worker PB `[GALNET APP]`. Add
+`GalnetBrokerRelay=<broker-side relay PB ID>` to the worker PB's Custom Data
+and recompile. Run `broker <TaskBroker PB ID>` on the worker while idle.
+The worker queues responses until its next invocation. The local bridge
 uses memory queues, with task checkpoints and completion recovery still
 owned by TaskBus. Direct IGC is used when no relay ID is configured.
 Other application bridges and explicit laser link control are separate work.

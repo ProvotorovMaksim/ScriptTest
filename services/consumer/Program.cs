@@ -21,6 +21,7 @@ namespace SpaceEngineers.Services.Consumer
 
         private readonly List<MyWaypointInfo> _routeWaypoints = new List<MyWaypointInfo>();
         private readonly List<MyWaypointInfo> _returnWaypoints = new List<MyWaypointInfo>();
+        private readonly GalnetWorkerBridge _galnet;
         private readonly TaskBusConsumer _consumer;
         private readonly IMyBroadcastListener _listener;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -29,9 +30,12 @@ namespace SpaceEngineers.Services.Consumer
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
+            _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
+                () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
+                (envelope, _) => IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
+                message => Echo(message));
             _consumer = new TaskBusConsumer(
-                send: (envelope, targetId) =>
-                    IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
+                send: _galnet.Send,
                 getStorage: () => Storage,
                 setStorage: value => Storage = value,
                 echo: message => Echo(message),
@@ -44,27 +48,32 @@ namespace SpaceEngineers.Services.Consumer
 
         public void Main(string argument)
         {
+            var command = (argument ?? "").Trim();
+            if (_galnet.TryReceive(command, _consumer))
+                return;
+
             _antennas.Clear();
             GridTerminalSystem.GetBlocksOfType(_antennas, antenna => antenna.IsFunctional && antenna.Enabled);
-            bool connected = _antennas.Count > 0;
+            bool viaGalnet = _galnet.IsConfigured;
+            bool connected = viaGalnet ? _galnet.IsAvailable : _antennas.Count > 0;
             _consumer.Tick(connected);
-            while (connected && _listener.HasPendingMessage)
+            while (!viaGalnet && connected && _listener.HasPendingMessage)
             {
                 var message = _listener.AcceptMessage();
                 if (message.Source != Me.EntityId)
                     _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
-            var command = (argument ?? "").Trim();
             if (string.Equals(command, "route approach", StringComparison.OrdinalIgnoreCase))
                 LoadMiningApproach();
             else if (string.Equals(command, "route return", StringComparison.OrdinalIgnoreCase))
                 LoadReturnRoute();
             else
                 _consumer.ProcessCommand(argument);
+            _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
             if (!connected)
-                status = "Radio unavailable.\n" + status;
+                status = (viaGalnet ? "Galnet relay unavailable or misconfigured.\n" : "Radio unavailable.\n") + status;
             Echo(status);
 
             if (++_monitorTicks >= 6 || !string.IsNullOrWhiteSpace(argument))
