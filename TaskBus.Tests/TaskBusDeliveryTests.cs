@@ -50,14 +50,7 @@ namespace TaskBus.Tests
             var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"default\"}", targetId: 1);
             Dispatch(broker, 42, poll);
             TakeResponse(broker, "TASK_ASSIGN", 42);
-            var rows = broker.Storage.Split('\n');
-            int index = System.Array.FindIndex(rows, row => row.StartsWith("TASK|"));
-            var fields = rows[index].Split('|');
-            Assert.True(long.Parse(fields[12]) > System.DateTime.UtcNow.Ticks);
-            fields[12] = "1";
-            rows[index] = string.Join("|", fields);
-
-            broker = StartBroker(string.Join("\n", rows));
+            broker = StartBroker(WithExpiredLease(broker.Storage, "9-1"));
             var oldDone = TaskBusProtocol.CreateEnvelope("TASK_DONE",
                 "{\"task_id\":\"9-1\",\"lease_epoch\":1}", targetId: 1);
             Dispatch(broker, 42, oldDone);
@@ -183,6 +176,11 @@ namespace TaskBus.Tests
                 broker.Main("");
             second.Tick();
             broker.Main("");
+            TakeResponse(broker, "QUEUE_EMPTY", 43);
+
+            broker = StartBroker(WithExpiredLease(broker.Storage, "9-1"));
+            second.Tick();
+            broker.Main("");
             DeliverToWorker(second, TakeResponse(broker, "TASK_ASSIGN", 43));
             broker.Main("");
 
@@ -262,7 +260,7 @@ namespace TaskBus.Tests
             TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
             Dispatch(broker, 42, TaskBusProtocol.CreateEnvelope("TASK_POLL",
                 "{\"group_id\":\"MiningPoints\"}", targetId: 1));
-            TakeResponse(broker, "TASK_ASSIGN", 42);
+            var parent = TakeResponse(broker, "TASK_ASSIGN", 42);
 
             var child = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
                 "{\"request_id\":\"scout\",\"group_id\":\"Scouts\",\"parent_task_id\":\"9-1\"," +
@@ -274,8 +272,11 @@ namespace TaskBus.Tests
             var assignment = TakeResponse(broker, "TASK_ASSIGN", 43);
             Assert.Contains("\"task_id\":\"42-2\"", assignment.PayloadJson);
 
-            for (int tick = 0; tick < 180; tick++)
-                broker.Main("");
+            Assert.True(TaskBusProtocol.TryGetProperty(parent.PayloadJson, "lease_expires_utc_ticks", out var parentDeadline));
+            Assert.True(TaskBusProtocol.TryGetProperty(assignment.PayloadJson, "lease_expires_utc_ticks", out var childDeadline));
+            Assert.Equal(long.Parse(parentDeadline), long.Parse(childDeadline));
+
+            broker = StartBroker(WithExpiredLease(broker.Storage, "9-1"));
             Assert.Contains("\"task_id\":\"42-2\"", TakeResponse(broker, "TASK_REVOKED", 43).PayloadJson);
 
             broker = StartBroker(broker.Storage);
@@ -376,7 +377,7 @@ namespace TaskBus.Tests
             Dispatch(broker, 42, haulerPackets.Dequeue());
             hauler.Tick();
             DeliverToWorker(hauler, Exchange(42, haulerPackets, "TASK_ASSIGN"));
-            Dispatch(broker, 42, haulerPackets.Dequeue());
+            Assert.Empty(haulerPackets);
             Assert.Contains("Stage: deliver", hauler.GetStatus());
 
             var stock = TaskBusProtocol.CreateEnvelope("TASK_QUERY",
@@ -604,6 +605,18 @@ namespace TaskBus.Tests
                 Text = append ? Text + text : text;
                 return true;
             }
+        }
+
+        private static string WithExpiredLease(string storage, string taskId)
+        {
+            var rows = storage.Split('\n');
+            int index = System.Array.FindIndex(rows, row => row.StartsWith("TASK|" + taskId + "|"));
+            Assert.True(index >= 0);
+            var fields = rows[index].Split('|');
+            Assert.True(long.Parse(fields[12]) > System.DateTime.UtcNow.Ticks);
+            fields[12] = "1";
+            rows[index] = string.Join("|", fields);
+            return string.Join("\n", rows);
         }
 
         private static string AfterResumeDeadline(string storage)

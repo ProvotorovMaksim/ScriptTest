@@ -62,10 +62,11 @@ catalog leaves unaccepted records pending on the sender. Use `survey cancel` to
 stop a transfer. A survey hit is a catalog observation. Route planning should use a
 separate approach point outside the voxel.
 
-The broker stores the UTC deadline of each newly issued or renewed
-lease alongside the simulation tick check. Loading Storage after downtime
-requeues expired leases and fences their old epochs. Legacy records without
-a UTC deadline keep the existing simulation tick check until renewed.
+The broker uses the UTC deadline of each newly issued or renewed lease.
+Loading Storage after downtime requeues expired leases and fences their
+old epochs. Legacy records without a UTC deadline keep the simulation
+tick check until renewed. A child lease cannot extend past its mining
+point's current parent lease.
 Assignments carry this deadline so workers stop acting on expired leases
 even before receiving a revocation. A delayed older refresh cannot replace
 a newer deadline for the same broker, task and lease epoch. Workers save

@@ -95,7 +95,7 @@ namespace SpaceEngineers.Services.Broker
                 if (!_paused)
                 {
                     _paused = true;
-                    // A worker may still hold a lease that was requeued by the tick timeout.
+                    // Allow earlier workers time to stop before reopening the queue.
                     _resumeAfterUtc = _sequence == 0 ? 0 : DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
                     foreach (var task in _tasks)
                         _resumeAfterUtc = Math.Max(_resumeAfterUtc, task.LeaseExpiresUtc);
@@ -593,7 +593,11 @@ namespace SpaceEngineers.Services.Broker
         private void RenewLease(TaskRecord task)
         {
             task.LastDispatchTick = _tick;
-            task.LeaseExpiresUtc = Math.Max(task.LeaseExpiresUtc + 1, DateTime.UtcNow.Ticks + LeaseTimeoutUtc);
+            long deadline = Math.Max(task.LeaseExpiresUtc + 1, DateTime.UtcNow.Ticks + LeaseTimeoutUtc);
+            var parent = task.HasParent ? FindParentLease(task.RequesterId, task.RequestJson) : null;
+            if (parent != null && parent.LeaseExpiresUtc != 0)
+                deadline = Math.Min(deadline, parent.LeaseExpiresUtc);
+            task.LeaseExpiresUtc = deadline;
         }
 
         private void ExpireConsumerLeases(bool force = false)
@@ -603,8 +607,10 @@ namespace SpaceEngineers.Services.Broker
             long now = DateTime.UtcNow.Ticks;
             foreach (var task in _tasks.Where(entry => entry.State == "LEASED" || entry.State == "ACTIVE"))
             {
-                if (!force && _tick - task.LastDispatchTick <= LeaseTimeoutTicks &&
-                    (task.LeaseExpiresUtc == 0 || now < task.LeaseExpiresUtc))
+                bool expired = task.LeaseExpiresUtc == 0
+                    ? _tick - task.LastDispatchTick > LeaseTimeoutTicks
+                    : now >= task.LeaseExpiresUtc;
+                if (!force && !expired)
                     continue;
 
                 task.WorkerId = 0;
