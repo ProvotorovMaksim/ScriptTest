@@ -37,6 +37,8 @@ namespace SpaceEngineers.Apps.Platform
         private string _platformFlightLease;
         private bool _platformSurveyFlight;
         private bool _platformMiningPass;
+        private bool _platformMiningRetreat;
+        private const string MiningRetreatRemoteName = "[AMN MINE RETREAT]";
         private const int MiningProgressCheckUpdates = 60;
         private const double MinimumMiningProgress = 0.5;
         private int _miningProgressTicks;
@@ -186,6 +188,8 @@ namespace SpaceEngineers.Apps.Platform
                 StartManagedDrills();
             else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
                 StartMiningPass();
+            else if (string.Equals(command, "mine retreat", StringComparison.OrdinalIgnoreCase))
+                StartMiningRetreat();
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
@@ -899,9 +903,57 @@ namespace SpaceEngineers.Apps.Platform
             }
         }
 
+        private void StartMiningRetreat()
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (!_miningLaneRadius.HasValue || _drillingLease != null || _worker.SupervisedCruiseRemote != 0 ||
+                !_worker.TryGetMiningApproach(out taskId, out x, out y, out z) ||
+                !CheckMiningLane(x, y, z) || !CanStartPlatformFlight())
+            {
+                Echo("Stop the drills and settle inside the assigned mining lane under a confirmed lease.");
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithName(MiningRetreatRemoteName) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking ||
+                remote.Direction != Base6Directions.Direction.Backward || remote.FlightMode != FlightMode.OneWay ||
+                !(remote.SpeedLimit > 0 && remote.SpeedLimit <= 1) || remote.GetShipSpeed() > 0.25)
+            {
+                Echo("Use a local One Way " + MiningRetreatRemoteName + " facing Backward at no more than 1 m/s.");
+                return;
+            }
+
+            var approach = new Vector3D(x, y, z);
+            var toApproach = approach - remote.GetPosition();
+            if (toApproach.LengthSquared() <= 4 ||
+                Vector3D.Dot(Vector3D.Normalize(toApproach), remote.WorldMatrix.Backward) < 0.996)
+            {
+                Echo("Align the rear of the retreat controller with the assigned approach before starting.");
+                return;
+            }
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count != 1 || Vector3D.DistanceSquared(_surveyWaypoints[0].Coords, approach) > 1)
+            {
+                Echo("Configure exactly one reviewed retreat waypoint at the assigned approach.");
+                return;
+            }
+
+            _platformMiningRetreat = true;
+            _miningPassEndpoint = _surveyWaypoints[0].Coords;
+            _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
+            _miningProgressTicks = 0;
+            StartPlatformFlight(remote, "Mining retreat", false);
+            if (_worker.SupervisedCruiseRemote == 0)
+                _platformMiningRetreat = false;
+        }
+
         private void CheckMiningPassProgress()
         {
-            if (!_platformMiningPass || ++_miningProgressTicks < MiningProgressCheckUpdates)
+            if ((!_platformMiningPass && !_platformMiningRetreat) || ++_miningProgressTicks < MiningProgressCheckUpdates)
                 return;
 
             _miningProgressTicks = 0;
@@ -916,8 +968,11 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            StopManagedDrills();
-            _lastProbe = "Mining pass halted: no progress toward the endpoint.";
+            if (_platformMiningRetreat)
+                _platformFlightLease = null;
+            else
+                StopManagedDrills();
+            _lastProbe = "Mining movement halted: no progress toward the endpoint.";
         }
 
         private void FinishMiningPass()
@@ -950,6 +1005,7 @@ namespace SpaceEngineers.Apps.Platform
             {
                 _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
+                _platformMiningRetreat = false;
                 return;
             }
             if (_platformMiningPass && (_drillingLease == null || remote.GetShipSpeed() > 1.5))
@@ -961,19 +1017,27 @@ namespace SpaceEngineers.Apps.Platform
                 FinishMiningPass();
                 return;
             }
-            string taskId;
-            double x;
-            double y;
-            double z;
             if (_platformFlightLease == null || _platformFlightLease != _worker.ConfirmedLeaseIdentity ||
-                (_platformSurveyFlight ? !SurveyLeaseIsCurrent() : !_worker.TryGetMiningApproach(out taskId, out x, out y, out z)))
+                (_platformSurveyFlight ? !SurveyLeaseIsCurrent() : !CheckMiningFlightPosition(remote)))
             {
                 remote.SetAutoPilotEnabled(false);
                 if (!remote.IsAutoPilotEnabled)
                     _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
-                _lastProbe = "Platform flight stopped. Confirm the lease before starting it again.";
+                _platformMiningRetreat = false;
+                if (!_lastProbe.StartsWith("Mining movement halted", StringComparison.Ordinal))
+                    _lastProbe = "Platform flight stopped. Check the lease and flight conditions.";
             }
+        }
+
+        private bool CheckMiningFlightPosition(IMyRemoteControl remote)
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            return _worker.TryGetMiningApproach(out taskId, out x, out y, out z) &&
+                (!_platformMiningRetreat || (remote.GetShipSpeed() <= 1.5 && CheckMiningLane(x, y, z)));
         }
 
         private void BeginSurveySweep()

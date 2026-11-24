@@ -337,7 +337,12 @@ stops on completion, lease loss, lane or cargo limits, or speed above
 over 60 scheduled updates (about 10 seconds at normal simulation speed).
 Use `mine drills off` to stop the drills and the supervised pass.
 Review ship alignment, drill coverage and controller collision settings
-before starting.
+before starting. To back out along a reviewed lane, set up
+`[AMN MINE RETREAT]` in One Way and Backward mode with one waypoint at the
+assigned approach and a speed limit at or below 1 m/s. Stop the drills,
+align the controller's rear with the approach and run `mine retreat`.
+Supervision stops retreat on lease loss, lane exit, excessive speed or
+lack of progress. Use `ore stop` to cancel the supervised flight.
 
 After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
