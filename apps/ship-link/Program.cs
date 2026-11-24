@@ -30,6 +30,18 @@ namespace SpaceEngineers.Apps.ShipLink
             public int SeenTick;
         }
 
+        private const string RelayName = "[GALNET RELAY]";
+        private const int MaxContacts = 16;
+        private static readonly long ContactLifetime = TimeSpan.FromSeconds(30).Ticks;
+        private sealed class FleetContact
+        {
+            public string Name;
+            public long Source;
+            public long Expires;
+            public Vector3D Position;
+        }
+        private readonly List<FleetContact> _contacts = new List<FleetContact>();
+
         private string _fleetName;
         private bool _needsAssistance;
         private readonly Dictionary<long, FleetStatus> _fleetPeers = new Dictionary<long, FleetStatus>();
@@ -71,10 +83,15 @@ namespace SpaceEngineers.Apps.ShipLink
 
         public void Main(string argument)
         {
+            var command = (argument ?? string.Empty).Trim();
+            if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
+            {
+                ReceiveContact(command);
+                return;
+            }
+
             _tick++;
             _displayTick++;
-
-            var command = (argument ?? string.Empty).Trim();
             if (command.StartsWith("base ", StringComparison.OrdinalIgnoreCase))
                 _baseName = command.Substring(5).Trim();
             else if (command.StartsWith("fleet ", StringComparison.OrdinalIgnoreCase))
@@ -84,6 +101,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 SaveSettings();
                 _needsAssistance = false;
                 _fleetPeers.Clear();
+                _contacts.Clear();
             }
 
             else if (command.StartsWith("worker ", StringComparison.OrdinalIgnoreCase))
@@ -122,6 +140,9 @@ namespace SpaceEngineers.Apps.ShipLink
                     _displayTick = DisplayUpdateIntervalTicks;
                 }
             }
+
+            else if (command.StartsWith("contact ", StringComparison.OrdinalIgnoreCase))
+                SendContact(command.Substring(8));
 
             // Scan antennas
             _antennas.Clear();
@@ -181,6 +202,84 @@ namespace SpaceEngineers.Apps.ShipLink
                 UpdateFleetStatus();
                 UpdateCockpitDisplay();
             }
+        }
+
+        private IMyProgrammableBlock FindGalnetRelay()
+        {
+            var relay = GridTerminalSystem.GetBlockWithName(RelayName) as IMyProgrammableBlock;
+            return relay != null && relay.CubeGrid == Me.CubeGrid && relay.IsWorking && relay.EntityId != Me.EntityId
+                ? relay : null;
+        }
+
+        private void SendContact(string argument)
+        {
+            int delimiter = argument.IndexOf(' ');
+            long target;
+            string name;
+            double x;
+            double y;
+            double z;
+            if (string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 ||
+                delimiter < 1 || !long.TryParse(argument.Substring(0, delimiter), out target) || target == 0 ||
+                argument.Length - delimiter > 200 ||
+                !TaskBusIgcHelper.TryReadOreGps(argument.Substring(delimiter + 1), out name, out x, out y, out z) ||
+                name.Length > 64)
+            {
+                Echo("Join a fleet and use contact <relay ID> GPS:Name:X:Y:Z:.");
+                return;
+            }
+            var relay = FindGalnetRelay();
+            if (relay == null || target == relay.EntityId || !relay.TryRun(
+                "app " + target + " contact|" + (DateTime.UtcNow.Ticks + ContactLifetime) + "|" +
+                TaskBusIgcHelper.EncodeStorage(_fleetName) + "|" +
+                TaskBusIgcHelper.EncodeStorage(argument.Substring(delimiter + 1))))
+                Echo("Could not hand the contact to the local Galnet relay.");
+        }
+
+        private void ReceiveContact(string command)
+        {
+            if (string.IsNullOrEmpty(_fleetName) || FindGalnetRelay() == null)
+                return;
+            var envelope = command.Split(new[] { ' ' }, 5, StringSplitOptions.RemoveEmptyEntries);
+            long source;
+            if (envelope.Length != 5 || !long.TryParse(envelope[2], out source) || source == 0)
+                return;
+
+            var fields = envelope[4].Split('|');
+            long expiry;
+            long now = DateTime.UtcNow.Ticks;
+            if (fields.Length != 4 || fields[0] != "contact" ||
+                !long.TryParse(fields[1], out expiry) || expiry <= now || expiry - now > ContactLifetime)
+                return;
+            try
+            {
+                if (TaskBusIgcHelper.DecodeStorage(fields[2]) != _fleetName)
+                    return;
+                string name;
+                double x;
+                double y;
+                double z;
+                if (!TaskBusIgcHelper.TryReadOreGps(TaskBusIgcHelper.DecodeStorage(fields[3]),
+                    out name, out x, out y, out z) || name.Length > 64)
+                    return;
+
+                _contacts.RemoveAll(contact => contact.Expires <= now);
+                var existing = _contacts.FirstOrDefault(contact => contact.Source == source && contact.Name == name);
+                if (existing == null)
+                {
+                    if (_contacts.Count >= MaxContacts)
+                        return;
+                    existing = new FleetContact { Source = source, Name = name };
+                    _contacts.Add(existing);
+                }
+                else if (existing.Expires >= expiry)
+                    return;
+
+                existing.Expires = expiry;
+                existing.Position = new Vector3D(x, y, z);
+                _displayTick = DisplayUpdateIntervalTicks;
+            }
+            catch (FormatException) { }
         }
 
         private void UpdateFleetStatus()
@@ -402,6 +501,18 @@ namespace SpaceEngineers.Apps.ShipLink
                     display.AppendLine((status.NeedsAssistance ? "[ASSIST] " : "") +
                         status.Name + " | " + status.Speed + " m/s | " +
                         (status.Piloted ? "piloted" : "unoccupied"));
+                }
+            }
+            _contacts.RemoveAll(contact => contact.Expires <= DateTime.UtcNow.Ticks);
+            if (_contacts.Count > 0)
+            {
+                display.AppendLine("=== GAME CONTACTS ===");
+                foreach (var contact in _contacts.OrderByDescending(entry => entry.Expires).Take(8))
+                {
+                    var point = contact.Position;
+                    display.AppendLine(contact.Name + " | relay " + contact.Source);
+                    display.AppendLine("X/Y/Z: " + Math.Round(point.X, 1) + " / " +
+                        Math.Round(point.Y, 1) + " / " + Math.Round(point.Z, 1));
                 }
             }
             display.AppendLine($"Tick: {_tick}");

@@ -269,6 +269,13 @@ on two ships, enter and leave a cockpit, then power down one antenna and
 confirm the other display drops that ship after the timeout. Test both
 assistance commands and confirm the other display adds and removes the marker.
 
+To share a manually observed in-game contact over Galnet, name the local
+relay `[GALNET RELAY]` and the recipient ShipLink PB `[GALNET APP]`, and join
+the same fleet on both ships. Run `contact <recipient relay ID> GPS:Name:X:Y:Z:`
+on the sending ShipLink. The recipient display shows the sender relay and
+coordinates for up to 30 seconds from the send time. Fleet names filter the
+display and do not authenticate the sender.
+
 ### Flight control PB
 
 `apps/fcs` is an opt-in cockpit flight controller. Copy the contents of
