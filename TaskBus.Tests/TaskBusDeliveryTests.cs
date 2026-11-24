@@ -211,6 +211,30 @@ namespace TaskBus.Tests
             Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|")));
         }
 
+        [Fact]
+        public void BaseStockConfirmationSurvivesReloadAndRequiresOriginalRequester()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"group_id\":\"MiningPoints\",\"minimum\":100}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+
+            var report = TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"parent\",\"stock\":100}", targetId: 1);
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\"}", targetId: 1);
+            Dispatch(broker, 10, report);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 10);
+            Dispatch(broker, 42, poll);
+            Assert.Contains("\"base_stock_confirmed\":false", TakeResponse(broker, "TASK_ASSIGN", 42).PayloadJson);
+
+            Dispatch(broker, 9, report);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 42, poll);
+            Assert.Contains("\"base_stock_confirmed\":true", TakeResponse(broker, "TASK_ASSIGN", 42).PayloadJson);
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

@@ -81,7 +81,9 @@ stages. While the point is idle, run `point auto` to automatically publish
 one child for the current stage to `Scouts`, `MiningFleet` or `Haulers`
 respectively. The child request ID is stable across retries and restart.
 After the child completes, confirm the stage on the point consumer.
-For transport, only confirm after the requesting base has received the cargo.
+For new point requests, transport confirmation also requires the original
+base to report stock at or above its requested minimum. This is a stock-level
+confirmation. It does not identify the source of individual items.
 `point manual` restores operator-only stage confirmation. `dispatch fleet` restores the direct
 fleet workflow. AMN saves the dispatch setting and refuses to change it
 while requests or cancellations are outstanding.

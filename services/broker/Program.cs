@@ -37,6 +37,7 @@ namespace SpaceEngineers.Services.Broker
             public string Key;
             public string RequestJson;
             public bool HasParent;
+            public bool BaseStockConfirmed;
             public string State;
             public int Attempts;
             public int LastDispatchTick;
@@ -114,8 +115,12 @@ namespace SpaceEngineers.Services.Broker
                 string requestId;
                 if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out raw) &&
                     TaskBusIgcHelper.TryReadJsonString(raw, out requestId) &&
-                    !string.IsNullOrWhiteSpace(requestId) && !ReportKnownRequest(sourceId, requestId))
-                    SendRequestStatus(sourceId, requestId, "UNKNOWN");
+                    !string.IsNullOrWhiteSpace(requestId))
+                {
+                    RecordBaseStock(sourceId, requestId, payloadJson);
+                    if (!ReportKnownRequest(sourceId, requestId))
+                        SendRequestStatus(sourceId, requestId, "UNKNOWN");
+                }
                 return;
             }
 
@@ -203,6 +208,23 @@ namespace SpaceEngineers.Services.Broker
             SaveQueue();
             SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(id) + ",\"state\":\"QUEUED\"}", requesterId, "ack:" + requestId);
             Echo("Queued " + id + " (" + taskKey + ")");
+        }
+
+        private void RecordBaseStock(long requesterId, string requestId, string payload)
+        {
+            double stock;
+            if (!TaskBusIgcHelper.TryReadFiniteNumber(payload, "stock", out stock))
+                return;
+            var task = _tasks.FirstOrDefault(entry => entry.RequesterId == requesterId &&
+                entry.RequestId == requestId && entry.GroupId == "MiningPoints");
+            double minimum;
+            if (task == null || task.BaseStockConfirmed ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(task.RequestJson, "minimum", out minimum) ||
+                minimum <= 0 || stock < minimum)
+                return;
+
+            task.BaseStockConfirmed = true;
+            SaveQueue();
         }
 
         private bool ReportKnownRequest(long requesterId, string requestId)
@@ -453,6 +475,7 @@ namespace SpaceEngineers.Services.Broker
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(task.Key) +
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(task.GroupId) +
                 ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) +
+                ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
                 ",\"details\":" + task.RequestJson + "}";
             SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             task.Attempts++;
@@ -545,7 +568,7 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12))
+                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13))
                     continue;
 
                 try
@@ -560,7 +583,7 @@ namespace SpaceEngineers.Services.Broker
                     string requestJson;
                     string state;
                     string id;
-                    if (parts.Length == 12)
+                    if (parts.Length >= 12)
                     {
                         id = parts[1];
                         requestId = TaskBusIgcHelper.DecodeStorage(parts[2]);
@@ -595,7 +618,8 @@ namespace SpaceEngineers.Services.Broker
                         State = state,
                         Attempts = attempts,
                         LastDispatchTick = 0,
-                        LeaseEpoch = leaseEpoch
+                        LeaseEpoch = leaseEpoch,
+                        BaseStockConfirmed = parts.Length == 13 && parts[12].Trim() == "1"
                     });
                 }
                 catch (FormatException)
@@ -627,7 +651,8 @@ namespace SpaceEngineers.Services.Broker
                     .Append(task.State).Append('|')
                     .Append(task.Attempts.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.LastDispatchTick.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .AppendLine(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+                    .Append(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .AppendLine(task.BaseStockConfirmed ? "1" : "0");
             }
             Storage = storage.ToString();
         }

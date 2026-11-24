@@ -45,6 +45,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private bool _autoPoint;
         private string _completedChildRequest;
         private string _childState;
+        private bool _baseStockConfirmed;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
@@ -206,6 +207,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 sb.AppendLine("Child request: " + CurrentChildRequestId());
                 sb.AppendLine("Child status: " + (_childState ?? "awaiting broker"));
+                if (CurrentStage() == "transport" && RequiresBaseStockConfirmation())
+                    sb.AppendLine(_baseStockConfirmed ? "Base stock confirmed" : "Waiting for base stock confirmation");
                 if (_completedChildRequest == CurrentChildRequestId())
                     sb.AppendLine("Child task complete. Confirm stage.");
             }
@@ -295,6 +298,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             else if (leaseEpoch < _leaseEpoch)
                 return;
 
+            string confirmation;
+            _baseStockConfirmed = TaskBusIgcHelper.TryGetJsonProperty(taskJson, "base_stock_confirmed", out confirmation) &&
+                confirmation == "true";
             _lastLeaseConfirmationTick = _tick;
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
@@ -385,6 +391,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (IsAutomaticPoint && expected == "transport" && RequiresBaseStockConfirmation() && !_baseStockConfirmed)
+            {
+                _echo("Waiting for stock confirmation from the requesting base.");
+                return;
+            }
+
             _stageIndex++;
             _childState = null;
             if (_stageIndex >= _stages.Count)
@@ -405,6 +417,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SaveState();
                 _echo("Stage saved. Next stage: " + CurrentStage());
             }
+        }
+
+        private bool RequiresBaseStockConfirmation()
+        {
+            string details;
+            string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "receipt_required", out value) && value == "true";
         }
 
         private string CurrentStage()
