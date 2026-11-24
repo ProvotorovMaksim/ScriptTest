@@ -361,17 +361,29 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !HasRecentLeaseConfirmation)
                 return false;
 
-            string details;
-            string position;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
-                !TaskBusIgcHelper.TryGetJsonProperty(details, "approach_position", out position) ||
-                !TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) ||
-                !TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) ||
-                !TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z))
+            if (!TryReadMiningPosition("approach_position", out x, out y, out z))
                 return false;
-
             taskId = _activeTaskId;
             return true;
+        }
+
+        public bool TryGetMiningOrePosition(out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return _miningPlatform && HasActiveTask && CurrentStage() == "mine" && HasRecentLeaseConfirmation &&
+                TryReadMiningPosition("ore_position", out x, out y, out z);
+        }
+
+        private bool TryReadMiningPosition(string field, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            string details;
+            string position;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out position) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z);
         }
 
         private bool HasRecentLeaseConfirmation => _lastLeaseConfirmationTick.HasValue &&

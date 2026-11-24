@@ -23,6 +23,7 @@ namespace SpaceEngineers.Apps.Platform
         private string _autoMiningUnloadLease;
         private int _miningUnloadTicks;
         private readonly string _miningCargoName;
+        private readonly double? _miningLaneRadius;
         private readonly string _miningUnloadTo;
         private readonly List<IMyCargoContainer> _miningBuffers = new List<IMyCargoContainer>();
         private readonly List<MyInventoryItem> _miningItems = new List<MyInventoryItem>();
@@ -73,6 +74,13 @@ namespace SpaceEngineers.Apps.Platform
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _miningCargoName = ReadSetting("MiningCargo=");
+            var laneSetting = ReadSetting("MiningLaneRadius=");
+            if (laneSetting != null)
+            {
+                double radius;
+                _miningLaneRadius = double.TryParse(laneSetting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius)
+                    && radius >= 1 && radius <= 100 ? radius : double.NaN;
+            }
             _miningUnloadTo = ReadSetting("MiningUnloadTo=");
             _listener = IGC.RegisterBroadcastListener(Channel);
             _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
@@ -386,7 +394,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            if (!CheckMiningCargo())
+            if (!CheckMiningLane(x, y, z) || !CheckMiningCargo())
             {
                 Echo(_lastProbe);
                 return;
@@ -416,8 +424,44 @@ namespace SpaceEngineers.Apps.Platform
                 StopManagedDrills();
                 _lastProbe = "Managed drills stopped: the mining lease or stage changed.";
             }
-            else if (!CheckMiningCargo())
+            else if (!CheckMiningLane(x, y, z) || !CheckMiningCargo())
                 StopManagedDrills();
+        }
+
+        private bool CheckMiningLane(double approachX, double approachY, double approachZ)
+        {
+            if (!_miningLaneRadius.HasValue)
+                return true;
+            if (double.IsNaN(_miningLaneRadius.Value))
+            {
+                _lastProbe = "Set MiningLaneRadius to a value between 1 and 100 metres.";
+                return false;
+            }
+
+            double oreX;
+            double oreY;
+            double oreZ;
+            if (!_worker.TryGetMiningOrePosition(out oreX, out oreY, out oreZ))
+            {
+                _lastProbe = "Mining lane requires a confirmed ore position.";
+                return false;
+            }
+            var start = new Vector3D(approachX, approachY, approachZ);
+            var axis = new Vector3D(oreX, oreY, oreZ) - start;
+            double lengthSquared = axis.LengthSquared();
+            if (lengthSquared < 0.01 || double.IsInfinity(lengthSquared))
+            {
+                _lastProbe = "Mining lane needs distinct approach and ore positions.";
+                return false;
+            }
+            var offset = Me.CubeGrid.GetPosition() - start;
+            double progress = Math.Max(0, Math.Min(1, Vector3D.Dot(offset, axis) / lengthSquared));
+            double radius = _miningLaneRadius.Value;
+            if ((offset - progress * axis).LengthSquared() <= radius * radius)
+                return true;
+
+            _lastProbe = "Managed drills halted: platform outside the configured mining lane.";
+            return false;
         }
 
         private bool CheckMiningCargo()

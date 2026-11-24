@@ -318,6 +318,10 @@ changes. Set `MiningCargo=<local cargo container name>` to measure the
 requested resource in a dedicated inventory and stop the drills when its
 requested amount is reached or the inventory is at least 95% full. This
 counts existing cargo in that inventory and does not complete the assignment.
+Set `MiningLaneRadius=<1 to 100 metres>` to permit drilling only when the
+platform grid origin is within that distance of the segment from the
+assigned approach to the surveyed ore position. Departure from this lane
+stops the managed drills. The pilot reviews clearance and flies the pass.
 
 After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
