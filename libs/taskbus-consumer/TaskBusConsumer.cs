@@ -345,6 +345,21 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ",\"y\":" + y.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"z\":" + z.ToString("R", CultureInfo.InvariantCulture) + "}";
             bool isSite = separator == 4;
+            if (isSite)
+            {
+                string details;
+                string raw;
+                string resource;
+                if (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                    TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out resource) &&
+                    resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(name, resource.Substring(4), StringComparison.OrdinalIgnoreCase))
+                {
+                    _echo("The selected deposit does not match the requested ore.");
+                    return;
+                }
+            }
             if (position == (isSite ? _oreApproach : _oreSite))
             {
                 _echo("Choose distinct ore and approach positions.");
@@ -608,21 +623,27 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 TaskBusIgcHelper.TryReadJsonString(baseNameJson, out baseName))
                 summary.Append("\nDelivery base: " + baseName);
 
+            AppendPosition(summary, details, "base_position", "Base at request time");
+            AppendPosition(summary, details, "approach_position", "Mining approach");
+            AppendPosition(summary, details, "ore_position", "Ore deposit");
+            return summary.ToString();
+        }
+
+        private static void AppendPosition(StringBuilder summary, string details, string field, string label)
+        {
             string position;
             double x;
             double y;
             double z;
-            if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_position", out position) &&
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out position) &&
                 TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
                 TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
                 TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z))
             {
                 var culture = CultureInfo.InvariantCulture;
-                summary.Append("\nBase at request time (X, Y, Z): " +
+                summary.Append("\n" + label + " (X, Y, Z): " +
                     x.ToString("0.##", culture) + ", " + y.ToString("0.##", culture) + ", " + z.ToString("0.##", culture));
             }
-
-            return summary.ToString();
         }
 
         private void ShowStatus()

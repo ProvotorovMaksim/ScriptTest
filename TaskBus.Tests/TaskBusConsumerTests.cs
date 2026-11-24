@@ -19,7 +19,7 @@ namespace TaskBus.Tests
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
             var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
-                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true,\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true,\"resource\":\"Ore/Iron\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
             point.ProcessIncomingMessage(1, parent);
             point.Tick();
             var firstPublication = sent[sent.Count - 1];
@@ -36,8 +36,11 @@ namespace TaskBus.Tests
                 "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
             point.ProcessCommand("stage survey");
             Assert.Contains("Stage: survey", point.GetStatus());
-            point.ProcessCommand("site GPS:Iron:10:20:30:");
+            point.ProcessCommand("site GPS:Gold:10:20:30:");
             point.ProcessCommand("approach GPS:Entry:10:20:50:");
+            point.ProcessCommand("stage survey");
+            Assert.Contains("Stage: survey", point.GetStatus());
+            point.ProcessCommand("site GPS:Iron:10:20:30:");
             point = Start();
             point.ProcessIncomingMessage(1, parent);
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
@@ -84,7 +87,9 @@ namespace TaskBus.Tests
             var worker = Start();
             var payload = "{\"task_id\":\"ore-1\",\"lease_epoch\":1,\"key\":\"Ore/Iron\",\"details\":{" +
                 "\"resource\":\"Ore/Iron\",\"amount\":12.5,\"base_grid_name\":\"Refinery\"," +
-                "\"base_position\":{\"x\":100,\"y\":-200.25,\"z\":300},\"steps\":[\"survey\"]}}";
+                "\"base_position\":{\"x\":100,\"y\":-200.25,\"z\":300}," +
+                "\"ore_position\":{\"x\":10,\"y\":20,\"z\":30},\"approach_position\":{\"x\":10,\"y\":20,\"z\":50}," +
+                "\"steps\":[\"survey\"]}}";
             worker.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_ASSIGN", payload, targetId: 42));
 
             var status = Start().GetStatus();
@@ -92,6 +97,8 @@ namespace TaskBus.Tests
             Assert.Contains("Requested amount: 12.5", status);
             Assert.Contains("Delivery base: Refinery", status);
             Assert.Contains("Base at request time (X, Y, Z): 100, -200.25, 300", status);
+            Assert.Contains("Mining approach (X, Y, Z): 10, 20, 50", status);
+            Assert.Contains("Ore deposit (X, Y, Z): 10, 20, 30", status);
         }
 
         [Fact]
