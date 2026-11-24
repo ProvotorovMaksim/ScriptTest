@@ -11,6 +11,11 @@ namespace SpaceEngineers.Apps.FlightControl
         // PB BODY START
         private readonly FlightController flight = new FlightController();
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
+        private const string DockConnectorName = "[FCS DOCK]";
+        private IMyShipConnector dockConnector;
+        private Vector3D? dockPosition;
+        private MatrixD dockFrame;
+        private bool showDockGuide;
         private const string StatusPanelName = "[FCS STATUS]";
         private const int StatusPanelInterval = 15;
         private const double DefaultBrakingDistance = 50;
@@ -26,9 +31,21 @@ namespace SpaceEngineers.Apps.FlightControl
 
         public Program()
         {
+            var settings = Storage.Split('\n');
             double distance;
-            if (TryReadBrakingDistance(Storage, out distance))
+            if (TryReadBrakingDistance(settings[0], out distance))
                 flight.BrakingDistance = distance;
+            Vector3D position;
+            Vector3D forward;
+            Vector3D up;
+            if (settings.Length == 4 && TryReadDockVector(settings[1], out position) &&
+                TryReadDockVector(settings[2], out forward) && TryReadDockVector(settings[3], out up) &&
+                Math.Abs(forward.LengthSquared() - 1) < 0.001 && Math.Abs(up.LengthSquared() - 1) < 0.001 &&
+                Math.Abs(Vector3D.Dot(forward, up)) < 0.001)
+            {
+                dockPosition = position;
+                dockFrame = MatrixD.CreateWorld(position, forward, up);
+            }
         }
 
         public void Main(string argument, UpdateType source)
@@ -45,6 +62,14 @@ namespace SpaceEngineers.Apps.FlightControl
                     Echo(mode == Mode.Off ? "Engage FCS before requesting mass limits." :
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
                     return;
+                case "dock record": RecordDockPose(); break;
+                case "dock guide":
+                    dockConnector = FindDockConnector();
+                    showDockGuide = dockConnector != null && dockPosition.HasValue;
+                    if (!showDockGuide)
+                        Echo("Dock guide requires a recorded berth and a connector named " + DockConnectorName + ".");
+                    break;
+                case "dock off": showDockGuide = false; break;
                 case "off": Release("FCS off."); break;
                 default:
                     if (command.StartsWith("brake ", StringComparison.Ordinal))
@@ -70,10 +95,11 @@ namespace SpaceEngineers.Apps.FlightControl
                 }
             }
 
-            Echo(status);
+            var displayStatus = showDockGuide ? status + GetDockStatus() : status;
+            Echo(displayStatus);
             bool refreshPanel = command.Length != 0 || (source & UpdateType.Update1) == 0;
             if (refreshPanel || previousMode != mode || (statusPanel != null && ++statusPanelTicks >= StatusPanelInterval))
-                WriteStatusPanel(refreshPanel);
+                WriteStatusPanel(refreshPanel, displayStatus);
         }
 
         private void SetBrakingDistance(string argument)
@@ -85,8 +111,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             }
             flight.BrakingDistance = distance;
-            Storage = distance.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-            Echo("Braking distance budget: " + Storage + " m per axis.");
+            SaveSettings();
+            Echo("Braking distance budget: " + FormatNumber(distance) + " m per axis.");
         }
 
         private static bool TryReadBrakingDistance(string text, out double distance)
@@ -96,7 +122,80 @@ namespace SpaceEngineers.Apps.FlightControl
                 distance >= MinimumBrakingDistance && distance <= MaximumBrakingDistance;
         }
 
-        private void WriteStatusPanel(bool refreshPanel)
+        private IMyShipConnector FindDockConnector()
+        {
+            var connector = GridTerminalSystem.GetBlockWithName(DockConnectorName) as IMyShipConnector;
+            return connector != null && connector.CubeGrid == Me.CubeGrid ? connector : null;
+        }
+
+        private void RecordDockPose()
+        {
+            dockConnector = FindDockConnector();
+            if (dockConnector == null || dockConnector.Status != MyShipConnectorStatus.Connected)
+            {
+                Echo("Connect " + DockConnectorName + " to the berth before recording.");
+                return;
+            }
+
+            dockPosition = dockConnector.GetPosition();
+            dockFrame = dockConnector.WorldMatrix;
+            SaveSettings();
+            Echo("Recorded the connected ship pose for this berth.");
+        }
+
+        private string GetDockStatus()
+        {
+            try
+            {
+                if (dockConnector == null || dockConnector.CubeGrid != Me.CubeGrid || !dockConnector.IsWorking)
+                    return "\nDock guide: ship connector unavailable.";
+
+                var frame = dockConnector.WorldMatrix;
+                var delta = dockPosition.Value - dockConnector.GetPosition();
+                var correction = Vector3D.TransformNormal(delta, MatrixD.Transpose(dockFrame));
+                var angle = Math.Acos(Clamp(Vector3D.Dot(frame.Forward, dockFrame.Forward), -1, 1)) * 180 / Math.PI;
+                var upError = Math.Acos(Clamp(Vector3D.Dot(frame.Up, dockFrame.Up), -1, 1)) * 180 / Math.PI;
+                return "\nDOCK GUIDE | " + dockConnector.Status +
+                    "\nBerth correction R/U/F: " + Math.Round(correction.X, 2) + " / " +
+                    Math.Round(correction.Y, 2) + " / " + Math.Round(-correction.Z, 2) + " m" +
+                    "\nForward/up alignment errors: " + Math.Round(angle, 1) + " / " +
+                    Math.Round(upError, 1) + " deg";
+            }
+            catch (Exception)
+            {
+                dockConnector = null;
+                return "\nDock guide: ship connector unavailable.";
+            }
+        }
+
+        private void SaveSettings()
+        {
+            Storage = FormatNumber(flight.BrakingDistance);
+            if (dockPosition.HasValue)
+                Storage += "\n" + FormatDockVector(dockPosition.Value) + "\n" +
+                    FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up);
+        }
+
+        private static string FormatDockVector(Vector3D vector) =>
+            FormatNumber(vector.X) + ";" + FormatNumber(vector.Y) + ";" + FormatNumber(vector.Z);
+
+        private static string FormatNumber(double value) =>
+            value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
+        private static bool TryReadDockVector(string text, out Vector3D vector)
+        {
+            vector = Vector3D.Zero;
+            var values = text.Split(';');
+            return values.Length == 3 && TryReadDockNumber(values[0], out vector.X) &&
+                TryReadDockNumber(values[1], out vector.Y) && TryReadDockNumber(values[2], out vector.Z);
+        }
+
+        private static bool TryReadDockNumber(string text, out double number) =>
+            double.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out number) &&
+            !double.IsNaN(number) && !double.IsInfinity(number);
+
+        private void WriteStatusPanel(bool refreshPanel, string displayStatus)
         {
             statusPanelTicks = 0;
             try
@@ -108,7 +207,7 @@ namespace SpaceEngineers.Apps.FlightControl
 
                 if (statusPanel.ContentType != ContentType.TEXT_AND_IMAGE)
                     statusPanel.ContentType = ContentType.TEXT_AND_IMAGE;
-                statusPanel.WriteText(status);
+                statusPanel.WriteText(displayStatus);
             }
             catch (Exception error)
             {

@@ -161,6 +161,21 @@ The estimate assumes current orientation, effective thrust and estimated
 external acceleration on that axis. In-game trials should compare the
 estimate with measured stopping distance at several loads and orientations.
 
+For a fixed berth, name the ship's connector `[FCS DOCK]`. While connected
+in the desired orientation, run `dock record` to save its world pose. Run
+`dock guide` on the next approach to show the position correction along the
+recorded connector's right, up and forward axes, plus forward and up
+alignment errors. Use `dock off` to hide the guide. The guide provides
+readouts during FCS flight. The pilot flies the approach and connects using
+the connector controls. Re-record the pose if the berth moves.
+
+To investigate an automatic approach that stalls near the port, record a
+successful connected pose and compare the guide readings at the stall with
+the same ship, berth and cargo load in a copy of the world without the
+physics mods. Capture the connector state, position and alignment errors,
+and which controller was active. Keep the guide in readout-only use during
+the comparison.
+
 Thrust allocation uses effective thrust and each engine's moment arm from the
 ship's measured center of mass. The PB reports the modeled residual moment.
 Verify actuator behavior, gyro signs, and instruction usage in game before
