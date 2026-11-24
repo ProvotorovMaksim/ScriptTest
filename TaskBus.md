@@ -798,6 +798,13 @@ requested thrust in controller axes, the smallest force margin after
 reserve, and the modeled residual moment. These readings remain available
 after FCS releases the approach, until the next FCS docking attempt.
 
+For modded-physics trials, `dock aero on` enables external acceleration
+estimation during final approach, including when the ship is nearly
+stationary. Compensation is limited to 0.5 m/s². It uses the same thrust
+reserve, moment and approach checks. The guide shows the applied magnitude.
+This option starts off after a PB restart. Use `dock aero off` to disable
+it without changing the free-flight estimator.
+
 Thrust allocation uses effective thrust and each engine's moment arm from the
 ship's measured center of mass. The PB reports the modeled residual moment.
 Verify actuator behavior, gyro signs, and instruction usage in game before

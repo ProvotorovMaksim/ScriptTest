@@ -119,6 +119,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "normal": Activate(Mode.Normal); break;
                 case "aero on": flight.EstimateAerodynamics = true; break;
                 case "aero off": flight.EstimateAerodynamics = false; break;
+                case "dock aero on": flight.EstimateDockDisturbance = true; break;
+                case "dock aero off": flight.EstimateDockDisturbance = false; break;
                 case "manual": Activate(Mode.Manual); break;
                 case "mass":
                     Echo(mode == Mode.Off ? "Engage FCS before requesting mass limits." :
@@ -450,7 +452,8 @@ namespace SpaceEngineers.Apps.FlightControl
             if (connectorStatus == MyShipConnectorStatus.Connectable && distanceSquared <= 0.36)
                 desiredVelocity = Vector3D.Zero;
 
-            flight.Approach(cockpit, velocity.LinearVelocity, velocity.AngularVelocity, desiredVelocity);
+            flight.Approach(cockpit, velocity.LinearVelocity, velocity.AngularVelocity, desiredVelocity,
+                Runtime.TimeSinceLastRun.TotalSeconds);
             status = droneDock ? "FCS dock: uncrewed final approach. Player control cancels." :
                 "FCS dock: creep to recorded berth. Pilot input cancels.";
         }
@@ -873,6 +876,7 @@ namespace SpaceEngineers.Apps.FlightControl
             private Vector3D disturbance;
             private bool hasSample;
             public bool EstimateAerodynamics { get; set; }
+            public bool EstimateDockDisturbance { get; set; }
 
             public bool Acquire(List<IMyThrust> thrusters, List<IMyGyro> availableGyros, MatrixD frame)
             {
@@ -901,21 +905,9 @@ namespace SpaceEngineers.Apps.FlightControl
                 var gravity = pilot.GetNaturalGravity();
                 var center = pilot.CenterOfMass;
                 var measuredForce = thrust.Measure(frame, center, capacity);
-                // Enable this estimator through the PB command for free-flight trials.
-                if (EstimateAerodynamics && hasSample && dt >= 0.008 && dt <= 0.15 &&
-                    velocity.LinearVelocity.LengthSquared() > 4)
-                {
-                    var estimate = (velocity.LinearVelocity - previousVelocity) / dt - gravity -
-                        Vector3D.TransformNormal(measuredForce / mass, frame);
-                    double magnitude = estimate.Length();
-                    if (magnitude > 4)
-                        estimate *= 4 / magnitude;
-                    disturbance += (estimate - disturbance) * Math.Min(dt, 0.05);
-                }
-                else
-                    disturbance = Vector3D.Zero;
-                previousVelocity = velocity.LinearVelocity;
-                hasSample = true;
+                UpdateDisturbance(velocity.LinearVelocity, gravity,
+                    Vector3D.TransformNormal(measuredForce / mass, frame), dt,
+                    EstimateAerodynamics && velocity.LinearVelocity.LengthSquared() > 4, 4);
 
                 var worldToLocal = MatrixD.Transpose(frame);
                 var localVelocity = Vector3D.TransformNormal(velocity.LinearVelocity, worldToLocal);
@@ -1035,12 +1027,30 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
+            private void UpdateDisturbance(Vector3D velocity, Vector3D gravity, Vector3D thrustAcceleration,
+                double dt, bool enabled, double limit)
+            {
+                if (enabled && hasSample && dt >= 0.008 && dt <= 0.15)
+                {
+                    var estimate = (velocity - previousVelocity) / dt - gravity - thrustAcceleration;
+                    double magnitude = estimate.Length();
+                    if (magnitude > limit)
+                        estimate *= limit / magnitude;
+                    disturbance += (estimate - disturbance) * Math.Min(dt, 0.05);
+                }
+                else
+                    disturbance = Vector3D.Zero;
+                previousVelocity = velocity;
+                hasSample = true;
+            }
+
             private bool hasDockTelemetry;
             private Vector3D dockMeasuredForce;
             private Vector3D dockRequestedForce;
             private Vector3D dockDesiredVelocity;
             private double dockMeasuredSpeed;
             private double dockThrustMargin;
+            private double dockDisturbance;
             private double? dockResidualMoment;
 
             public void ResetDockTelemetry()
@@ -1058,6 +1068,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nDock thrust XYZ actual: " + FormatDockForce(dockMeasuredForce) +
                     "\nDock thrust XYZ target: " + FormatDockForce(dockRequestedForce) +
                     "\nDock minimum thrust margin: " + Math.Round(dockThrustMargin) + " N" +
+                    "\nDock external acceleration applied: " + Math.Round(dockDisturbance, 2) + " m/s²" +
                     "\nDock modeled moment: " +
                     (dockResidualMoment.HasValue ? Math.Round(dockResidualMoment.Value) + " N m" : "unavailable");
             }
@@ -1066,7 +1077,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 Math.Round(force.X) + " / " + Math.Round(force.Y) + " / " + Math.Round(force.Z) + " N";
 
             public void Approach(IMyShipController pilot, Vector3D velocity, Vector3D angularVelocity,
-                Vector3D desiredVelocity)
+                Vector3D desiredVelocity, double dt)
             {
                 var frame = pilot.WorldMatrix;
                 var toLocal = MatrixD.Transpose(frame);
@@ -1075,8 +1086,12 @@ namespace SpaceEngineers.Apps.FlightControl
                     throw new InvalidOperationException("ship mass unavailable");
 
                 dockMeasuredForce = thrust.Measure(frame, pilot.CenterOfMass, capacity);
+                var gravity = pilot.GetNaturalGravity();
+                UpdateDisturbance(velocity, gravity,
+                    Vector3D.TransformNormal(dockMeasuredForce / mass, frame), dt, EstimateDockDisturbance, 0.5);
                 var acceleration = (desiredVelocity - velocity) * 1.5;
-                var target = Vector3D.TransformNormal((acceleration - pilot.GetNaturalGravity()) * mass, toLocal);
+                var target = Vector3D.TransformNormal((acceleration - gravity - disturbance) * mass, toLocal);
+                dockDisturbance = disturbance.Length();
                 dockRequestedForce = target;
                 dockDesiredVelocity = desiredVelocity;
                 dockMeasuredSpeed = velocity.Length();
