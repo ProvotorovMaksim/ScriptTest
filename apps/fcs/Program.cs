@@ -15,6 +15,8 @@ namespace SpaceEngineers.Apps.FlightControl
         private IMyShipConnector dockConnector;
         private Vector3D? dockPosition;
         private MatrixD dockFrame;
+        private long dockPortId;
+        private int dockTicks;
         private bool showDockGuide;
         private const string StatusPanelName = "[FCS STATUS]";
         private const int StatusPanelInterval = 15;
@@ -38,13 +40,15 @@ namespace SpaceEngineers.Apps.FlightControl
             Vector3D position;
             Vector3D forward;
             Vector3D up;
-            if (settings.Length == 4 && TryReadDockVector(settings[1], out position) &&
+            if (settings.Length >= 4 && TryReadDockVector(settings[1], out position) &&
                 TryReadDockVector(settings[2], out forward) && TryReadDockVector(settings[3], out up) &&
                 Math.Abs(forward.LengthSquared() - 1) < 0.001 && Math.Abs(up.LengthSquared() - 1) < 0.001 &&
                 Math.Abs(Vector3D.Dot(forward, up)) < 0.001)
             {
                 dockPosition = position;
                 dockFrame = MatrixD.CreateWorld(position, forward, up);
+                if (settings.Length == 5)
+                    long.TryParse(settings[4], out dockPortId);
             }
         }
 
@@ -63,13 +67,18 @@ namespace SpaceEngineers.Apps.FlightControl
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
                     return;
                 case "dock record": RecordDockPose(); break;
+                case "dock approach": BeginDockApproach(); break;
                 case "dock guide":
                     dockConnector = FindDockConnector();
                     showDockGuide = dockConnector != null && dockPosition.HasValue;
                     if (!showDockGuide)
                         Echo("Dock guide requires a recorded berth and a connector named " + DockConnectorName + ".");
                     break;
-                case "dock off": showDockGuide = false; break;
+                case "dock off":
+                    showDockGuide = false;
+                    if (mode == Mode.Dock)
+                        Release("FCS off: docking cancelled.");
+                    break;
                 case "off": Release("FCS off."); break;
                 default:
                     if (command.StartsWith("brake ", StringComparison.Ordinal))
@@ -85,6 +94,8 @@ namespace SpaceEngineers.Apps.FlightControl
                         Release("FCS off: cockpit unavailable or pilot absent.");
                     else if (RemoteAutopilotEnabled())
                         Release("FCS off: remote autopilot took control.");
+                    else if (mode == Mode.Dock)
+                        UpdateDockApproach();
                     else
                         status = flight.Update(cockpit, mode, Runtime.TimeSinceLastRun.TotalSeconds,
                             () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2);
@@ -137,10 +148,99 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             }
 
+            var port = dockConnector.OtherConnector;
             dockPosition = dockConnector.GetPosition();
             dockFrame = dockConnector.WorldMatrix;
+            dockPortId = port == null ? 0 : port.EntityId;
             SaveSettings();
             Echo("Recorded the connected ship pose for this berth.");
+        }
+
+        private void BeginDockApproach()
+        {
+            if (mode == Mode.Dock)
+                return;
+
+            dockConnector = FindDockConnector();
+            if (!dockPosition.HasValue || dockPortId == 0 || dockConnector == null)
+            {
+                Echo("Record the berth while connected before starting an approach.");
+                return;
+            }
+
+            Activate(Mode.Dock);
+            if (mode == Mode.Dock)
+            {
+                dockTicks = 0;
+                showDockGuide = true;
+                status = "FCS dock: checking final approach.";
+            }
+        }
+
+        private void UpdateDockApproach()
+        {
+            const double alignment = 0.996194698; // cosine of five degrees
+            if (++dockTicks > 1200 || dockConnector == null || dockConnector.CubeGrid != Me.CubeGrid ||
+                !dockConnector.IsWorking)
+            {
+                Release("FCS off: docking timed out or connector unavailable.");
+                return;
+            }
+
+            if (cockpit.MoveIndicator.LengthSquared() > 0.01 ||
+                cockpit.RotationIndicator.LengthSquared() > 0.01 || Math.Abs(cockpit.RollIndicator) > 0.1)
+            {
+                Release("FCS off: pilot took over docking.");
+                return;
+            }
+
+            var port = dockConnector.OtherConnector;
+            var connectorStatus = dockConnector.Status;
+            if (connectorStatus == MyShipConnectorStatus.Connected)
+            {
+                Release(port != null && port.EntityId == dockPortId ?
+                    "FCS off: connected to recorded berth." : "FCS off: connected to a different port.");
+                return;
+            }
+
+            var frame = dockConnector.WorldMatrix;
+            var delta = dockPosition.Value - dockConnector.GetPosition();
+            var correction = Vector3D.TransformNormal(delta, MatrixD.Transpose(dockFrame));
+            var velocity = cockpit.GetShipVelocities();
+            if (delta.LengthSquared() > 9 || Math.Abs(correction.X) > 0.4 || Math.Abs(correction.Y) > 0.4 ||
+                correction.Z > 0.15 || Vector3D.Dot(frame.Forward, dockFrame.Forward) < alignment ||
+                Vector3D.Dot(frame.Up, dockFrame.Up) < alignment || velocity.LinearVelocity.LengthSquared() > 1)
+            {
+                Release("FCS off: outside the final docking corridor.");
+                return;
+            }
+
+            if (connectorStatus == MyShipConnectorStatus.Connectable)
+            {
+                if (port == null || port.EntityId != dockPortId)
+                {
+                    Release("FCS off: connector target does not match the recorded berth.");
+                    return;
+                }
+                if (velocity.LinearVelocity.LengthSquared() <= 0.04 && delta.LengthSquared() <= 0.36)
+                {
+                    dockConnector.Connect();
+                    if (dockConnector.Status == MyShipConnectorStatus.Connected)
+                    {
+                        Release("FCS off: connected to recorded berth.");
+                        return;
+                    }
+                }
+            }
+
+            var desiredVelocity = delta * 0.65;
+            if (desiredVelocity.LengthSquared() > 0.1225)
+                desiredVelocity = Vector3D.Normalize(desiredVelocity) * 0.35;
+            if (connectorStatus == MyShipConnectorStatus.Connectable && delta.LengthSquared() <= 0.36)
+                desiredVelocity = Vector3D.Zero;
+
+            flight.Approach(cockpit, velocity.LinearVelocity, velocity.AngularVelocity, desiredVelocity);
+            status = "FCS dock: creep to recorded berth. Pilot input cancels.";
         }
 
         private string GetDockStatus()
@@ -173,7 +273,8 @@ namespace SpaceEngineers.Apps.FlightControl
             Storage = FormatNumber(flight.BrakingDistance);
             if (dockPosition.HasValue)
                 Storage += "\n" + FormatDockVector(dockPosition.Value) + "\n" +
-                    FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up);
+                    FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up) +
+                    "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static string FormatDockVector(Vector3D vector) =>
@@ -306,7 +407,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 status += "\nCould not restore " + failures + " actuator or cockpit settings.";
         }
 
-        private enum Mode { Off, Normal, Manual }
+        private enum Mode { Off, Normal, Manual, Dock }
 
         private sealed class FlightController
         {
@@ -471,17 +572,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     Rotation(turn.X, localAngularVelocity.X),
                     Rotation(turn.Y, localAngularVelocity.Y),
                     Rotation(turn.Z, localAngularVelocity.Z));
-                var worldRotation = Vector3D.TransformNormal(rotationCommand, frame);
-                foreach (var gyro in gyros)
-                {
-                    if (!gyro.IsWorking)
-                        continue;
-                    var local = Vector3D.TransformNormal(worldRotation, MatrixD.Transpose(gyro.WorldMatrix));
-                    gyro.Pitch = (float)Clamp(local.X, -GyroLimit, GyroLimit);
-                    gyro.Yaw = (float)Clamp(local.Y, -GyroLimit, GyroLimit);
-                    gyro.Roll = (float)Clamp(local.Z, -GyroLimit, GyroLimit);
-                    gyro.GyroOverride = true;
-                }
+                ApplyGyros(frame, rotationCommand);
 
                 return (mode == Mode.Manual ? "FCS manual assist" : "FCS normal") +
                     (risk ? "\nWarning: insufficient support or braking reserve." : "") +
@@ -494,6 +585,50 @@ namespace SpaceEngineers.Apps.FlightControl
                     (double.IsPositiveInfinity(longestStop) ? "unavailable" : Math.Round(longestStop, 1) + " m") +
                     "\nBraking distance budget: " + BrakingDistance + " m per axis" +
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
+            }
+
+            public void Approach(IMyCockpit pilot, Vector3D velocity, Vector3D angularVelocity,
+                Vector3D desiredVelocity)
+            {
+                var frame = pilot.WorldMatrix;
+                var toLocal = MatrixD.Transpose(frame);
+                var mass = pilot.CalculateShipMass().PhysicalMass;
+                if (mass <= 0)
+                    throw new InvalidOperationException("ship mass unavailable");
+
+                thrust.Measure(frame, pilot.CenterOfMass, capacity);
+                var acceleration = (desiredVelocity - velocity) * 1.5;
+                var target = Vector3D.TransformNormal((acceleration - pilot.GetNaturalGravity()) * mass, toLocal);
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    double force = target.GetDim(axis);
+                    if (force > capacity[axis * 2] * (1 - ThrustReserve) ||
+                        force < -capacity[axis * 2 + 1] * (1 - ThrustReserve))
+                        throw new InvalidOperationException("insufficient thrust reserve for docking");
+                }
+
+                var moment = thrust.Solve(target, Vector3D.One);
+                if (moment.LengthSquared() > target.LengthSquared() * MaximumResidualLeverArm * MaximumResidualLeverArm)
+                    throw new InvalidOperationException("insufficient moment compensation for docking");
+
+                thrust.Apply();
+                var spin = Vector3D.TransformNormal(angularVelocity, toLocal);
+                ApplyGyros(frame, new Vector3D(Rotation(0, spin.X), Rotation(0, spin.Y), Rotation(0, spin.Z)));
+            }
+
+            private void ApplyGyros(MatrixD frame, Vector3D rotationCommand)
+            {
+                var worldRotation = Vector3D.TransformNormal(rotationCommand, frame);
+                foreach (var gyro in gyros)
+                {
+                    if (!gyro.IsWorking)
+                        continue;
+                    var local = Vector3D.TransformNormal(worldRotation, MatrixD.Transpose(gyro.WorldMatrix));
+                    gyro.Pitch = (float)Clamp(local.X, -GyroLimit, GyroLimit);
+                    gyro.Yaw = (float)Clamp(local.Y, -GyroLimit, GyroLimit);
+                    gyro.Roll = (float)Clamp(local.Z, -GyroLimit, GyroLimit);
+                    gyro.GyroOverride = true;
+                }
             }
 
             public string AssessMass(IMyCockpit pilot, Func<bool> hasInstructionBudget)

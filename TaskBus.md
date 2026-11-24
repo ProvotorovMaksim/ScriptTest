@@ -169,6 +169,15 @@ alignment errors. Use `dock off` to hide the guide. The guide provides
 readouts during FCS flight. The pilot flies the approach and connects using
 the connector controls. Re-record the pose if the berth moves.
 
+For a supervised final approach, turn off the standard autopilot, occupy the
+`[FCS]` cockpit, and line up within 3 m of the recorded pose with at most 0.4 m
+of side or vertical error and five degrees of angular error. Run
+`dock approach`. FCS targets up to 0.35 m/s and calls Connect when the matching
+port is connectable and ship speed is low enough. Use a clear approach
+path. Pilot movement or rotation input, `dock off`, loss of control, leaving
+the corridor or a timeout releases FCS. Record the berth again after this
+update so the saved pose includes the port ID.
+
 To investigate an automatic approach that stalls near the port, record a
 successful connected pose and compare the guide readings at the stall with
 the same ship, berth and cargo load in a copy of the world without the
