@@ -48,6 +48,35 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void SurveyRetrySurvivesRestartAndFencesOldCompletion()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1);
+            var point = Start();
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+            point.ProcessIncomingMessage(1, assignment);
+            var oldCompletion = TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42);
+            point.ProcessCommand("survey retry");
+            Assert.Contains("Child request: parent:7:0\n", point.GetStatus());
+            Assert.True(point.ProcessIncomingMessage(1, oldCompletion));
+            point.ProcessCommand("survey retry");
+            Assert.Contains("\"request_id\":\"parent:7:0:retry:1\"", sent[sent.Count - 1]);
+
+            point = Start();
+            point.ProcessIncomingMessage(1, assignment);
+            Assert.False(point.ProcessIncomingMessage(1, oldCompletion));
+            point.Tick();
+            Assert.Contains("\"request_id\":\"parent:7:0:retry:1\"", sent[sent.Count - 1]);
+            Assert.Contains("Stage: survey", point.GetStatus());
+        }
+
+        [Fact]
         public void AutomaticMiningPointRetriesChildAndRequiresItsCompletion()
         {
             string storage = "";

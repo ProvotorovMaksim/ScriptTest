@@ -217,7 +217,10 @@ complete the survey child with sample counts and one observed GPS, when
 available. The broker retains this report and returns it to the mining
 point with the child status. After reviewing the report, use `site report`
 on the mining point to select the reported ore GPS. Record a separate,
-clear approach waypoint before starting mining. For standalone surveys
+clear approach waypoint before starting mining.
+If the completed survey needs another flight, run `survey retry` on the
+mining point. It clears the current site and approach selections and
+issues a new survey child under the same parent lease. For standalone surveys
 use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits

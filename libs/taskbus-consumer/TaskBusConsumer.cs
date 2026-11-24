@@ -44,6 +44,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private long _brokerId;
         private bool _autoPoint;
         private string _completedChildRequest;
+        private int _surveyAttempt;
         private string _childSurveyReport;
         private string _pendingSurveyReport;
         private string _childState;
@@ -174,6 +175,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (cmd.StartsWith("group ", StringComparison.OrdinalIgnoreCase))
             {
                 SetConsumerGroup(cmd.Substring(6).Trim());
+                return;
+            }
+            if (string.Equals(cmd, "survey retry", StringComparison.OrdinalIgnoreCase))
+            {
+                RetrySurvey();
                 return;
             }
             if (string.Equals(cmd, "site report", StringComparison.OrdinalIgnoreCase))
@@ -360,6 +366,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
                 _activeTaskId = taskId;
                 _completedChildRequest = null;
+                _surveyAttempt = 0;
                 _childSurveyReport = null;
                 _childState = null;
                 _oreSite = null;
@@ -376,6 +383,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _leaseEpoch = leaseEpoch;
                 _completedChildRequest = null;
+                _surveyAttempt = 0;
                 _childSurveyReport = null;
                 _childState = null;
                 _activeTaskJson = taskJson;
@@ -395,7 +403,29 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private bool IsAutomaticPoint => !_miningPlatform && _autoPoint && _consumerGroup == "MiningPoints" && HasActiveTask;
 
         private string CurrentChildRequestId() => _activeTaskId + ":" +
-            _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture);
+            _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture) +
+            (CurrentStage() == "survey" && _surveyAttempt > 0 ?
+                ":retry:" + _surveyAttempt.ToString(CultureInfo.InvariantCulture) : "");
+
+        private void RetrySurvey()
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId() || _surveyAttempt == int.MaxValue)
+            {
+                _echo("A completed survey under the current lease is required to retry.");
+                return;
+            }
+
+            _surveyAttempt++;
+            _completedChildRequest = null;
+            _childSurveyReport = null;
+            _childState = null;
+            _oreSite = null;
+            _oreApproach = null;
+            SaveState();
+            PublishCurrentChild();
+            _echo("Survey retry requested.");
+        }
 
         private string GetRequestedResource()
         {
@@ -869,6 +899,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 {
                     if (key == "ACTIVE_ID") _activeTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "ACTIVE_JSON") _activeTaskJson = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "SURVEY_ATTEMPT")
+                        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _surveyAttempt);
                     else if (key == "STAGE_INDEX") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _stageIndex);
                     else if (key == "STAGES")
                     {
@@ -925,6 +957,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 storage.AppendLine("ACTIVE_ID|" + TaskBusIgcHelper.EncodeStorage(_activeTaskId));
                 storage.AppendLine("ACTIVE_JSON|" + TaskBusIgcHelper.EncodeStorage(_activeTaskJson ?? string.Empty));
+                if (_surveyAttempt > 0)
+                    storage.AppendLine("SURVEY_ATTEMPT|" + _surveyAttempt.ToString(CultureInfo.InvariantCulture));
                 storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(CultureInfo.InvariantCulture));
                 var stagesJson = "[" + string.Join(",", _stages.Select(TaskBusIgcHelper.ToJsonString).ToArray()) + "]";
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
