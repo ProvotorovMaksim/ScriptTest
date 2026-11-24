@@ -76,7 +76,10 @@ shows the current next hop. The relay's default peer list reports direct
 heartbeat status. Run `network status` for each queued delivery's current
 route and next hop, or to see that it is waiting for a route.
 Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
-up to 16 pending messages in Storage and retries them via the current
+up to 16 pending messages in Storage. Timed messages are admitted while
+fewer than 12 total messages are pending, leaving four slots for regular
+deliveries. The relay clears expired entries before checking capacity
+and retries pending messages via the current
 route until the destination acknowledges or the five-minute UTC deadline
 expires. Upgrade all relays together. Older diagnostic packets without
 a deadline are discarded. The receiver retains up to 64 delivery IDs until their original deadlines

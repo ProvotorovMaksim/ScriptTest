@@ -26,6 +26,7 @@ namespace SpaceEngineers.Services.Galnet
         private const string ApplicationBlockName = "[GALNET APP]";
         private const int MaxApplicationLength = 1024;
         private const int MaxPending = 16;
+        private const int ReservedPending = 4;
         private const int MaxReceived = 64;
         private readonly List<string> _outbox = new List<string>();
         private readonly Dictionary<string, long> _received = new Dictionary<string, long>();
@@ -108,7 +109,7 @@ namespace SpaceEngineers.Services.Galnet
             if (periodic && _tick % AdvertiseEvery == 1)
             {
                 long now = DateTime.UtcNow.Ticks;
-                int expired = _outbox.RemoveAll(packet => !IsCurrentPacket(packet, now));
+                int expired = _outbox.RemoveAll(pending => !IsCurrentPacket(pending, now));
                 if (expired > 0)
                 {
                     SaveConfiguration();
@@ -295,10 +296,19 @@ namespace SpaceEngineers.Services.Galnet
             int split = argument.IndexOf(' ');
             long destination;
             if (split < 1 || !long.TryParse(argument.Substring(0, split), out destination) ||
-                destination == 0 || destination == Me.EntityId || argument.Length - split - 1 > maxLength || split == argument.Length - 1 ||
-                _outbox.Count >= MaxPending)
+                destination == 0 || destination == Me.EntityId || argument.Length - split - 1 > maxLength || split == argument.Length - 1)
             {
-                Echo("Use send/app <node ID> <payload>. Max " + maxLength + " characters. Outbox holds 16 messages.");
+                Echo("Use send/app <node ID> <payload>. Max " + maxLength + " characters.");
+                return;
+            }
+
+            int expired = _outbox.RemoveAll(pending => !IsCurrentPacket(pending, now));
+            int limit = deadline.HasValue ? MaxPending - ReservedPending : MaxPending;
+            if (_outbox.Count >= limit)
+            {
+                if (expired > 0)
+                    SaveConfiguration();
+                Echo(deadline.HasValue ? "Timed delivery queue limit reached." : "Outbox full.");
                 return;
             }
 

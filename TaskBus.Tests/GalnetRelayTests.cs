@@ -125,6 +125,23 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void TimedApplicationsLeaveSpaceForRegularDelivery()
+        {
+            var relay = Start(4, "0\n1");
+            long deadline = DateTime.UtcNow.AddSeconds(30).Ticks;
+            for (int i = 0; i < 16; i++)
+                relay.Main("app-until " + deadline + " 1 mark", UpdateType.Terminal);
+
+            Assert.Equal(12, relay.Storage.Split('\n').Count(line => line.StartsWith("SEND:")));
+            for (int i = 0; i < 5; i++)
+                relay.Main("app 1 task", UpdateType.Terminal);
+
+            Assert.Equal(16, relay.Storage.Split('\n').Count(line => line.StartsWith("SEND:")));
+            Assert.Equal(4, relay.Storage.Split('\n').Count(line =>
+                line.EndsWith("|" + TaskBusIgcHelper.EncodeStorage("task"))));
+        }
+
+        [Fact]
         public void TimedApplicationUsesItsOwnDeadlineAcrossRestart()
         {
             var relay = Start(4, "0\n1");
