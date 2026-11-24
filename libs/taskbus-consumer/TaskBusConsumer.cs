@@ -176,6 +176,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SetConsumerGroup(cmd.Substring(6).Trim());
                 return;
             }
+            if (string.Equals(cmd, "site report", StringComparison.OrdinalIgnoreCase))
+            {
+                SetSiteFromSurveyReport();
+                return;
+            }
             if (cmd == "site remember")
             {
                 RememberSurveySite();
@@ -437,6 +442,26 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _oreApproach = points[1];
             _stageIndex = 1;
             _echo("Using known site for " + resource + ".");
+        }
+
+        private void SetSiteFromSurveyReport()
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId())
+            {
+                _echo("A completed survey under the current lease is required.");
+                return;
+            }
+
+            int marker = _childSurveyReport == null ? -1 :
+                _childSurveyReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
+            if (marker < 0)
+            {
+                _echo("The survey report has no ore GPS.");
+                return;
+            }
+
+            SetSurveyWaypoint("site " + _childSurveyReport.Substring(marker + 1));
         }
 
         private void SetSurveyWaypoint(string command)

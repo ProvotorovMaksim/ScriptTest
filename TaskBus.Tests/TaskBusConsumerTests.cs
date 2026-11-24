@@ -81,11 +81,15 @@ namespace TaskBus.Tests
             point.ProcessCommand("approach GPS:Entry:10:20:50:");
             point.ProcessCommand("stage survey");
             Assert.Contains("Stage: survey", point.GetStatus());
-            point.ProcessCommand("site GPS:Iron:10:20:30:");
+            point.ProcessCommand("site report");
+            point.ProcessCommand("stage survey");
+            Assert.Contains("Stage: survey", point.GetStatus());
             point = Start();
             point.ProcessIncomingMessage(1, parent);
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
-                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42));
+                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"," +
+                "\"survey_report\":\"1 positive sample. GPS:Iron:10:20:30:\"}", targetId: 42));
+            point.ProcessCommand("site report");
             point.ProcessCommand("site remember");
             point.ProcessCommand("stage survey");
             Assert.Contains("Stage: mine", point.GetStatus());

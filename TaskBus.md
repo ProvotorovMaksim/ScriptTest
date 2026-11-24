@@ -215,8 +215,9 @@ type. Repeating it for the same lease keeps completed samples. Sampling
 pauses when that lease is no longer confirmed. Run `ore report` to
 complete the survey child with sample counts and one observed GPS, when
 available. The broker retains this report and returns it to the mining
-point with the child status. The mining point still records both the
-verified site and an approach waypoint before starting mining. For standalone surveys
+point with the child status. After reviewing the report, use `site report`
+on the mining point to select the reported ore GPS. Record a separate,
+clear approach waypoint before starting mining. For standalone surveys
 use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits
