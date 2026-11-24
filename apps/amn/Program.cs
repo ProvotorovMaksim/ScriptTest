@@ -20,6 +20,7 @@ namespace SpaceEngineers.Apps.Amn
         #endregion
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const string SurveyProperty = "Survey.DetectedOre";
+        private const double OreCandidateRadius = 5000;
         private const int MaxOreObservations = 256;
         private long _surveyRecipient;
         private readonly Queue<string> _surveyOutbox = new Queue<string>();
@@ -671,6 +672,10 @@ namespace SpaceEngineers.Apps.Amn
         private void SendResourceRequest(string resource, double current, double minimum, string requestId)
         {
             var position = Me.CubeGrid.GetPosition();
+            var candidate = resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase)
+                ? TaskBusIgcHelper.FindNearestOre(_oreObservations, resource.Substring(4),
+                    position.X, position.Y, position.Z, OreCandidateRadius)
+                : null;
             var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) +
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(DispatchGroup) +
                 ",\"resource\":" + TaskBusIgcHelper.ToJsonString(resource) +
@@ -680,6 +685,7 @@ namespace SpaceEngineers.Apps.Amn
                 ",\"amount\":" + (minimum - current).ToString("R", CultureInfo.InvariantCulture) +
                 (_dispatchToPoint ? ",\"receipt_required\":true,\"site_required\":true,\"steps\":[\"survey\",\"mine\",\"transport\"]" :
                     ",\"steps\":[\"survey\",\"mine\",\"intermediate\",\"deliver\"]") +
+                (candidate == null ? "" : ",\"ore_candidate_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
                 ",\"base_grid_id\":" + Me.CubeGrid.EntityId.ToString(CultureInfo.InvariantCulture) +
                 ",\"base_grid_name\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
                 ",\"base_position\":{\"x\":" + position.X.ToString("R", CultureInfo.InvariantCulture) +

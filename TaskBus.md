@@ -192,7 +192,11 @@ The resource amount shown is the requested amount.
 On an AMN grid with a saved ore catalog, run `survey nearest Iron 5000`
 to print the nearest stored Iron GPS within 5000 m of the grid. A missing
 result leaves survey coverage unknown. A stored observation supplies a
-candidate coordinate for verification at the site.
+candidate coordinate for verification at the site. An ore deficit request
+includes the nearest candidate within 5 km of the requesting grid when
+available. A mining point forwards it to the survey assignment, where it
+appears as a GPS hint. A site with both saved waypoints still goes straight
+to the mining stage.
 
 ### AMN platform worker
 

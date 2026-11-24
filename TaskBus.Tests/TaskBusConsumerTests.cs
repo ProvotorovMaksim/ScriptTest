@@ -38,12 +38,13 @@ namespace TaskBus.Tests
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
             var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
-                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true,\"resource\":\"Ore/Iron\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true,\"resource\":\"Ore/Iron\",\"ore_candidate_gps\":\"GPS:Iron:10:20:30:\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
             point.ProcessIncomingMessage(1, parent);
             point.Tick();
             var firstPublication = sent[sent.Count - 1];
             Assert.Contains("\"group_id\":\"Scouts\"", firstPublication);
             Assert.Contains("\"parent_lease_epoch\":7", firstPublication);
+            Assert.Contains("\"ore_candidate_gps\":\"GPS:Iron:10:20:30:\"", firstPublication);
             point.ProcessCommand("stage survey");
             Assert.Contains("Stage: survey", point.GetStatus());
 
@@ -69,6 +70,7 @@ namespace TaskBus.Tests
             Assert.Contains("Stage: mine", point.GetStatus());
             point.Tick();
             Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
+            Assert.DoesNotContain("ore_candidate_gps", sent[sent.Count - 1]);
             Assert.Contains("\"ore_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
             Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":50}", sent[sent.Count - 1]);
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",

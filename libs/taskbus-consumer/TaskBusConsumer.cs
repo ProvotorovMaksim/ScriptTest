@@ -499,6 +499,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out value))
                     payload.Append(',').Append(TaskBusIgcHelper.ToJsonString(field)).Append(':').Append(value);
             }
+            string candidate;
+            if (childStage == "survey" && TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidate))
+                payload.Append(",\"ore_candidate_gps\":").Append(candidate);
             if (CurrentStage() == "mine" && _oreSite != null && _oreApproach != null)
                 payload.Append(",\"ore_position\":").Append(_oreSite)
                     .Append(",\"approach_position\":").Append(_oreApproach);
@@ -723,6 +726,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_grid_name", out baseNameJson) &&
                 TaskBusIgcHelper.TryReadJsonString(baseNameJson, out baseName))
                 summary.Append("\nDelivery base: " + baseName);
+
+            string candidateJson;
+            string candidate;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidateJson) &&
+                TaskBusIgcHelper.TryReadJsonString(candidateJson, out candidate))
+                summary.Append("\nOre candidate to verify: " + candidate);
 
             AppendPosition(summary, details, "base_position", "Base at request time");
             AppendPosition(summary, details, "approach_position", "Mining approach");
