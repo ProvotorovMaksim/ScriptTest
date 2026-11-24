@@ -165,13 +165,13 @@ namespace SpaceEngineers.Apps.Amn
             GridTerminalSystem.GetBlocksOfType(_containers, container => container.IsFunctional);
             GridTerminalSystem.GetBlocksOfType(_assemblers, assembler => assembler.IsFunctional);
             GridTerminalSystem.GetBlocksOfType(_refineries, refinery => refinery.IsFunctional);
-            GridTerminalSystem.GetBlocksOfType(_cockpits, cockpit => cockpit.IsFunctional);
+            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional);
             GridTerminalSystem.GetBlocksOfType(_remoteControls, rc => rc.IsFunctional);
 
             var resources = new Dictionary<string, double>();
             var items = new List<MyInventoryItem>();
 
-            void ScanInventory(IMyInventory inventory)
+            Action<IMyInventory> scanInventory = inventory =>
             {
                 if (inventory == null) return;
                 items.Clear();
@@ -185,13 +185,13 @@ namespace SpaceEngineers.Apps.Amn
                     else
                         resources.Add(itemName, amount);
                 }
-            }
+            };
 
-            foreach (var container in _containers) ScanInventory(container.GetInventory());
-            foreach (var assembler in _assemblers) ScanInventory(assembler.GetInventory());
-            foreach (var refinery in _refineries) ScanInventory(refinery.GetInventory());
-            foreach (var cockpit in _cockpits) ScanInventory(cockpit.GetInventory());
-            foreach (var rc in _remoteControls) ScanInventory(rc.GetInventory());
+            foreach (var container in _containers) scanInventory(container.GetInventory());
+            foreach (var assembler in _assemblers) scanInventory(assembler.GetInventory());
+            foreach (var refinery in _refineries) scanInventory(refinery.GetInventory());
+            foreach (var cockpit in _cockpits) scanInventory(cockpit.GetInventory());
+            foreach (var rc in _remoteControls) scanInventory(rc.GetInventory());
 
             Echo($"Cargo containers: {_containers.Count}, Assemblers: {_assemblers.Count}, Refineries: {_refineries.Count}, Cockpits: {_cockpits.Count}, Remote controls: {_remoteControls.Count}");
             foreach (var resource in resources)
@@ -320,7 +320,7 @@ namespace SpaceEngineers.Apps.Amn
         private void UpdateCockpitPanel(Dictionary<string, double> resources)
         {
             _cockpits.Clear();
-            GridTerminalSystem.GetBlocksOfType(_cockpits, cockpit => cockpit.IsFunctional);
+            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional);
 
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
             if (cockpit == null || cockpit.SurfaceCount == 0)

@@ -87,7 +87,7 @@ jobs:
             build/output/services/producer/producer/TaskProducer.dll
             build/output/apps/amn/amn/AMN.Base.dll
             build/output/apps/fcs/fcs/FlightControl.dll
-            build/output/apps/fcs/fcs/FlightControl.pb.cs
+            build/output/**/*.pb.cs
             build/output/apps/sample/sample/SampleMain.dll
             build/output/apps/ship-link/ship-link/ShipLink.dll
             build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll

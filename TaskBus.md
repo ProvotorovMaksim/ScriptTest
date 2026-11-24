@@ -34,7 +34,7 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 ./build.sh
 ```
 
-Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. In-game deployment requires packaging the PB source with its shared code for the Programmable Block API.
+Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. GitHub Actions includes these files in the `taskbus-build` artifact.
 
 ### Flight control PB
 

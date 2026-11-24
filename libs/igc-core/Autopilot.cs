@@ -27,7 +27,8 @@ namespace SpaceEngineers.Libs.IgcCore
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="remoteControl"/> is null.</exception>
         public RemoteControlPhysicalInfo(IMyRemoteControl remoteControl)
         {
-            _remoteControl = remoteControl ?? throw new ArgumentNullException(nameof(remoteControl));
+            if (remoteControl == null) throw new ArgumentNullException(nameof(remoteControl));
+            _remoteControl = remoteControl;
         }
     }
 

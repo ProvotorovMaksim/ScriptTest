@@ -61,10 +61,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks)
         {
-            _send = send ?? throw new ArgumentNullException(nameof(send));
-            _getStorage = getStorage ?? throw new ArgumentNullException(nameof(getStorage));
-            _setStorage = setStorage ?? throw new ArgumentNullException(nameof(setStorage));
-            _echo = echo ?? throw new ArgumentNullException(nameof(echo));
+            if (send == null) throw new ArgumentNullException(nameof(send));
+            _send = send;
+            if (getStorage == null) throw new ArgumentNullException(nameof(getStorage));
+            _getStorage = getStorage;
+            if (setStorage == null) throw new ArgumentNullException(nameof(setStorage));
+            _setStorage = setStorage;
+            if (echo == null) throw new ArgumentNullException(nameof(echo));
+            _echo = echo;
             _entityId = entityId;
             _gridName = gridName ?? string.Empty;
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
@@ -400,7 +404,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     else if (key == "STAGE_INDEX") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _stageIndex);
                     else if (key == "STAGES")
                     {
-                        if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out var stages))
+                        List<string> stages;
+                        if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);

@@ -15,7 +15,8 @@ namespace SpaceEngineers.Libs.IgcCore
         /// <summary>Parses a TaskBus JSON envelope into event type and payload.</summary>
         public static bool TryParseEnvelope(string json, out string eventType, out string payloadJson)
         {
-            if (TaskBusProtocol.TryParseEnvelope(json, out var envelope))
+            TaskBusEnvelope envelope;
+            if (TaskBusProtocol.TryParseEnvelope(json, out envelope))
             {
                 eventType = envelope.EventType;
                 payloadJson = envelope.PayloadJson;

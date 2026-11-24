@@ -51,8 +51,9 @@ namespace SpaceEngineers.Libs.IgcCore
             envelope = null;
             string eventTypeJson;
             string payloadJson;
+            string eventType;
             if (!TryGetProperty(json, "event_type", out eventTypeJson) ||
-                !TryReadString(eventTypeJson, out var eventType) ||
+                !TryReadString(eventTypeJson, out eventType) ||
                 !TryGetProperty(json, "payload", out payloadJson))
                 return false;
 
@@ -116,7 +117,8 @@ namespace SpaceEngineers.Libs.IgcCore
                 SkipWhitespace(json, ref index);
                 if (index < json.Length && json[index] == '}')
                     return false;
-                if (!TryReadString(json, ref index, out var key))
+                string key;
+                if (!TryReadString(json, ref index, out key))
                     return false;
                 SkipWhitespace(json, ref index);
                 if (index >= json.Length || json[index++] != ':')
@@ -159,7 +161,8 @@ namespace SpaceEngineers.Libs.IgcCore
             while (index < json.Length)
             {
                 SkipWhitespace(json, ref index);
-                if (!TryReadString(json, ref index, out var item))
+                string item;
+                if (!TryReadString(json, ref index, out item))
                     return false;
                 values.Add(item);
                 SkipWhitespace(json, ref index);
@@ -208,7 +211,8 @@ namespace SpaceEngineers.Libs.IgcCore
                     case 'r': result.Append('\r'); break;
                     case 't': result.Append('\t'); break;
                     case 'u':
-                        if (index + 4 > json.Length || !int.TryParse(json.Substring(index, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var codePoint))
+                        int codePoint;
+                        if (index + 4 > json.Length || !int.TryParse(json.Substring(index, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out codePoint))
                             return false;
                         result.Append((char)codePoint);
                         index += 4;
@@ -224,7 +228,10 @@ namespace SpaceEngineers.Libs.IgcCore
             if (index >= json.Length)
                 return false;
             if (json[index] == '"')
-                return TryReadString(json, ref index, out _);
+            {
+                string ignored;
+                return TryReadString(json, ref index, out ignored);
+            }
             if (json[index] == '{' || json[index] == '[')
             {
                 var depth = 0;
