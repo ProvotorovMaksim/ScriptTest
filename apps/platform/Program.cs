@@ -20,6 +20,8 @@ namespace SpaceEngineers.Apps.Platform
         private readonly List<IMyShipDrill> _managedDrills = new List<IMyShipDrill>();
         private string _drillingLease;
         private readonly string _miningCargoName;
+        private readonly string _miningUnloadTo;
+        private readonly List<IMyCargoContainer> _miningBuffers = new List<IMyCargoContainer>();
         private readonly List<MyInventoryItem> _miningItems = new List<MyInventoryItem>();
         private const string ControllerName = "[AMN PLATFORM]";
         private const string SurveyRemoteName = "[AMN SURVEY ROUTE]";
@@ -67,14 +69,8 @@ namespace SpaceEngineers.Apps.Platform
         public Program()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
-            const string cargoSetting = "MiningCargo=";
-            foreach (var line in Me.CustomData.Split('\n'))
-            {
-                if (!line.StartsWith(cargoSetting, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                _miningCargoName = line.Substring(cargoSetting.Length).Trim();
-                break;
-            }
+            _miningCargoName = ReadSetting("MiningCargo=");
+            _miningUnloadTo = ReadSetting("MiningUnloadTo=");
             _listener = IGC.RegisterBroadcastListener(Channel);
             _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
@@ -169,6 +165,8 @@ namespace SpaceEngineers.Apps.Platform
                 StartManagedDrills();
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
+            else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
+                UnloadMiningCargo();
             else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
                 StopManagedDrills();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
@@ -196,6 +194,70 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Automatic sampling active.");
             if (_sampleDetector != null)
                 Echo("Waiting for ore detector refresh.");
+        }
+
+        private string ReadSetting(string key)
+        {
+            foreach (var line in Me.CustomData.Split('\n'))
+            {
+                if (line.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                    return line.Substring(key.Length).Trim();
+            }
+            return null;
+        }
+
+        private void UnloadMiningCargo()
+        {
+            long grid;
+            string resource;
+            double amount;
+            if (_drillingLease != null || !_worker.TryGetMiningPoint(out grid) ||
+                !_worker.TryGetMiningCargoTarget(out resource, out amount))
+            {
+                Echo("Stop the drills and confirm the mining assignment before unloading.");
+                return;
+            }
+
+            var connector = GridTerminalSystem.GetBlockWithName("[FCS DOCK]") as IMyShipConnector;
+            var partner = connector == null || connector.CubeGrid != Me.CubeGrid ||
+                connector.Status != MyShipConnectorStatus.Connected ? null : connector.OtherConnector;
+            if (partner == null || partner.CubeGrid.EntityId != grid || grid == Me.CubeGrid.EntityId)
+            {
+                Echo("Dock at the assigned mining point before unloading.");
+                return;
+            }
+
+            var source = FindMiningInventory();
+            if (source == null || string.IsNullOrEmpty(_miningUnloadTo))
+            {
+                Echo("Configure MiningCargo and MiningUnloadTo before unloading.");
+                return;
+            }
+            _miningBuffers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_miningBuffers, container =>
+                container.CubeGrid.EntityId == grid && container.IsFunctional &&
+                string.Equals(container.CustomName, _miningUnloadTo, StringComparison.Ordinal));
+            var destination = _miningBuffers.Count == 1 ? _miningBuffers[0].GetInventory() : null;
+            if (destination == null || !source.IsConnectedTo(destination))
+            {
+                Echo("The assigned mining point needs a unique, conveyor-connected unload container.");
+                return;
+            }
+
+            _miningItems.Clear();
+            source.GetItems(_miningItems);
+            foreach (var item in _miningItems)
+            {
+                if (!MatchesMiningResource(item, resource))
+                    continue;
+
+                var quantity = (VRage.MyFixedPoint)Math.Min(amount, (double)item.Amount);
+                bool transferred = (double)quantity > 0 && source.TransferItemTo(destination, item, quantity);
+                Echo(transferred ? "Requested ore stack transferred. Verify the mining point inventory." :
+                    "Transfer refused. Check available space and conveyor permissions.");
+                return;
+            }
+            Echo("No " + resource + " in the configured mining cargo container.");
         }
 
         private void RequestMiningPointDock()
@@ -283,10 +345,7 @@ namespace SpaceEngineers.Apps.Platform
             if (_miningCargoName == null)
                 return true;
 
-            var container = string.IsNullOrEmpty(_miningCargoName) ? null :
-                GridTerminalSystem.GetBlockWithName(_miningCargoName) as IMyCargoContainer;
-            var inventory = container != null && container.CubeGrid == Me.CubeGrid && container.IsFunctional
-                ? container.GetInventory() : null;
+            var inventory = FindMiningInventory();
             string resource;
             double target;
             if (inventory == null || !_worker.TryGetMiningCargoTarget(out resource, out target))
@@ -299,8 +358,7 @@ namespace SpaceEngineers.Apps.Platform
             inventory.GetItems(_miningItems);
             foreach (var item in _miningItems)
             {
-                var type = item.Type.TypeId.ToString().Replace("MyObjectBuilder_", string.Empty);
-                if (string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase))
+                if (MatchesMiningResource(item, resource))
                     collected += (double)item.Amount;
             }
 
@@ -317,6 +375,20 @@ namespace SpaceEngineers.Apps.Platform
                 return false;
             }
             return true;
+        }
+
+        private IMyInventory FindMiningInventory()
+        {
+            var container = string.IsNullOrEmpty(_miningCargoName) ? null :
+                GridTerminalSystem.GetBlockWithName(_miningCargoName) as IMyCargoContainer;
+            return container != null && container.CubeGrid == Me.CubeGrid && container.IsFunctional
+                ? container.GetInventory() : null;
+        }
+
+        private static bool MatchesMiningResource(MyInventoryItem item, string resource)
+        {
+            var type = item.Type.TypeId.ToString().Replace("MyObjectBuilder_", string.Empty);
+            return string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase);
         }
 
         private void StopManagedDrills()

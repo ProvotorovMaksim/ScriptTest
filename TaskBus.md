@@ -319,6 +319,11 @@ After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
 the station identified by the mining assignment. The platform needs
 a local `[AMN FCS]` PB and a previously recorded berth for that grid.
+Set `MiningUnloadTo=<mining point cargo container name>` and run
+`mine unload` while docked there with drills off. Each command transfers
+up to one stack of the requested resource from `MiningCargo` into the
+named conveyor-connected buffer. Check the deposited quantity before
+confirming the mining stage.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 With a confirmed ore survey assignment, run `ore task` to use its ore
