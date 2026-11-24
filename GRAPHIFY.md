@@ -2,6 +2,13 @@
 
 This document provides a structured, graph-oriented representation of the TaskBus repository for use with Graphify (AI/neural network code understanding tool).
 
+## Техническое задание ScriptTest
+
+[ТЗ по AMN, FCS, боевой поддержке и Галнету](docs/ScriptTest-Spec.md) содержит
+целевую схему программируемых блоков, требования к системе и пять этапов
+приёмки. Заключительный абзац ТЗ фиксирует состояние системы на момент
+составления. Команды и текущее поведение описаны в [TaskBus.md](TaskBus.md).
+
 ## Repository Overview
 
 - **Name**: TaskBus
