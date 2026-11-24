@@ -228,8 +228,14 @@ on the mining point to select the reported ore GPS. Record a separate,
 clear approach waypoint before starting mining.
 If the completed survey needs another flight, run `survey retry` on the
 mining point. It clears the current site and approach selections and
-issues a new survey child under the same parent lease. For standalone surveys
-use `ore survey Iron`. Move to the first observation position and run
+issues a new survey child under the same parent lease.
+
+Use `ore auto on` during a task survey to start samples automatically
+once the platform is moving at 0.25 m/s or less and is at least 10 m from
+previous sample locations. Hold position for the detector refresh. Use
+`ore auto off` to stop automatic sampling. Re-enable it after a recompile.
+
+For standalone surveys use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits
 in persistent PB storage. A recompile restores completed samples and the

@@ -38,6 +38,8 @@ namespace SpaceEngineers.Apps.Platform
         private Vector3D _samplePosition;
         private double _sampleWait;
         private int _positiveViews;
+        private bool _autoSample;
+        private int _autoSampleTicks;
         private const string DetectorName = "[AMN ORE]";
 
         public Program()
@@ -95,6 +97,20 @@ namespace SpaceEngineers.Apps.Platform
                 BeginTaskSurvey();
             else if (command.StartsWith("ore survey ", StringComparison.OrdinalIgnoreCase))
                 BeginOreSurvey(command.Substring(11).Trim());
+            else if (string.Equals(command, "ore auto on", StringComparison.OrdinalIgnoreCase))
+            {
+                _autoSample = _surveyLease != null && SurveyLeaseIsCurrent();
+                _autoSampleTicks = 0;
+                _lastProbe = _autoSample ? "Automatic sampling enabled for this survey." :
+                    "Start the confirmed survey with ore task before enabling automatic sampling.";
+            }
+            else if (string.Equals(command, "ore auto off", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_autoSample)
+                    _sampleDetector = null;
+                _autoSample = false;
+                _lastProbe = "Automatic sampling disabled.";
+            }
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
                 ScheduleOreSample();
             else if (string.Equals(command, "ore report", StringComparison.OrdinalIgnoreCase))
@@ -104,6 +120,7 @@ namespace SpaceEngineers.Apps.Platform
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
+            UpdateAutomaticSampling();
             _galnet.Flush();
             Echo(_worker.GetStatus());
             Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
@@ -112,6 +129,8 @@ namespace SpaceEngineers.Apps.Platform
             if (_surveyOre != null)
                 Echo("Ore survey " + _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
                     " views reported ore, " + _oreHits.Count + " distinct positions.");
+            if (_autoSample)
+                Echo("Automatic sampling active.");
             if (_sampleDetector != null)
                 Echo("Waiting for ore detector refresh.");
         }
@@ -150,6 +169,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             _surveyOre = ore;
             _surveyLease = lease;
+            _autoSample = false;
             _surveyViews.Clear();
             _oreHits.Clear();
             _positiveViews = 0;
@@ -226,6 +246,7 @@ namespace SpaceEngineers.Apps.Platform
                 break;
             }
             _worker.CompleteSurvey(report);
+            _autoSample = false;
         }
 
         private void ShowOreBounds()
@@ -259,7 +280,24 @@ namespace SpaceEngineers.Apps.Platform
                 position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
         }
 
-        private void ScheduleOreSample()
+        private void UpdateAutomaticSampling()
+        {
+            if (!_autoSample || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
+                !SurveyLeaseIsCurrent() || ++_autoSampleTicks < 6)
+                return;
+
+            _autoSampleTicks = 0;
+            var controller = GridTerminalSystem.GetBlockWithName(ControllerName) as IMyShipController;
+            if (controller == null || controller.CubeGrid != Me.CubeGrid || !controller.IsWorking)
+            {
+                _lastProbe = "Automatic sampling requires a working local " + ControllerName + ".";
+                return;
+            }
+            if (controller.GetShipSpeed() <= 0.25)
+                ScheduleOreSample(automatic: true);
+        }
+
+        private void ScheduleOreSample(bool automatic = false)
         {
             if (_surveyOre == null || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews)
             {
@@ -285,7 +323,8 @@ namespace SpaceEngineers.Apps.Platform
             {
                 if (Vector3D.DistanceSquared(view, position) < MinimumViewSeparation * MinimumViewSeparation)
                 {
-                    _lastProbe = "Move at least 10 m from previous survey positions.";
+                    if (!automatic)
+                        _lastProbe = "Move at least 10 m from previous survey positions.";
                     return;
                 }
             }
