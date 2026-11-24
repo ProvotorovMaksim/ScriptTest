@@ -53,10 +53,10 @@ USINGS
 
 awk '
   { sub(/\r$/, "") }
-  /^        \/\/ PB BODY END$/ { exit }
-  in_body { sub(/^        /, ""); print }
-  /^        \/\/ PB BODY START$/ { in_body = 1 }
-' apps/fcs/Program.cs > "$output_dir/apps/fcs/fcs/FlightControl.pb.cs"
+  /^[[:space:]]*\/\/ PB BODY END$/ { in_body = 0; next }
+  in_body { sub(/^    /, ""); print }
+  /^[[:space:]]*\/\/ PB BODY START$/ { in_body = 1 }
+' apps/fcs/Program.cs apps/fcs/DockLease.cs > "$output_dir/apps/fcs/fcs/FlightControl.pb.cs"
 wrap_pb_for_compile_check "$output_dir/apps/fcs/fcs/FlightControl.pb.cs" fcs
 
 package_taskbus_pb() {

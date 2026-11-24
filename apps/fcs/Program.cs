@@ -17,9 +17,7 @@ namespace SpaceEngineers.Apps.FlightControl
         private const string DockFailureTimer = "[FCS DOCK FAIL]";
         private const string DroneControllerName = "[FCS DRONE]";
         private bool droneDock;
-        private long dockLeaseDeadlineUtc;
-        private long dockLeaseRequestId;
-        private long dockLeaseLimitUtc;
+        private readonly DockLease dockLease = new DockLease();
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
         private const string DockConnectorName = "[FCS DOCK]";
         private IMyShipConnector dockConnector;
@@ -165,8 +163,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     else if (command.StartsWith("dock lease stop ", StringComparison.Ordinal))
                     {
                         long requestId;
-                        if (dockLeaseRequestId != 0 && long.TryParse(command.Substring(16), out requestId) &&
-                            requestId == dockLeaseRequestId)
+                        if (long.TryParse(command.Substring(16), out requestId) && dockLease.Matches(requestId))
                             Release("FCS off: docking lease cancelled by AMN.");
                     }
                     else if (command.StartsWith("dock drone ", StringComparison.Ordinal))
@@ -312,7 +309,7 @@ namespace SpaceEngineers.Apps.FlightControl
             long deadline;
             long now = DateTime.UtcNow.Ticks;
             if (fields.Length != 2 || !long.TryParse(fields[1], out deadline) ||
-                deadline <= now || deadline > now + TimeSpan.FromSeconds(30).Ticks)
+                !DockLease.CanStart(now, deadline))
             {
                 Echo("FCS: docking requires a current AMN lease deadline.");
                 return;
@@ -321,25 +318,16 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             BeginDockApproach(true);
             if (mode == Mode.Dock)
-            {
-                dockLeaseDeadlineUtc = deadline;
-                dockLeaseRequestId = deadline;
-                dockLeaseLimitUtc = now + TimeSpan.FromSeconds(30).Ticks;
-            }
+                dockLease.Start(now, deadline);
         }
 
         private void RefreshDockLease(string arguments)
         {
-            long now = DateTime.UtcNow.Ticks;
-            if (dockLeaseRequestId == 0 || now >= dockLeaseDeadlineUtc)
-                return;
             var fields = arguments.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             long requestId;
             long deadline;
-            if (fields.Length == 2 && long.TryParse(fields[0], out requestId) && requestId == dockLeaseRequestId &&
-                long.TryParse(fields[1], out deadline) && deadline > dockLeaseDeadlineUtc &&
-                deadline <= now + TimeSpan.FromSeconds(30).Ticks)
-                dockLeaseDeadlineUtc = Math.Min(deadline, dockLeaseLimitUtc);
+            if (fields.Length == 2 && long.TryParse(fields[0], out requestId) && long.TryParse(fields[1], out deadline))
+                dockLease.Refresh(DateTime.UtcNow.Ticks, requestId, deadline);
         }
 
         private void BeginDockApproach(bool uncrewed)
@@ -376,7 +364,7 @@ namespace SpaceEngineers.Apps.FlightControl
 
         private void UpdateDockApproach()
         {
-            if (dockLeaseDeadlineUtc != 0 && DateTime.UtcNow.Ticks >= dockLeaseDeadlineUtc)
+            if (dockLease.IsExpired(DateTime.UtcNow.Ticks))
             {
                 Release("FCS off: AMN docking lease expired.");
                 return;
@@ -644,9 +632,7 @@ namespace SpaceEngineers.Apps.FlightControl
             cockpit = null;
             mode = Mode.Off;
             droneDock = false;
-            dockLeaseDeadlineUtc = 0;
-            dockLeaseRequestId = 0;
-            dockLeaseLimitUtc = 0;
+            dockLease.Clear();
             Runtime.UpdateFrequency = dockCharging ? UpdateFrequency.Update10 : UpdateFrequency.None;
 
             int failures = flight.Release();

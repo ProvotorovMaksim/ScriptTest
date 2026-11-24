@@ -24,6 +24,8 @@
     <Compile Include="TaskBusDeliveryTests.cs" />
     <Compile Include="TaskBusProtocolTests.cs" />
     <Compile Include="TaskBusConsumerTests.cs" />
+    <Compile Include="../apps/fcs/DockLease.cs" />
+    <Compile Include="DockLeaseTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
