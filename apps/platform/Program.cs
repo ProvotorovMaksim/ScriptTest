@@ -53,6 +53,8 @@ namespace SpaceEngineers.Apps.Platform
         private bool _sweepLegStarted;
         private bool _sweepSampleStarted;
         private int _sweepSettleTicks;
+        private int _sweepScanTicks;
+        private readonly List<IMyCameraBlock> _surveyCameras = new List<IMyCameraBlock>();
         private int _autoSampleTicks;
         private const string DetectorName = "[AMN ORE]";
 
@@ -490,6 +492,7 @@ namespace SpaceEngineers.Apps.Platform
             _sweepLegStarted = false;
             _sweepSampleStarted = false;
             _sweepSettleTicks = 0;
+            _sweepScanTicks = 0;
             _surveySweep = true;
         }
 
@@ -542,11 +545,46 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            if (!CheckSurveyLegClearance(_surveyPlan[0]))
+                return;
+
             LoadNextSurveyWaypoint();
             StartSurveyFlight();
             _sweepLegStarted = true;
             if (_worker.SupervisedCruiseRemote == 0)
                 _surveySweep = false;
+        }
+
+        private bool CheckSurveyLegClearance(Vector3D target)
+        {
+            _surveyCameras.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyCameras, camera =>
+                camera.CubeGrid == Me.CubeGrid && camera.IsWorking &&
+                camera.CustomName.StartsWith(CameraName, StringComparison.Ordinal));
+
+            foreach (var camera in _surveyCameras)
+            {
+                camera.EnableRaycast = true;
+                if (!camera.CanScan(target))
+                    continue;
+
+                var hit = camera.Raycast(target);
+                if (hit.IsEmpty())
+                    return true;
+
+                _surveySweep = false;
+                _lastProbe = "Survey sweep halted: camera detected " + hit.Type + " before the next waypoint.";
+                return false;
+            }
+
+            if (++_sweepScanTicks >= 60 || _surveyCameras.Count == 0)
+            {
+                _surveySweep = false;
+                _lastProbe = "Survey sweep halted: no survey camera could scan the next waypoint.";
+            }
+            else
+                _lastProbe = "Waiting for camera range and alignment to the next survey waypoint.";
+            return false;
         }
 
         private void CompletePlannedSurveyPosition()
@@ -561,6 +599,7 @@ namespace SpaceEngineers.Apps.Platform
                 _sweepLegStarted = false;
                 _sweepSampleStarted = false;
                 _sweepSettleTicks = 0;
+                _sweepScanTicks = 0;
             }
         }
 

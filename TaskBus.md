@@ -334,7 +334,12 @@ A completed sample within 2 m of the point, measured at the remote, advances
 the saved plan. Repeat `ore route` for the next point.
 
 After reviewing all legs for clearance, run `ore sweep` to fly and sample
-the remaining points in order. It advances only after a completed sample
+the remaining points in order. Before each flight the platform looks for
+a working local camera whose name starts with `[AMN SCOUT]` and can scan
+the next waypoint. Include cameras covering the sweep directions. The
+sweep waits briefly for a usable scan and halts on a hit. A clear ray
+checks one line and the operator still reviews clearance for the hull.
+It advances only after a completed sample
 at the planned waypoint. Lease loss, stopping outside the waypoint tolerance
 or a sample failure stops the sweep. It stays stopped after a restart.
 
