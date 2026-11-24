@@ -62,7 +62,9 @@ namespace SpaceEngineers.Services.Consumer
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
                 gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
-                CanStartHaulerCruise, GridTerminalSystem.GetBlockWithId);
+                CanStartHaulerCruise, GridTerminalSystem.GetBlockWithId,
+                string.Equals(ReadSetting("HaulerAutoDock="), "true", StringComparison.OrdinalIgnoreCase)
+                    ? (Action<long>)RequestHaulerApproach : null);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _routes.CheckCruiseLease();
         }
@@ -116,6 +118,11 @@ namespace SpaceEngineers.Services.Consumer
                 return;
             }
 
+            RequestHaulerApproach(grid);
+        }
+
+        private void RequestHaulerApproach(long grid)
+        {
             if (RequestFcs("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
                 Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
         }

@@ -25,10 +25,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private string _cruiseLease;
         private bool _cruisePickup;
         private long _cruiseGrid;
+        private Vector3D _cruiseEndpoint;
+        private int _arrivalChecks;
+        private readonly Action<long> _onCruiseArrival;
 
         public MiningRouteLoader(TaskBusConsumer worker, IMyCubeGrid grid,
             Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null,
-            Func<bool> canStartCruise = null, Func<long, IMyTerminalBlock> findBlockById = null)
+            Func<bool> canStartCruise = null, Func<long, IMyTerminalBlock> findBlockById = null,
+            Action<long> onCruiseArrival = null)
         {
             _worker = worker;
             _grid = grid;
@@ -37,6 +41,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _findStationApproach = findStationApproach;
             _canStartCruise = canStartCruise;
             _findBlockById = findBlockById;
+            _onCruiseArrival = onCruiseArrival;
         }
 
         public bool TryHandle(string command)
@@ -140,8 +145,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _cruiseLease = _worker.ConfirmedLeaseIdentity;
                 _cruisePickup = pickup;
                 _cruiseGrid = grid;
+                _cruiseEndpoint = position;
+                _arrivalChecks = 0;
                 remote.SetAutoPilotEnabled(true);
-                _echo(remote.IsAutoPilotEnabled ? "Cruise autopilot engaged." : "Cruise autopilot did not engage.");
+                if (remote.IsAutoPilotEnabled)
+                    _echo("Cruise autopilot engaged.");
+                else
+                {
+                    ForgetCruise();
+                    _echo("Cruise autopilot did not engage.");
+                }
             }
             catch (Exception error)
             {
@@ -178,7 +191,31 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _worker.ConfirmedLeaseIdentity != _cruiseLease || pickup != _cruisePickup || grid != _cruiseGrid)
                 StopCruise("Cruise stopped: the current leg lost lease confirmation.");
             else if (!_cruiseRemote.IsAutoPilotEnabled)
+                CheckCruiseArrival();
+        }
+
+        private void CheckCruiseArrival()
+        {
+            if (_onCruiseArrival == null || !_cruiseRemote.IsWorking ||
+                Vector3D.DistanceSquared(_cruiseRemote.GetPosition(), _cruiseEndpoint) > 4)
+            {
                 ForgetCruise();
+                return;
+            }
+
+            if (_cruiseRemote.GetShipSpeed() > 0.35 || !_canStartCruise())
+            {
+                if (++_arrivalChecks >= 18)
+                {
+                    ForgetCruise();
+                    _echo("Automatic docking handoff timed out. Check the ship and request route dock.");
+                }
+                return;
+            }
+
+            long grid = _cruiseGrid;
+            ForgetCruise();
+            _onCruiseArrival(grid);
         }
 
         private void ForgetCruise()
