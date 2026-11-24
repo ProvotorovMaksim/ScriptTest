@@ -1,0 +1,114 @@
+using System.Linq;
+using Sandbox.ModAPI.Ingame;
+using SpaceEngineers.Libs.IgcCore;
+using SpaceEngineers.Libs.TaskBusConsumer;
+using Xunit;
+using Broker = SpaceEngineers.Services.Broker.Program;
+
+namespace TaskBus.Tests
+{
+    public sealed class TaskBusDeliveryTests
+    {
+        [Fact]
+        public void LostPublishAndCompletionAcksRecoverAcrossRestarts()
+        {
+            var broker = StartBroker("");
+            string workerStorage = "";
+            TaskBusConsumer StartWorker() => new TaskBusConsumer(
+                (message, _) => broker.IGC.Inbox.Enqueue((42, message)),
+                () => workerStorage, value => workerStorage = value, _ => { },
+                42, "Worker", 1);
+
+            var publish = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore-1\",\"group_id\":\"MiningFleet\",\"key\":\"Ore/Iron\",\"steps\":[\"survey\",\"deliver\"]}",
+                targetId: 1);
+            Dispatch(broker, 9, publish);
+            var firstAck = TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 9, publish);
+            Assert.Equal(firstAck.PayloadJson, TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|")));
+
+            var worker = StartWorker();
+            worker.ProcessCommand("broker 1");
+            worker.ProcessCommand("group MiningFleet");
+            worker.Tick();
+            broker.Main("");
+            var assignment = TakeResponse(broker, "TASK_ASSIGN", 42);
+            DeliverToWorker(worker, assignment);
+            worker.ProcessCommand("stage survey");
+
+            worker = StartWorker();
+            Assert.Contains("Stage: deliver", worker.GetStatus());
+            worker.Tick();
+            broker.Main("");
+            DeliverToWorker(worker, TakeResponse(broker, "TASK_ASSIGN", 42));
+            worker.ProcessCommand("stage deliver");
+            broker.Main("");
+            TakeResponse(broker, "TASK_DONE_ACK", 42);
+
+            broker = StartBroker(broker.Storage);
+            worker = StartWorker();
+            Assert.Contains("Pending completion: 9-1", worker.GetStatus());
+            worker.Tick();
+            broker.Main("");
+            DeliverToWorker(worker, TakeResponse(broker, "TASK_DONE_ACK", 42));
+            Assert.Contains("Pending completion: none", StartWorker().GetStatus());
+
+            Dispatch(broker, 9, publish);
+            Assert.Contains("\"state\":\"DONE\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.DoesNotContain("TASK|", broker.Storage);
+        }
+
+        [Fact]
+        public void LostCancellationAckDoesNotReopenTheRequestAfterRestart()
+        {
+            var broker = StartBroker("");
+            var publish = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore-2\",\"key\":\"Ore/Iron\"}", targetId: 1);
+            var cancel = TaskBusProtocol.CreateEnvelope("TASK_CANCEL",
+                "{\"request_id\":\"ore-2\"}", targetId: 1);
+
+            Dispatch(broker, 9, publish);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 9, cancel);
+            TakeResponse(broker, "TASK_CANCEL_ACK", 9);
+            Assert.DoesNotContain("TASK|", broker.Storage);
+
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 9, cancel);
+            TakeResponse(broker, "TASK_CANCEL_ACK", 9);
+            Dispatch(broker, 9, publish);
+            Assert.Contains("\"state\":\"CANCELLED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.DoesNotContain("TASK|", broker.Storage);
+        }
+
+        private static Broker StartBroker(string storage)
+        {
+            MyGridProgram.StorageAtStartup = storage;
+            try { return new Broker(); }
+            finally { MyGridProgram.StorageAtStartup = null; }
+        }
+
+        private static void Dispatch(Broker broker, long sender, string envelope)
+        {
+            broker.IGC.Inbox.Enqueue((sender, envelope));
+            broker.Main("");
+        }
+
+        private static TaskBusEnvelope TakeResponse(Broker broker, string type, long target)
+        {
+            Assert.True(TaskBusProtocol.TryParseEnvelope(Assert.Single(broker.IGC.Outbox), out var envelope));
+            broker.IGC.Outbox.Clear();
+            Assert.Equal(type, envelope.EventType);
+            Assert.Equal(target, envelope.TargetId);
+            return envelope;
+        }
+
+        private static void DeliverToWorker(TaskBusConsumer worker, TaskBusEnvelope envelope)
+        {
+            Assert.True(worker.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope(
+                envelope.EventType, envelope.PayloadJson, envelope.MessageId, envelope.TargetId)));
+        }
+    }
+}

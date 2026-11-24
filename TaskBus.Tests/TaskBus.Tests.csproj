@@ -13,6 +13,10 @@
     <Compile Include="../libs/igc-core/TaskBusProtocol.cs" />
     <Compile Include="../libs/igc-core/TaskBusIgcHelper.cs" />
     <Compile Include="../libs/taskbus-consumer/TaskBusConsumer.cs" />
+    <Compile Include="../libs/taskbus-producer/TaskBusProducer.cs" />
+    <Compile Include="../services/broker/Program.cs" />
+    <Compile Include="BrokerGameApiStub.cs" />
+    <Compile Include="TaskBusDeliveryTests.cs" />
     <Compile Include="TaskBusProtocolTests.cs" />
     <Compile Include="TaskBusConsumerTests.cs" />
   </ItemGroup>
