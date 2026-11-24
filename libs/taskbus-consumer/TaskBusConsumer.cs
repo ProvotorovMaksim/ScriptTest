@@ -31,6 +31,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
     public sealed class TaskBusConsumer
     {
         private const int DefaultPollIntervalTicks = 30;
+        private const int LeaseConfirmationTimeoutTicks = 120;
 
         private readonly int _pollIntervalTicks;
         private readonly ConsumerSendDelegate _send;
@@ -50,6 +51,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private int _leaseEpoch;
         private int _pendingCompletedEpoch;
         private int _tick;
+        private int? _lastLeaseConfirmationTick;
 
 
         public TaskBusConsumer(
@@ -141,9 +143,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// <summary>
         /// Called every tick. Increments the internal tick and polls the broker when due.
         /// </summary>
-        public void Tick()
+        public void Tick(bool canPoll = true)
         {
             _tick++;
+            if (!canPoll)
+            {
+                _lastLeaseConfirmationTick = null;
+                return;
+            }
             if (_tick % _pollIntervalTicks == 0 || !string.IsNullOrEmpty(_pendingCompletedTaskId))
                 PollBroker();
         }
@@ -162,7 +169,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));
             sb.AppendLine("Lease epoch: " + _leaseEpoch);
             if (!string.IsNullOrEmpty(_activeTaskId))
+            {
+                sb.AppendLine(HasRecentLeaseConfirmation ? "Lease confirmed" : "Waiting for lease confirmation");
                 sb.AppendLine(GetActiveTaskSummary());
+            }
             return sb.ToString().TrimEnd();
         }
 
@@ -170,6 +180,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// Returns true if there is an active task being worked on.
         /// </summary>
         public bool HasActiveTask => !string.IsNullOrEmpty(_activeTaskId);
+
+        private bool HasRecentLeaseConfirmation => _lastLeaseConfirmationTick.HasValue &&
+            _tick - _lastLeaseConfirmationTick.Value < LeaseConfirmationTimeoutTicks;
 
         private void PollBroker()
         {
@@ -232,6 +245,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             else if (leaseEpoch < _leaseEpoch)
                 return;
 
+            _lastLeaseConfirmationTick = _tick;
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
         }
@@ -241,6 +255,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (string.IsNullOrEmpty(_activeTaskId))
             {
                 _echo("No active task. Waiting for broker poll.");
+                return;
+            }
+
+            if (!HasRecentLeaseConfirmation)
+            {
+                _echo("Waiting for lease confirmation from the broker. Stage was not advanced.");
                 return;
             }
 

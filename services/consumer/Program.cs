@@ -35,12 +35,12 @@ namespace SpaceEngineers.Services.Consumer
 
         public void Main(string argument)
         {
-            _consumer.ProcessCommand(argument);
-
             _antennas.Clear();
             GridTerminalSystem.GetBlocksOfType(_antennas, antenna => antenna.IsFunctional && antenna.Enabled);
             if (_antennas.Count == 0)
             {
+                _consumer.Tick(false);
+                _consumer.ProcessCommand(argument);
                 Echo("Enable a functional radio antenna to connect to the broker.");
                 return;
             }
@@ -53,6 +53,7 @@ namespace SpaceEngineers.Services.Consumer
                     _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
+            _consumer.ProcessCommand(argument);
             Echo("Worker block ID: " + Me.EntityId);
             Echo(_consumer.GetStatus());
         }

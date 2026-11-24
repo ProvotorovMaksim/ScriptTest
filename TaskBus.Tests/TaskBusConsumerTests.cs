@@ -8,6 +8,38 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void StageWaitsForLeaseConfirmationAfterRestartAndTimeout()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { },
+                () => storage, value => storage = value, _ => { }, 42, "Worker");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"work-1\",\"lease_epoch\":3}", targetId: 42);
+
+            var worker = Start();
+            worker.ProcessIncomingMessage(1, assignment);
+            worker = Start();
+            worker.ProcessCommand("stage execute");
+            Assert.True(worker.HasActiveTask);
+
+            worker.ProcessIncomingMessage(1, assignment);
+            for (int tick = 0; tick < 120; tick++)
+                worker.Tick();
+            worker.ProcessCommand("stage execute");
+            Assert.True(worker.HasActiveTask);
+
+            worker.ProcessIncomingMessage(1, assignment);
+            worker.Tick(false);
+            worker.ProcessCommand("stage execute");
+            Assert.True(worker.HasActiveTask);
+
+            worker.ProcessIncomingMessage(1, assignment);
+            worker.ProcessCommand("stage execute");
+            Assert.False(worker.HasActiveTask);
+            Assert.Contains("Pending completion: work-1", worker.GetStatus());
+        }
+
+        [Fact]
         public void RevokedCompletionReleasesWorkerForAnotherTask()
         {
             string storage = "";

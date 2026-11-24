@@ -53,15 +53,16 @@ ship attached only by a connector is outside that inventory scope.
    ID. Leave the shortage in place through a publication retry. The worker
    should retain the same task ID and the broker should show one open task.
 2. Run `stage survey` on the worker. Recompile its Programmable Block without
-   clearing Storage. Verify that it restores the same task and displays
-   `mine` as the next stage. Run `stage mine`, `stage intermediate` and
+   clearing Storage. Wait for the broker to confirm the lease again. Verify
+   that the worker restores the same task and displays `mine` as the next stage. Run `stage mine`, `stage intermediate` and
    `stage deliver` as you complete those actions. Bring the base stock above
    the minimum after the worker reports the broker commit. The stage commands
    record operator confirmation of each action.
 3. Create a new shortage. Disable the worker antenna after it receives an
-   assignment. Wait until the broker reports the lease expired, then enable
-   the antenna. The worker should clear the stale lease and receive a new
-   lease epoch on a subsequent poll. With no other worker, the task ID should
+   assignment. While disconnected, a stage command should leave the checkpoint
+   unchanged. Wait until the broker reports the lease expired, then enable the
+   antenna. The worker should clear the stale lease and receive a new lease
+   epoch on a subsequent poll. With no other worker, the task ID should
    remain the same.
 4. With a shortage task open, disable the broker block. Raise the base stock
    above the minimum and let AMN scan it, then lower it again. Re-enable the
