@@ -23,6 +23,7 @@ namespace SpaceEngineers.Services.Galnet
         private long _sequence;
         private long _tick;
         private static readonly long MessageLifetime = TimeSpan.FromMinutes(5).Ticks;
+        private readonly HashSet<long> _localApplications = new HashSet<long>();
         private const string ApplicationBlockName = "[GALNET APP]";
         private const int MaxApplicationLength = 1024;
         private const int MaxPending = 16;
@@ -68,6 +69,14 @@ namespace SpaceEngineers.Services.Galnet
             }
             foreach (var line in Me.CustomData.Split('\n'))
             {
+                if (line.StartsWith("App=", StringComparison.OrdinalIgnoreCase))
+                {
+                    long application;
+                    if (_localApplications.Count < 8 && long.TryParse(line.Substring(4), out application) &&
+                        application != 0 && application != Me.EntityId)
+                        _localApplications.Add(application);
+                    continue;
+                }
                 if (!line.StartsWith("Laser=", StringComparison.OrdinalIgnoreCase))
                     continue;
                 int delimiter = line.IndexOf('|', 6);
@@ -115,7 +124,7 @@ namespace SpaceEngineers.Services.Galnet
                     SaveConfiguration();
                     Echo("Expired queued messages: " + expired);
                 }
-                foreach (var pending in _outbox)
+                foreach (var pending in _outbox.ToArray())
                     ForwardMessage(pending, 0);
             }
 
@@ -296,14 +305,24 @@ namespace SpaceEngineers.Services.Galnet
             int split = argument.IndexOf(' ');
             long destination;
             if (split < 1 || !long.TryParse(argument.Substring(0, split), out destination) ||
-                destination == 0 || destination == Me.EntityId || argument.Length - split - 1 > maxLength || split == argument.Length - 1)
+                destination == 0 || argument.Length - split - 1 > maxLength || split == argument.Length - 1)
             {
                 Echo("Use send/app <node ID> <payload>. Max " + maxLength + " characters.");
                 return;
             }
 
+            var payload = argument.Substring(split + 1);
+            long applicationId;
+            if (destination == Me.EntityId &&
+                (kind != "APP" || !TryReadApplicationTarget(payload, out applicationId) ||
+                    !_localApplications.Contains(applicationId)))
+            {
+                Echo("Local delivery requires an allowed addressed TaskBus application.");
+                return;
+            }
+
             int expired = _outbox.RemoveAll(pending => !IsCurrentPacket(pending, now));
-            var encoded = TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
+            var encoded = TaskBusIgcHelper.EncodeStorage(payload);
             if (kind == "APP" && !deadline.HasValue)
             {
                 var address = "APP|" + Me.EntityId + "|" + destination + "|";
@@ -335,7 +354,8 @@ namespace SpaceEngineers.Services.Galnet
                 encoded;
             _outbox.Add(packet);
             SaveConfiguration();
-            ForwardMessage(packet, 0);
+            if (destination != Me.EntityId)
+                ForwardMessage(packet, 0);
         }
 
         private void ForwardMessage(string packet, long previousHop)
@@ -414,11 +434,34 @@ namespace SpaceEngineers.Services.Galnet
             ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|" + expires + "|", 0);
         }
 
+        private static bool TryReadApplicationTarget(string payload, out long target)
+        {
+            target = 0;
+            if (!payload.StartsWith("taskbus ", StringComparison.Ordinal))
+                return false;
+
+            int separator = payload.IndexOf(' ', 8);
+            TaskBusEnvelope envelope;
+            if (separator < 0 || !TaskBusProtocol.TryParseEnvelope(payload.Substring(separator + 1), out envelope))
+                return false;
+            target = envelope.TargetId;
+            return target != 0;
+        }
+
         private bool DeliverApplication(long origin, string id, string payload)
         {
             try
             {
-                var block = GridTerminalSystem.GetBlockWithName(ApplicationBlockName) as IMyProgrammableBlock;
+                IMyProgrammableBlock block;
+                if (_localApplications.Count > 0 && payload.StartsWith("taskbus ", StringComparison.Ordinal))
+                {
+                    long target;
+                    if (!TryReadApplicationTarget(payload, out target) || !_localApplications.Contains(target))
+                        return false;
+                    block = GridTerminalSystem.GetBlockWithId(target) as IMyProgrammableBlock;
+                }
+                else
+                    block = GridTerminalSystem.GetBlockWithName(ApplicationBlockName) as IMyProgrammableBlock;
                 return block != null && block.EntityId != Me.EntityId && block.CubeGrid == Me.CubeGrid &&
                     block.IsWorking && block.TryRun("galnet recv " + origin + " " + id + " " + payload);
             }

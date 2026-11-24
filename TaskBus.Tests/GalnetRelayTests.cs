@@ -13,6 +13,37 @@ namespace TaskBus.Tests
     public sealed class GalnetRelayTests
     {
         [Fact]
+        public void SharedRelayDeliversLoopbackTaskBusOnlyToTheAddressedApplication()
+        {
+            MyGridProgram.CustomDataAtStartup = "App=42\nApp=43";
+            Relay relay;
+            try { relay = Start(4, ""); }
+            finally { MyGridProgram.CustomDataAtStartup = null; }
+
+            var received = new List<string>();
+            relay.GridTerminalSystem.ApplicationsById[42] = new ApplicationBlock(42, command =>
+            {
+                received.Add(command);
+                return true;
+            });
+            relay.GridTerminalSystem.ApplicationsById[43] = new ApplicationBlock(43, _ =>
+                throw new InvalidOperationException("Delivered to the wrong block"));
+            string Command(long target) => "app 4 taskbus 43 " +
+                TaskBusProtocol.CreateEnvelope("TASK_QUERY", "{\"request_id\":\"ore\"}", targetId: target);
+
+            relay.Main(Command(99), UpdateType.Terminal);
+            Assert.DoesNotContain("SEND:", relay.Storage);
+            relay.Main(Command(42), UpdateType.Terminal);
+            Assert.Empty(received);
+            Assert.Contains("SEND:", relay.Storage);
+
+            relay.Main("", UpdateType.Update10);
+            Assert.StartsWith("galnet recv 4 ", Assert.Single(received));
+            Assert.DoesNotContain("SEND:", relay.Storage);
+            Assert.Empty(relay.IGC.UnicastOutbox);
+        }
+
+        [Fact]
         public void DeliveryUsesReserveAfterRestartAndRetriesLostAck()
         {
             var nodes = new Dictionary<long, Relay>

@@ -69,6 +69,8 @@ namespace Sandbox.ModAPI.Ingame
     public sealed class TestTerminal
     {
         public IMyProgrammableBlock Application;
+        public readonly Dictionary<long, IMyProgrammableBlock> ApplicationsById = new();
+        public object GetBlockWithId(long id) => ApplicationsById.TryGetValue(id, out var block) ? block : null;
         public IMyProgrammableBlock Relay;
         public IMyLaserAntenna Laser;
         public object GetBlockWithName(string name) =>

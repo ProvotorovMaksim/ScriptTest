@@ -110,8 +110,13 @@ owned by TaskBus. Direct IGC is used when no relay ID is configured.
 AMN.Base can use the same bridge for publishing, querying and cancelling
 deficit requests. Use a base-side relay named `[GALNET RELAY]`, name the
 AMN.Base PB `[GALNET APP]`, and configure `GalnetBrokerRelay` and
-`broker <TaskBroker PB ID>` as on a worker. The base and broker need
-separate relay endpoints for this mode. Direct ore catalog transfers
+`broker <TaskBroker PB ID>` as on a worker. A base and broker on the same grid can share one relay. Add one
+`App=<programmable block ID>` line for each local TaskBus application to
+the relay Custom Data, then recompile. Point `GalnetBrokerRelay` to the
+shared relay. It queues addressed local messages and dispatches them by
+block ID on its next retry update. If any `App=` entries are configured,
+include every local TaskBus recipient on that relay. Non-TaskBus packets
+still go to `[GALNET APP]`. Direct ore catalog transfers
 and radio diagnostics continue to use radio.
 
 To check failover in a world, connect the worker and broker relays
