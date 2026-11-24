@@ -19,6 +19,7 @@ namespace SpaceEngineers.Services.Consumer
         private int _departureTicks;
         private bool _autoDepart;
         private readonly string _haulerCargo;
+        private readonly string _miningBuffer;
         private readonly string _haulerDock;
         private readonly string _haulerUnloadTo;
         private readonly string _haulerLoadFrom;
@@ -41,6 +42,7 @@ namespace SpaceEngineers.Services.Consumer
                 (envelope, _) => IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
                 message => Echo(message));
             _haulerCargo = ReadSetting("HaulerCargo=");
+            _miningBuffer = ReadSetting("MiningBuffer=");
             _haulerDock = ReadSetting("HaulerDock=");
             _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
             _haulerLoadFrom = ReadSetting("HaulerLoadFrom=");
@@ -61,7 +63,8 @@ namespace SpaceEngineers.Services.Consumer
                 unloadHaulerCargo: string.IsNullOrEmpty(_haulerUnloadTo)
                     ? null : (Action<long, string, double>)UnloadHaulerCargo,
                 loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
-                    ? null : (Action<long, string, double>)LoadHaulerCargo);
+                    ? null : (Action<long, string, double>)LoadHaulerCargo,
+                readMiningBuffer: _miningBuffer == null ? null : (Func<string, double?>)ReadMiningBuffer);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
                 gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
@@ -211,7 +214,16 @@ namespace SpaceEngineers.Services.Consumer
 
         private double? ReadHaulerCargo(string resource)
         {
-            var inventory = FindHaulerInventory();
+            return ReadCargo(FindHaulerInventory(), resource);
+        }
+
+        private double? ReadMiningBuffer(string resource)
+        {
+            return ReadCargo(FindLocalInventory(_miningBuffer), resource);
+        }
+
+        private double? ReadCargo(IMyInventory inventory, string resource)
+        {
             if (inventory == null)
                 return null;
 
@@ -228,9 +240,14 @@ namespace SpaceEngineers.Services.Consumer
 
         private IMyInventory FindHaulerInventory()
         {
-            if (string.IsNullOrEmpty(_haulerCargo))
+            return FindLocalInventory(_haulerCargo);
+        }
+
+        private IMyInventory FindLocalInventory(string name)
+        {
+            if (string.IsNullOrEmpty(name))
                 return null;
-            var container = GridTerminalSystem.GetBlockWithName(_haulerCargo) as IMyCargoContainer;
+            var container = GridTerminalSystem.GetBlockWithName(name) as IMyCargoContainer;
             return container != null && container.CubeGrid == Me.CubeGrid && container.IsFunctional
                 ? container.GetInventory() : null;
         }

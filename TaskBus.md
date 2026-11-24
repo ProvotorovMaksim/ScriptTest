@@ -150,6 +150,10 @@ stages. While the point is idle, run `point auto` to automatically publish
 one child for the current stage to `Scouts`, `MiningFleet` or `Haulers`
 respectively. The child request ID is stable across retries and restart.
 After the child completes, confirm survey and mining on the point consumer.
+Set `MiningBuffer=<local cargo container name>` in the mining point PB to
+advance mining automatically after the child completes and the buffer
+contains the requested resource and quantity. The same inventory check
+applies to manual `stage mine` with this setting.
 Transport with a required base receipt completes automatically once the
 receipt and hauler completion are both confirmed.
 For new point requests, transport confirmation also requires the original

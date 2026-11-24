@@ -77,6 +77,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly bool _autoHauler;
         private readonly Action<long, string, double> _unloadHaulerCargo;
         private readonly Action<long, string, double> _loadHaulerCargo;
+        private readonly Func<string, double?> _readMiningBuffer;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -87,7 +88,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
             Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
-            Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null)
+            Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
+            Func<string, double?> readMiningBuffer = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -107,6 +109,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _readDockedGrid = readDockedGrid;
             _unloadHaulerCargo = unloadHaulerCargo;
             _loadHaulerCargo = loadHaulerCargo;
+            _readMiningBuffer = readMiningBuffer;
             _autoHauler = autoHauler && _readDockedGrid != null && _readHaulerCargo != null;
             LoadState();
         }
@@ -249,6 +252,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (CurrentStage() == "transport" && _completedChildRequest == CurrentChildRequestId() &&
                     _baseStockConfirmed && AssignmentRequires("receipt_required"))
                     AdvanceStage("transport");
+                else if (CurrentStage() == "mine" && _readMiningBuffer != null &&
+                    _completedChildRequest == CurrentChildRequestId())
+                    AdvanceStage("mine", automatic: true);
                 else
                     PublishCurrentChild();
             }
@@ -284,7 +290,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (_completedChildRequest == CurrentChildRequestId())
                     sb.AppendLine(CurrentStage() == "transport" && AssignmentRequires("receipt_required")
                         ? "Hauler task complete."
-                        : "Child task complete. Confirm stage.");
+                        : CurrentStage() == "mine" && _readMiningBuffer != null
+                            ? "Mining child complete. Checking buffer before dispatch."
+                            : "Child task complete. Confirm stage.");
             }
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));
@@ -761,6 +769,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (IsAutomaticPoint && expected == "mine" && _readMiningBuffer != null && !MiningBufferReady())
+            {
+                if (!automatic)
+                    _echo("Waiting for the requested quantity in the configured mining buffer.");
+                return;
+            }
+
             if (IsAutomaticPoint && expected == "transport" && AssignmentRequires("receipt_required") && !_baseStockConfirmed)
             {
                 _echo("Waiting for stock confirmation from the requesting base.");
@@ -856,6 +871,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             taskId = _activeTaskId;
             return true;
+        }
+
+        private bool MiningBufferReady()
+        {
+            string details;
+            double target;
+            var resource = GetRequestedResource();
+            return !string.IsNullOrEmpty(resource) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out target) && target > 0 &&
+                _readMiningBuffer(resource) >= target;
         }
 
         public bool CanDepartHaulerPickup()

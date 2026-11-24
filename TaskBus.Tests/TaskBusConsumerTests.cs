@@ -8,6 +8,35 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void AutomaticPointDispatchesHaulerOnlyWithCompletedMiningAndEnoughBufferStock()
+        {
+            double? stock = 100;
+            var sent = new List<string>();
+            var point = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { }, _ => { },
+                42, "Point", 1, readMiningBuffer: resource => resource == "Ore/Iron" ? stock : null);
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\"," +
+                "\"amount\":100,\"steps\":[\"mine\",\"transport\"]}}", targetId: 42);
+            point.ProcessIncomingMessage(1, assignment);
+            point.Tick();
+            Assert.Contains("Stage: mine", point.GetStatus());
+            stock = 99;
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:1:0\",\"state\":\"DONE\"}", targetId: 42));
+            point.Tick();
+            point.ProcessCommand("stage mine");
+            Assert.Contains("Stage: mine", point.GetStatus());
+
+            stock = 100;
+            point.Tick();
+            Assert.Contains("Stage: transport", point.GetStatus());
+            point.Tick();
+            Assert.Contains("\"group_id\":\"Haulers\"", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void MiningDepositIsRestoredOnlyForTheSameConfirmedLease()
         {
             string storage = "";
