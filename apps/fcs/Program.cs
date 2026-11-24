@@ -40,6 +40,7 @@ namespace SpaceEngineers.Apps.FlightControl
         private bool dockCharging;
         private bool departureRequested;
         private bool disconnectPending;
+        private bool externalDisconnectPending;
         private int departureCharge = 95;
         private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
         private bool showDockGuide;
@@ -96,7 +97,9 @@ namespace SpaceEngineers.Apps.FlightControl
                 if (settings.Length >= 5)
                     long.TryParse(settings[4], out dockPortId);
                 departureRequested = dockPortId != 0 && settings.Length >= 6 && settings[5] == "departing";
-                disconnectPending = dockPortId != 0 && settings.Length >= 6 && settings[5] == "disconnecting";
+                externalDisconnectPending = dockPortId != 0 && settings.Length >= 6 && settings[5] == "disconnecting external";
+                disconnectPending = externalDisconnectPending ||
+                    (dockPortId != 0 && settings.Length >= 6 && settings[5] == "disconnecting");
                 dockCharging = disconnectPending || departureRequested ||
                     (dockPortId != 0 && settings.Length >= 6 && settings[5] == "charging");
                 if (dockCharging)
@@ -149,6 +152,7 @@ namespace SpaceEngineers.Apps.FlightControl
                         departureRequested = false;
                         bool wasDisconnecting = disconnectPending;
                         disconnectPending = false;
+                        externalDisconnectPending = false;
                         SaveSettings();
                         status = "FCS: departure cancelled; continuing to charge.";
                         var connector = FindDockConnector();
@@ -492,7 +496,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 Storage += "\n" + FormatDockVector(dockPosition.Value) + "\n" +
                     FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up) +
                     "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                (disconnectPending ? "\ndisconnecting" : departureRequested ? "\ndeparting" :
+                (disconnectPending ? (externalDisconnectPending ? "\ndisconnecting external" : "\ndisconnecting") :
+                    departureRequested ? "\ndeparting" :
                         dockCharging ? "\ncharging" : "");
             foreach (var entry in berths)
             {
@@ -752,7 +757,20 @@ namespace SpaceEngineers.Apps.FlightControl
                         return;
                     }
 
-                    // A persisted disconnect is already committed to Auto, even after restart.
+                    if (externalDisconnectPending)
+                    {
+                        // A worker must confirm readiness again before a second disconnect attempt.
+                        if (SetDockBatteryMode(ChargeMode.Recharge))
+                        {
+                            disconnectPending = false;
+                            externalDisconnectPending = false;
+                            SaveSettings();
+                            status = "FCS: still connected. Charging while waiting for a new departure request.";
+                        }
+                        return;
+                    }
+
+                    // A persisted manual disconnect is already committed to Auto, even after restart.
                     if (!disconnectPending && !SetDockBatteryMode(ChargeMode.Recharge))
                         return;
                     if ((departureRequested || disconnectPending) && mode == Mode.Off)
@@ -787,6 +805,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     status = "FCS: departure requires a connection to the recorded berth.";
                     departureRequested = false;
                     disconnectPending = false;
+                    externalDisconnectPending = false;
                     SaveSettings();
                     return;
                 }
@@ -813,6 +832,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     dockCharging = true;
                     departureRequested = false;
                     disconnectPending = true;
+                    externalDisconnectPending = requireReady;
                     SaveSettings();
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
                 }
@@ -834,6 +854,7 @@ namespace SpaceEngineers.Apps.FlightControl
             dockCharging = false;
             departureRequested = false;
             disconnectPending = false;
+            externalDisconnectPending = false;
             SaveSettings();
             Runtime.UpdateFrequency = mode == Mode.Off ? UpdateFrequency.None : UpdateFrequency.Update1;
             status = "FCS: undocked. Ship batteries set to Auto.";

@@ -257,7 +257,10 @@ restart. With `MiningAutoDepart=true`, an armed platform at its assigned
 mining point requests `dock depart ready` periodically while the lease,
 reviewed route and single connector still match. FCS waits for the charge
 threshold and sets the batteries to Auto before disconnecting. The
-platform launches only after the connection has released.
+platform launches only after the connection has released. If an AMN
+departure request leaves the ship connected, FCS restores Recharge and
+waits for another readiness request. A manually queued `dock depart`
+keeps its existing retry behavior.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This
