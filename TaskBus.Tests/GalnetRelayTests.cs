@@ -240,10 +240,11 @@ namespace TaskBus.Tests
         }
 
         [Fact]
-        public void WorkerLeasesAndCommitsTaskThroughGalnet()
+        public void BasePublishesAndWorkerCompletesTaskThroughGalnet()
         {
             var workerRelay = Start(21, "0\n22");
-            var brokerRelay = Start(22, "0\n21");
+            var brokerRelay = Start(22, "0\n21\n23");
+            var baseRelay = Start(23, "0\n22");
             MyGridProgram.StorageAtStartup = "";
             Broker broker;
             try { broker = new Broker(); }
@@ -275,31 +276,56 @@ namespace TaskBus.Tests
                 return true;
             });
 
-            broker.IGC.Inbox.Enqueue((9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
-                "{\"request_id\":\"ore\",\"group_id\":\"MiningFleet\",\"steps\":[\"mine\"]}", targetId: 1)));
-            broker.Main("");
-            Assert.Single(broker.IGC.Outbox);
-            broker.IGC.Outbox.Clear();
-
-            void Transfer()
+            var baseBlock = new ApplicationBlock(9, _ => true);
+            var baseLocalRelay = new ApplicationBlock(23, command =>
             {
-                foreach (var packet in workerRelay.IGC.UnicastOutbox)
-                    brokerRelay.IGC.UnicastListener.Inbox.Enqueue((21, packet.Tag, packet.Data));
-                workerRelay.IGC.UnicastOutbox.Clear();
-                foreach (var packet in brokerRelay.IGC.UnicastOutbox)
-                    workerRelay.IGC.UnicastListener.Inbox.Enqueue((22, packet.Tag, packet.Data));
-                brokerRelay.IGC.UnicastOutbox.Clear();
-            }
+                baseRelay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+            var baseBridge = new GalnetWorkerBridge(baseBlock, "GalnetBrokerRelay=22",
+                () => baseLocalRelay, (_, __) => throw new InvalidOperationException("Direct IGC disabled"), _ => { });
+            var baseReplies = new List<string>();
+            baseRelay.GridTerminalSystem.Application = new ApplicationBlock(9, command =>
+                baseBridge.TryReceive(command, (source, envelope) =>
+                {
+                    Assert.Equal(1L, source);
+                    baseReplies.Add(envelope);
+                }));
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\",\"group_id\":\"MiningFleet\",\"steps\":[\"mine\"]}", targetId: 1), 1);
 
+            var relays = new Dictionary<long, Relay> { { 21, workerRelay }, { 22, brokerRelay }, { 23, baseRelay } };
+            bool baseLinkOnline = false;
             void Tick()
             {
+                baseBridge.Flush();
                 worker.Tick();
                 bridge.Flush();
                 broker.Main("");
-                workerRelay.Main("", UpdateType.Update10);
-                brokerRelay.Main("", UpdateType.Update10);
-                Transfer();
+                foreach (var relay in relays.Values)
+                    relay.Main("", UpdateType.Update10);
+                foreach (var relay in relays)
+                {
+                    foreach (var packet in relay.Value.IGC.UnicastOutbox)
+                    {
+                        if (baseLinkOnline || (relay.Key != 23 && packet.Target != 23))
+                            relays[packet.Target].IGC.UnicastListener.Inbox.Enqueue((relay.Key, packet.Tag, packet.Data));
+                    }
+                    relay.Value.IGC.UnicastOutbox.Clear();
+                }
             }
+
+            for (int tick = 0; tick < 40; tick++)
+                Tick();
+            Assert.Empty(baseReplies);
+            Assert.False(worker.HasActiveTask);
+            Assert.Contains("SEND:", baseRelay.Storage);
+
+            baseLinkOnline = true;
+            for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
+                Tick();
+            Assert.Contains(baseReplies, envelope => envelope.Contains("TASK_PUBLISHED_ACK") &&
+                envelope.Contains("\"request_id\":\"ore\""));
 
             for (int tick = 0; tick < 150 && !worker.HasActiveTask; tick++)
                 Tick();
@@ -311,6 +337,13 @@ namespace TaskBus.Tests
                 Tick();
             Assert.Contains("Pending completion: none", worker.GetStatus());
             Assert.DoesNotContain("TASK|", broker.Storage);
+            baseReplies.Clear();
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"ore\"}", targetId: 1), 1);
+            for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
+                Tick();
+            Assert.Contains(baseReplies, envelope => envelope.Contains("TASK_PUBLISHED_ACK") &&
+                envelope.Contains("\"state\":\"DONE\""));
             Assert.Empty(broker.IGC.Outbox);
         }
 
