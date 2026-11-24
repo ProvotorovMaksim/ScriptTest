@@ -82,7 +82,9 @@ namespace SpaceEngineers.Services.Consumer
                     _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
-            if (!_routes.TryHandle(command))
+            if (string.Equals(command, "route dock", StringComparison.OrdinalIgnoreCase))
+                StartHaulerDock();
+            else if (!_routes.TryHandle(command))
                 _consumer.ProcessCommand(argument);
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
@@ -95,6 +97,28 @@ namespace SpaceEngineers.Services.Consumer
                 _monitorTicks = 0;
                 UpdateMonitor(status);
             }
+        }
+
+        private void StartHaulerDock()
+        {
+            string taskId;
+            bool pickup;
+            long grid;
+            if (!_consumer.TryGetHaulerDestination(out taskId, out pickup, out grid))
+            {
+                Echo("A confirmed hauler lease with an assigned station is required.");
+                return;
+            }
+
+            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
+            if (fcs == null || fcs.CubeGrid != Me.CubeGrid || fcs.EntityId == Me.EntityId || !fcs.IsWorking ||
+                !fcs.TryRun("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
+            {
+                Echo("Could not send the final approach request to a working local [AMN FCS] block.");
+                return;
+            }
+
+            Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
         }
 
         private string ReadSetting(string key)

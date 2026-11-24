@@ -266,6 +266,13 @@ approach to a local Remote Control. Use `[AMN PICKUP]` for the pickup leg
 and `[AMN DELIVERY]` for delivery. Keep autopilot off while loading the
 approach and remove the old AMN waypoint before preparing a new task.
 
+Name the hauler FCS programmable block `[AMN FCS]` and record each station
+berth with FCS while connected. At the final approach, run `route dock`
+on the hauler to request `dock drone <grid ID>` for the current assignment.
+FCS selects the recorded berth for that grid and applies its usual final
+approach checks. Turn off cruise autopilot and position the ship in the
+final approach envelope before requesting docking.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both

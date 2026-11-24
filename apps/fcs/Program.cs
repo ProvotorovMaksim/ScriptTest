@@ -109,9 +109,6 @@ namespace SpaceEngineers.Apps.FlightControl
         {
             var previousMode = mode;
             var command = (argument ?? "").Trim().ToLowerInvariant();
-            if (command.StartsWith("dock select ", StringComparison.Ordinal))
-                SelectBerth(command.Substring(12).Trim());
-
             switch (command)
             {
                 case "normal": Activate(Mode.Normal); break;
@@ -155,7 +152,14 @@ namespace SpaceEngineers.Apps.FlightControl
                     break;
                 case "off": Release("FCS off."); break;
                 default:
-                    if (command.StartsWith("brake ", StringComparison.Ordinal))
+                    if (command.StartsWith("dock select ", StringComparison.Ordinal))
+                        SelectBerth(command.Substring(12).Trim());
+                    else if (command.StartsWith("dock drone ", StringComparison.Ordinal))
+                    {
+                        if (SelectBerth(command.Substring(11).Trim()))
+                            BeginDockApproach(true);
+                    }
+                    else if (command.StartsWith("brake ", StringComparison.Ordinal))
                         SetBrakingDistance(command.Substring(6));
                     else if (command.StartsWith("dock charge ", StringComparison.Ordinal))
                     {
@@ -263,25 +267,26 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private void SelectBerth(string argument)
+        private bool SelectBerth(string argument)
         {
             long grid;
             Berth berth;
             if (!long.TryParse(argument, out grid) || !berths.TryGetValue(grid, out berth))
             {
                 Echo("Use dock list to find a recorded grid ID.");
-                return;
+                return false;
             }
             if (mode == Mode.Dock || dockCharging || departureRequested || disconnectPending)
             {
                 Echo("Finish docking and departure before selecting another berth.");
-                return;
+                return false;
             }
             dockFrame = berth.Frame;
             dockPosition = dockFrame.Translation;
             dockPortId = berth.PortId;
             SaveSettings();
             Echo("Selected berth on grid " + grid + ".");
+            return true;
         }
 
         private void BeginDockApproach(bool uncrewed)
