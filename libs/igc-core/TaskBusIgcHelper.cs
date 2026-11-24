@@ -64,8 +64,36 @@ namespace SpaceEngineers.Libs.IgcCore
             value = 0;
             string raw;
             return TryGetJsonProperty(json, key, out raw) &&
-                double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
-                !double.IsNaN(value) && !double.IsInfinity(value);
+                TryParseFiniteNumber(raw, out value);
         }
+        /// <summary>Reads a GPS survey report from an ore detector adapter.</summary>
+        public static bool TryReadOreGps(string report, out string ore, out double x, out double y, out double z)
+        {
+            ore = null;
+            x = y = z = 0;
+            if (string.IsNullOrWhiteSpace(report))
+                return false;
+
+            var fields = report.Trim().Split(':');
+            double parsedX;
+            double parsedY;
+            double parsedZ;
+            if (fields.Length < 6 || fields[0] != "GPS" || fields[fields.Length - 1] != "" ||
+                string.IsNullOrWhiteSpace(fields[1]) ||
+                !TryParseFiniteNumber(fields[2], out parsedX) ||
+                !TryParseFiniteNumber(fields[3], out parsedY) ||
+                !TryParseFiniteNumber(fields[4], out parsedZ))
+                return false;
+
+            ore = fields[1].Trim();
+            x = parsedX;
+            y = parsedY;
+            z = parsedZ;
+            return true;
+        }
+
+        private static bool TryParseFiniteNumber(string value, out double result) =>
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+            !double.IsNaN(result) && !double.IsInfinity(result);
     }
 }

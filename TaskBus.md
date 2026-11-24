@@ -45,6 +45,16 @@ while unloading and recharging at home. In ScriptTest, TaskBus owns dispatch
 and checkpoints, FCS owns the last metres and the berth battery cycle, and
 the mining script owns route following and drilling.
 
+### Ore survey input
+
+The [Ore Detector GPS Script API](https://steamcommunity.com/sharedfiles/filedetails/?id=3695937446)
+documents the string terminal property `Survey.DetectedOre`. It returns
+one GPS record per line with the ore name and world coordinates.
+`TaskBusIgcHelper.TryReadOreGps` parses these records for a survey adapter.
+Workshop availability and runtime behavior still need a check in the target
+world. A survey hit is a catalog observation. Route planning should use a
+separate approach point outside the voxel.
+
 ### Select a broker
 
 Update all brokers sharing the channel before using broker selection. In a
