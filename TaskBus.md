@@ -219,7 +219,10 @@ does not prevent the broker from later recording a qualifying reading.
 New hauler assignments start at `pickup`. After loading the cargo, run
 `stage pickup`, then run `stage deliver` after unloading. The pickup
 checkpoint survives a recompile. Resume delivery after broker lease
-confirmation.
+confirmation. To check the actual load at pickup, set
+`HaulerCargo=<local cargo container name>` in the hauler PB Custom Data
+and recompile. Confirming pickup then requires the requested resource
+and amount in that container.
 
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions

@@ -70,6 +70,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
 
         private readonly Func<string> _getGridPositionJson;
+        private readonly Func<string, double?> _readHaulerCargo;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -78,7 +79,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             ConsumerEchoDelegate echo,
             long entityId,
             string gridName,
-            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null)
+            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
+            Func<string, double?> readHaulerCargo = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -93,6 +95,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
             _miningPlatform = miningPlatform;
             _getGridPositionJson = getGridPositionJson;
+            _readHaulerCargo = readHaulerCargo;
             LoadState();
         }
 
@@ -686,6 +689,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (_consumerGroup == "Haulers" && expected == "pickup" && _readHaulerCargo != null && !CheckPickupCargo())
+                return;
+
             if (IsAutomaticPoint && _completedChildRequest != CurrentChildRequestId())
             {
                 _echo("Waiting for the broker to confirm the child task is complete.");
@@ -727,6 +733,30 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SaveState();
                 _echo("Stage saved. Next stage: " + CurrentStage());
             }
+        }
+
+        private bool CheckPickupCargo()
+        {
+            string details;
+            double amount;
+            var resource = GetRequestedResource();
+            if (string.IsNullOrEmpty(resource) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
+            {
+                _echo("The pickup assignment has no valid resource amount.");
+                return false;
+            }
+
+            double? loaded = _readHaulerCargo(resource);
+            if (!(loaded >= amount))
+            {
+                _echo("Pickup requires " + amount.ToString("G", CultureInfo.InvariantCulture) + " of " + resource +
+                    " in the configured cargo container. Measured: " +
+                    (loaded.HasValue ? loaded.Value.ToString("G", CultureInfo.InvariantCulture) : "unavailable"));
+                return false;
+            }
+            return true;
         }
 
         private bool AssignmentRequires(string field)
