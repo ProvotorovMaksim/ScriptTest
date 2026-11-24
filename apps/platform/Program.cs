@@ -36,6 +36,8 @@ namespace SpaceEngineers.Apps.Platform
         private readonly List<IMyShipConnector> _surveyConnectors = new List<IMyShipConnector>();
         private string _platformFlightLease;
         private bool _platformSurveyFlight;
+        private bool _platformMiningPass;
+        private const string MiningPassRemoteName = "[AMN MINE PASS]";
         private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -175,6 +177,8 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
                 StartManagedDrills();
+            else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
+                StartMiningPass();
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
@@ -379,7 +383,7 @@ namespace SpaceEngineers.Apps.Platform
                 drill.CubeGrid == Me.CubeGrid && drill.CustomName.StartsWith(DrillPrefix, StringComparison.Ordinal));
         }
 
-        private void StartManagedDrills()
+        private bool StartManagedDrills()
         {
             string taskId;
             double x;
@@ -388,7 +392,7 @@ namespace SpaceEngineers.Apps.Platform
             if (_worker.SupervisedCruiseRemote != 0 || !_worker.TryGetMiningApproach(out taskId, out x, out y, out z))
             {
                 Echo("A confirmed mining lease with a verified approach is required.");
-                return;
+                return false;
             }
             _surveyConnectors.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
@@ -396,23 +400,24 @@ namespace SpaceEngineers.Apps.Platform
             if (_surveyConnectors.Count != 0)
             {
                 Echo("Undock before enabling the managed drills.");
-                return;
+                return false;
             }
 
             if (!CheckMiningLane(x, y, z) || !CheckMiningCargo())
             {
                 Echo(_lastProbe);
-                return;
+                return false;
             }
             FindManagedDrills();
             if (_managedDrills.Count == 0)
             {
                 Echo("Name the managed local drills with the " + DrillPrefix + " prefix.");
-                return;
+                return false;
             }
             _drillingLease = _worker.ConfirmedLeaseIdentity;
             foreach (var drill in _managedDrills)
                 drill.Enabled = true;
+            return true;
         }
 
         private void CheckMiningLease()
@@ -433,7 +438,7 @@ namespace SpaceEngineers.Apps.Platform
                 StopManagedDrills();
         }
 
-        private bool CheckMiningLane(double approachX, double approachY, double approachZ)
+        private bool CheckMiningLane(double approachX, double approachY, double approachZ, Vector3D? position = null)
         {
             if (!_miningLaneRadius.HasValue)
                 return true;
@@ -459,7 +464,7 @@ namespace SpaceEngineers.Apps.Platform
                 _lastProbe = "Mining lane needs distinct approach and ore positions.";
                 return false;
             }
-            var offset = Me.CubeGrid.GetPosition() - start;
+            var offset = (position ?? Me.CubeGrid.GetPosition()) - start;
             double progress = Math.Max(0, Math.Min(1, Vector3D.Dot(offset, axis) / lengthSquared));
             double radius = _miningLaneRadius.Value;
             if ((offset - progress * axis).LengthSquared() <= radius * radius)
@@ -837,6 +842,61 @@ namespace SpaceEngineers.Apps.Platform
                 _routes.LoadMiningApproach(remote => StartPlatformFlight(remote, "Mining approach", false));
         }
 
+        private void StartMiningPass()
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (!_miningLaneRadius.HasValue || _miningCargoName == null || _drillingLease != null ||
+                _worker.SupervisedCruiseRemote != 0 || !_worker.TryGetMiningApproach(out taskId, out x, out y, out z) ||
+                !CanStartPlatformFlight())
+            {
+                Echo("A confirmed mining approach, configured lane and cargo, and idle flight controls are required.");
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
+            var approach = new Vector3D(x, y, z);
+            if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking ||
+                remote.FlightMode != FlightMode.OneWay || !(remote.SpeedLimit > 0 && remote.SpeedLimit <= 1) ||
+                remote.GetShipSpeed() > 0.25 || Vector3D.DistanceSquared(remote.GetPosition(), approach) > 25)
+            {
+                Echo("Use a local One Way " + MiningPassRemoteName +
+                    " at no more than 1 m/s. Settle within 5 m of the ore approach.");
+                return;
+            }
+
+            _surveyWaypoints.Clear();
+            remote.GetWaypointInfo(_surveyWaypoints);
+            if (_surveyWaypoints.Count != 1 ||
+                !CheckMiningLane(x, y, z, _surveyWaypoints[0].Coords + Me.CubeGrid.GetPosition() - remote.GetPosition()))
+            {
+                Echo("Load one reviewed mining endpoint inside the assigned lane.");
+                return;
+            }
+
+            _platformMiningPass = true;
+            try
+            {
+                if (StartManagedDrills())
+                    StartPlatformFlight(remote, "Mining pass", false);
+            }
+            finally
+            {
+                if (_worker.SupervisedCruiseRemote == 0 || !remote.IsAutoPilotEnabled)
+                    FinishMiningPass();
+            }
+        }
+
+        private void FinishMiningPass()
+        {
+            if (!_platformMiningPass)
+                return;
+            _platformMiningPass = false;
+            StopManagedDrills();
+        }
+
         private void StartPlatformFlight(IMyRemoteControl remote, string leg, bool survey)
         {
             _worker.SetSupervisedCruiseRemote(remote.EntityId);
@@ -858,6 +918,16 @@ namespace SpaceEngineers.Apps.Platform
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
             {
                 _worker.SetSupervisedCruiseRemote(0);
+                FinishMiningPass();
+                return;
+            }
+            if (_platformMiningPass && (_drillingLease == null || remote.GetShipSpeed() > 1.5))
+            {
+                _platformFlightLease = null;
+                remote.SetAutoPilotEnabled(false);
+                if (!remote.IsAutoPilotEnabled)
+                    _worker.SetSupervisedCruiseRemote(0);
+                FinishMiningPass();
                 return;
             }
             string taskId;
@@ -870,6 +940,7 @@ namespace SpaceEngineers.Apps.Platform
                 remote.SetAutoPilotEnabled(false);
                 if (!remote.IsAutoPilotEnabled)
                     _worker.SetSupervisedCruiseRemote(0);
+                FinishMiningPass();
                 _lastProbe = "Platform flight stopped. Confirm the lease before starting it again.";
             }
         }

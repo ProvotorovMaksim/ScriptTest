@@ -328,7 +328,14 @@ counts existing cargo in that inventory and does not complete the assignment.
 Set `MiningLaneRadius=<1 to 100 metres>` to permit drilling only when the
 platform grid origin is within that distance of the segment from the
 assigned approach to the surveyed ore position. Departure from this lane
-stops the managed drills. The pilot reviews clearance and flies the pass.
+stops the managed drills. For a supervised pass, prepare one reviewed
+endpoint in a local `[AMN MINE PASS]` Remote Control, set One Way and a
+speed limit at or below 1 m/s, then settle within 5 m of the approach.
+Run `mine pass` to start both the drills and the controller. The pass
+stops on completion, lease loss, lane or cargo limits, or speed above
+1.5 m/s. Use `mine drills off` to stop the drills and the supervised pass.
+Review ship alignment, drill coverage and controller collision settings
+before starting.
 
 After returning to the assigned mining point, stop the drills and enter
 the FCS final approach envelope. Run `mine dock` to request docking at
