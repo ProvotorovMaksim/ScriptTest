@@ -153,36 +153,39 @@ namespace SpaceEngineers.Apps.Amn
             _cockpits.Clear();
             _remoteControls.Clear();
 
-            GridTerminalSystem.GetBlocksOfType(_containers, container => container.IsFunctional);
-            GridTerminalSystem.GetBlocksOfType(_assemblers, assembler => assembler.IsFunctional);
-            GridTerminalSystem.GetBlocksOfType(_refineries, refinery => refinery.IsFunctional);
-            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional);
-            GridTerminalSystem.GetBlocksOfType(_remoteControls, rc => rc.IsFunctional);
+            GridTerminalSystem.GetBlocksOfType(_containers, container => container.IsFunctional && container.IsSameConstructAs(Me));
+            GridTerminalSystem.GetBlocksOfType(_assemblers, assembler => assembler.IsFunctional && assembler.IsSameConstructAs(Me));
+            GridTerminalSystem.GetBlocksOfType(_refineries, refinery => refinery.IsFunctional && refinery.IsSameConstructAs(Me));
+            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.IsSameConstructAs(Me));
+            GridTerminalSystem.GetBlocksOfType(_remoteControls, rc => rc.IsFunctional && rc.IsSameConstructAs(Me));
 
             var resources = new Dictionary<string, double>();
             var items = new List<MyInventoryItem>();
 
-            Action<IMyInventory> scanInventory = inventory =>
+            Action<IMyTerminalBlock> scanInventories = block =>
             {
-                if (inventory == null) return;
-                items.Clear();
-                inventory.GetItems(items);
-                foreach (var item in items)
+                for (int index = 0; index < block.InventoryCount; index++)
                 {
-                    var itemName = GetResourceKey(item.Type);
-                    var amount = (double)item.Amount;
-                    if (resources.ContainsKey(itemName))
-                        resources[itemName] += amount;
-                    else
-                        resources.Add(itemName, amount);
+                    var inventory = block.GetInventory(index);
+                    if (inventory == null)
+                        continue;
+                    items.Clear();
+                    inventory.GetItems(items);
+                    foreach (var item in items)
+                    {
+                        var itemName = GetResourceKey(item.Type);
+                        double previous;
+                        resources.TryGetValue(itemName, out previous);
+                        resources[itemName] = previous + (double)item.Amount;
+                    }
                 }
             };
 
-            foreach (var container in _containers) scanInventory(container.GetInventory());
-            foreach (var assembler in _assemblers) scanInventory(assembler.GetInventory());
-            foreach (var refinery in _refineries) scanInventory(refinery.GetInventory());
-            foreach (var cockpit in _cockpits) scanInventory(cockpit.GetInventory());
-            foreach (var rc in _remoteControls) scanInventory(rc.GetInventory());
+            foreach (var container in _containers) scanInventories(container);
+            foreach (var assembler in _assemblers) scanInventories(assembler);
+            foreach (var refinery in _refineries) scanInventories(refinery);
+            foreach (var cockpit in _cockpits) scanInventories(cockpit);
+            foreach (var rc in _remoteControls) scanInventories(rc);
 
             Echo($"Cargo containers: {_containers.Count}, Assemblers: {_assemblers.Count}, Refineries: {_refineries.Count}, Cockpits: {_cockpits.Count}, Remote controls: {_remoteControls.Count}");
             foreach (var resource in resources)
@@ -205,7 +208,7 @@ namespace SpaceEngineers.Apps.Amn
             if (parts.Length == 3 && string.Equals(parts[0], "set", StringComparison.OrdinalIgnoreCase))
             {
                 double minimum;
-                if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) || minimum < 0)
+                if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) || double.IsNaN(minimum) || double.IsInfinity(minimum) || minimum < 0)
                 {
                     Echo("Usage: set Component/SteelPlate 500");
                     return;
@@ -282,7 +285,7 @@ namespace SpaceEngineers.Apps.Amn
                 double minimum;
                 var key = minimumLine.Substring(0, separator).Trim();
                 var value = minimumLine.Substring(separator + 1).Trim();
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) && minimum >= 0)
+                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) && !double.IsInfinity(minimum) && minimum >= 0)
                     _minimums[key] = minimum;
             }
         }
@@ -311,7 +314,7 @@ namespace SpaceEngineers.Apps.Amn
         private void UpdateCockpitPanel(Dictionary<string, double> resources)
         {
             _cockpits.Clear();
-            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional);
+            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.IsSameConstructAs(Me));
 
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
             if (cockpit == null || cockpit.SurfaceCount == 0)

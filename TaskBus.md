@@ -45,6 +45,10 @@ grid. On the worker, run `group MiningFleet`. Use a resource such as
 `Ore/Iron` in the base cargo and set a threshold with `set Ore/Iron 100`
 on AMN.
 
+AMN counts all inventory slots of functional cargo containers, assemblers,
+refineries, cockpits and remote controls on the base construct. Cargo on a
+ship attached only by a connector is outside that inventory scope.
+
 1. Start below the threshold. Run `status` on the broker and record the task
    ID. Leave the shortage in place through a publication retry. The worker
    should retain the same task ID and the broker should show one open task.
@@ -63,6 +67,11 @@ on AMN.
    above the minimum and let AMN scan it, then lower it again. Re-enable the
    broker and watch AMN retry cancellation. The broker should close the old
    request and receive a new request ID if the stock is still below minimum.
+
+5. Verify the inventory boundary. Leave only a docked ship's cargo above the
+   selected minimum and confirm the base still requests the resource. Place
+   the same resource in a base assembler or refinery output inventory and
+   confirm AMN counts it toward the minimum.
 
 Record task IDs, lease epochs and any block errors. Use separate runs for the
 workflow, lease-expiry and cancellation checks so their state is easy to
