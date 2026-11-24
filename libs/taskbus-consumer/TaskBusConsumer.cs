@@ -968,6 +968,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (IsAutomaticPoint && expected == "mine" && _readMiningBuffer != null &&
+                _oreSite != null && _oreApproach != null)
+            {
+                var resource = GetRequestedResource();
+                if (resource != null && resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                    !AddOrUpdateKnownSite(resource, _oreSite, _oreApproach))
+                    _echo("Known-site catalog is full. Completed mining will still advance.");
+            }
+
             _stageIndex++;
             _childState = null;
             _completedChildRequest = null;

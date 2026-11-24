@@ -56,29 +56,40 @@ namespace TaskBus.Tests
         }
 
         [Fact]
-        public void AutomaticPointDispatchesHaulerOnlyWithCompletedMiningAndEnoughBufferStock()
+        public void AutomaticPointRemembersMinedSiteAndDispatchesHaulerOnlyWithEnoughBufferStock()
         {
+            string storage = "";
             double? stock = 100;
             var sent = new List<string>();
-            var point = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { }, _ => { },
-                42, "Point", 1, readMiningBuffer: resource => resource == "Ore/Iron" ? stock : null);
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message), () => storage,
+                value => storage = value, _ => { }, 42, "Point", 1,
+                readMiningBuffer: resource => resource == "Ore/Iron" ? stock : null, autoAcceptSurvey: true);
+            var point = Start();
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
                 "{\"task_id\":\"parent\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\"," +
-                "\"amount\":100,\"steps\":[\"mine\",\"transport\"]}}", targetId: 42);
+                "\"amount\":100,\"steps\":[\"survey\",\"mine\",\"transport\"]}}", targetId: 42);
             point.ProcessIncomingMessage(1, assignment);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:1:0\",\"state\":\"DONE\",\"survey_report\":" +
+                "\"1 positive sample. GPS:Iron:10:20:30: | GPS:Observation:10:20:60:\"}", targetId: 42));
             point.Tick();
             Assert.Contains("Stage: mine", point.GetStatus());
+            Assert.DoesNotContain("KNOWN_SITE|", storage);
             stock = 99;
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
-                "{\"request_id\":\"parent:1:0\",\"state\":\"DONE\"}", targetId: 42));
+                "{\"request_id\":\"parent:1:1\",\"state\":\"DONE\"}", targetId: 42));
             point.Tick();
             point.ProcessCommand("stage mine");
             Assert.Contains("Stage: mine", point.GetStatus());
+            Assert.DoesNotContain("KNOWN_SITE|", storage);
 
             stock = 100;
             point.Tick();
+            Assert.Contains("KNOWN_SITE|", storage);
+            point = Start();
+            point.ProcessIncomingMessage(1, assignment);
             Assert.Contains("Stage: transport", point.GetStatus());
             point.Tick();
             Assert.Contains("\"group_id\":\"Haulers\"", sent[sent.Count - 1]);

@@ -261,7 +261,10 @@ in the point PB's Custom Data to configure the radius in metres. The
 default is 5000 m, measured from the point grid origin. If no entry
 qualifies or the origin is unavailable, the point starts a survey. Use `site forget GPS:Iron:X:Y:Z:` to remove one
 depleted deposit by its ore GPS, or `site forget Ore/Iron` to remove all
-entries for that ore.
+entries for that ore. When the mining child completes and a configured
+buffer confirms the requested ore amount, the point also saves the
+deposit and approach that it used. A full catalog leaves transport
+dispatch available.
 To seed it from an already verified deposit, run
 `site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:` on the automatic
 mining point. Supply both the ore and its distinct, reviewed entry
