@@ -110,6 +110,8 @@ namespace SpaceEngineers.Apps.Platform
         private bool _autoSample;
         private bool _surveySweep;
         private bool _reportOnSweepCompletion;
+        private bool _bracketOnSweepCompletion;
+        private readonly double _automaticBracketGap;
         private readonly double _automaticSurveySpacing;
         private readonly Vector3D _automaticSurveyCenter;
         private readonly double _asteroidScanRange;
@@ -137,6 +139,9 @@ namespace SpaceEngineers.Apps.Platform
             if (automaticSurvey != null &&
                 !TryReadSurveyPlan(automaticSurvey, out _automaticSurveySpacing, out _automaticSurveyCenter))
                 Echo("Use SurveyAutoSweep=<10 to 500 metres> GPS:Center:X:Y:Z:.");
+            var automaticBracket = ReadSetting("SurveyAutoBracketGap=");
+            if (automaticBracket != null && !TryReadBracketGap(automaticBracket, out _automaticBracketGap))
+                Echo("SurveyAutoBracketGap must be between 20 and 500 m.");
             var clearanceSetting = ReadSetting("SurveyClearanceRadius=");
             if (clearanceSetting != null)
             {
@@ -990,7 +995,7 @@ namespace SpaceEngineers.Apps.Platform
                 if (!PlanAsteroidSurvey(ore, lease))
                     return;
             }
-            BeginSurveySweep(reportOnCompletion: true);
+            BeginSurveySweep(reportOnCompletion: true, bracketOnCompletion: _automaticBracketGap > 0);
         }
 
         private void PlanSurveyGrid(IMyShipController controller, double spacing, Vector3D center)
@@ -1149,24 +1154,41 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Unvisited points: " + _surveyPlan.Count + ". Review terrain and approach clearance.");
         }
 
+        private static bool TryReadBracketGap(string argument, out double maxGap)
+        {
+            double gap;
+            maxGap = 0;
+            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out gap) ||
+                !(gap >= 2 * MinimumViewSeparation && gap <= 500))
+                return false;
+            maxGap = gap;
+            return true;
+        }
+
         private void PlanSurveyBrackets(string argument)
         {
             double maxGap;
-            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out maxGap) ||
-                !(maxGap >= 2 * MinimumViewSeparation && maxGap <= 500))
+            if (!TryReadBracketGap(argument, out maxGap))
             {
                 Echo("Use ore bracket <maximum sample gap in metres, 20 to 500>.");
                 return;
             }
-            if (FindSurveyPlanningController() == null)
-                return;
+            if (FindSurveyPlanningController() != null && TryPlanSurveyBrackets(maxGap))
+                Echo("Review terrain and approach clearance before running ore sweep.");
+        }
+
+        private bool TryPlanSurveyBrackets(double maxGap)
+        {
+            int maxPoints = Math.Min(MaxSurveyPlanPoints, MaxSurveyViews - _surveyViews.Count);
+            if (maxPoints <= 0)
+                return false;
             var remote = FindSurveyRemote();
             var detector = GridTerminalSystem.GetBlockWithName(DetectorName) as IMyOreDetector;
             if (remote == null || remote.IsAutoPilotEnabled || detector == null ||
                 detector.CubeGrid != Me.CubeGrid || !detector.IsWorking)
             {
                 Echo("Bracketing requires a working local detector and an idle survey remote.");
-                return;
+                return false;
             }
 
             var noReports = new List<Vector3D>();
@@ -1199,21 +1221,21 @@ namespace SpaceEngineers.Apps.Platform
                 if (IsNearPlannedSurveyPosition(waypoint, planned))
                     continue;
                 planned.Add(waypoint);
-                if (planned.Count == MaxSurveyPlanPoints)
+                if (planned.Count == maxPoints)
                     break;
             }
 
             if (planned.Count == 0)
             {
                 Echo("No new midpoint between opposite detector readings within the selected gap.");
-                return;
+                return false;
             }
             _surveyPlan.Clear();
             _surveyPlan.AddRange(planned);
             SaveSurvey();
             for (int i = 0; i < _surveyPlan.Count; i++)
                 Echo(FormatSurveyGps("Ore bracket " + (i + 1), _surveyPlan[i]));
-            Echo("Review terrain and approach clearance before running ore sweep.");
+            return true;
         }
 
         private static bool IsNearPlannedSurveyPosition(Vector3D position, List<Vector3D> plan)
@@ -1773,7 +1795,7 @@ namespace SpaceEngineers.Apps.Platform
                 (!_platformMiningRetreat || (remote.GetShipSpeed() <= 1.5 && CheckMiningLane(x, y, z)));
         }
 
-        private void BeginSurveySweep(bool reportOnCompletion)
+        private void BeginSurveySweep(bool reportOnCompletion, bool bracketOnCompletion = false)
         {
             if (_surveySweep || _surveyLease == null || !SurveyLeaseIsCurrent() ||
                 _surveyPlan.Count == 0 || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null)
@@ -1789,6 +1811,7 @@ namespace SpaceEngineers.Apps.Platform
             _sweepScanTicks = 0;
             _sweepClearanceIndex = 0;
             _reportOnSweepCompletion = reportOnCompletion;
+            _bracketOnSweepCompletion = bracketOnCompletion;
             _surveySweep = true;
         }
 
@@ -1805,6 +1828,12 @@ namespace SpaceEngineers.Apps.Platform
             if (_surveyPlan.Count == 0)
             {
                 _surveySweep = false;
+                if (_bracketOnSweepCompletion && TryPlanSurveyBrackets(_automaticBracketGap))
+                {
+                    BeginSurveySweep(reportOnCompletion: true);
+                    _lastProbe = "Automatic survey is refining the boundary between detector observations.";
+                    return;
+                }
                 if (_reportOnSweepCompletion)
                     SubmitOreSurvey();
                 else
