@@ -132,7 +132,9 @@ engaging. The controller starts off after compilation or reload.
 
 - `normal` enables assisted flight with six-direction thrust, a 10% thrust
   margin when possible, and support and braking checks. The default braking
-  budget is 50 m per local axis. It does not measure distance to terrain.
+  budget is 50 m per local axis. Set a different budget with `brake <metres>`
+  (1–500). FCS keeps the selected budget across recompile and restart. The
+  value is a flight model input. FCS does not measure the distance to terrain.
 - `manual` gives active pilot axes priority and leaves safety findings as
   warnings. Release an axis to let FCS damp its unwanted motion.
 - `aero on` enables experimental external-force estimation for free-flight
@@ -154,7 +156,7 @@ to show live flight status there. The panel refreshes while FCS is active
 and shows the reason when FCS releases control.
 
 The FCS status shows speed and the highest stopping-distance estimate across
-the cockpit's local X, Y and Z axes. Compare it with the 50 m braking budget.
+the cockpit's local X, Y and Z axes alongside the selected braking budget.
 The estimate assumes current orientation, effective thrust and estimated
 external acceleration on that axis. In-game trials should compare the
 estimate with measured stopping distance at several loads and orientations.

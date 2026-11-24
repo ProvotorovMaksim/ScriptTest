@@ -13,6 +13,9 @@ namespace SpaceEngineers.Apps.FlightControl
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
         private const string StatusPanelName = "[FCS STATUS]";
         private const int StatusPanelInterval = 15;
+        private const double DefaultBrakingDistance = 50;
+        private const double MinimumBrakingDistance = 1;
+        private const double MaximumBrakingDistance = 500;
         private IMyTextPanel statusPanel;
         private int statusPanelTicks;
         private IMyCockpit cockpit;
@@ -20,6 +23,13 @@ namespace SpaceEngineers.Apps.FlightControl
         private bool previousDampeners;
         private Mode mode;
         private string status = "FCS off. Commands: normal, manual, off, status.";
+
+        public Program()
+        {
+            double distance;
+            if (TryReadBrakingDistance(Storage, out distance))
+                flight.BrakingDistance = distance;
+        }
 
         public void Main(string argument, UpdateType source)
         {
@@ -36,6 +46,10 @@ namespace SpaceEngineers.Apps.FlightControl
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
                     return;
                 case "off": Release("FCS off."); break;
+                default:
+                    if (command.StartsWith("brake ", StringComparison.Ordinal))
+                        SetBrakingDistance(command.Substring(6));
+                    break;
             }
 
             if (mode != Mode.Off && (source & UpdateType.Update1) != 0)
@@ -60,6 +74,26 @@ namespace SpaceEngineers.Apps.FlightControl
             bool refreshPanel = command.Length != 0 || (source & UpdateType.Update1) == 0;
             if (refreshPanel || previousMode != mode || (statusPanel != null && ++statusPanelTicks >= StatusPanelInterval))
                 WriteStatusPanel(refreshPanel);
+        }
+
+        private void SetBrakingDistance(string argument)
+        {
+            double distance;
+            if (!TryReadBrakingDistance(argument, out distance))
+            {
+                Echo("Usage: brake <distance in metres, 1 to 500>.");
+                return;
+            }
+            flight.BrakingDistance = distance;
+            Storage = distance.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            Echo("Braking distance budget: " + Storage + " m per axis.");
+        }
+
+        private static bool TryReadBrakingDistance(string text, out double distance)
+        {
+            return double.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out distance) &&
+                distance >= MinimumBrakingDistance && distance <= MaximumBrakingDistance;
         }
 
         private void WriteStatusPanel(bool refreshPanel)
@@ -179,7 +213,7 @@ namespace SpaceEngineers.Apps.FlightControl
         {
             private const double DeadZone = 0.03;
             private const double Acceleration = 5;
-            private const double BrakingDistance = 50;
+            public double BrakingDistance { get; set; } = DefaultBrakingDistance;
             private const double GyroLimit = 1.2;
             private const double ThrustReserve = 0.10;
             private const double LiftAccelerationReserve = 1.0;
@@ -359,6 +393,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nSpeed: " + Math.Round(localVelocity.Length(), 1) + " m/s" +
                     "\nMax axis stopping estimate (" + "XYZ"[limitingAxis] + "): " +
                     (double.IsPositiveInfinity(longestStop) ? "unavailable" : Math.Round(longestStop, 1) + " m") +
+                    "\nBraking distance budget: " + BrakingDistance + " m per axis" +
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
