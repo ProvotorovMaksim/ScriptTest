@@ -14,6 +14,8 @@ namespace SpaceEngineers.Services.Galnet
         private const int AdvertiseEvery = 12;
         private const int LinkLifetime = 48;
         private const int AdvertisementLifetime = 72;
+        private const int LaserRetryTicks = 60;
+        private readonly Dictionary<string, string> _lasers = new Dictionary<string, string>();
         private const int MaxHops = 8;
         private readonly Dictionary<long, long> _peers = new Dictionary<long, long>();
         private readonly GalnetTopology _topology = new GalnetTopology();
@@ -54,6 +56,22 @@ namespace SpaceEngineers.Services.Galnet
                 else if (_peers.Count < 32 && long.TryParse(line, out peer) && peer != 0 && peer != Me.EntityId)
                     _peers[peer] = -LinkLifetime;
             }
+            foreach (var line in Me.CustomData.Split('\n'))
+            {
+                if (!line.StartsWith("Laser=", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                int delimiter = line.IndexOf('|', 6);
+                if (delimiter < 7 || _lasers.Count >= 16)
+                    continue;
+                var name = line.Substring(6, delimiter - 6).Trim();
+                var gps = line.Substring(delimiter + 1).Trim();
+                string label;
+                double x;
+                double y;
+                double z;
+                if (name.Length != 0 && TaskBusIgcHelper.TryReadOreGps(gps, out label, out x, out y, out z))
+                    _lasers[name] = gps;
+            }
             SaveConfiguration();
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
         }
@@ -63,6 +81,9 @@ namespace SpaceEngineers.Services.Galnet
             bool periodic = (source & UpdateType.Update10) != 0;
             if (periodic)
                 _tick++;
+
+            if (periodic && _tick % LaserRetryTicks == 1)
+                ReconnectLasers();
 
             var listener = IGC.UnicastListener;
             for (int processed = 0; processed < 32 && listener.HasPendingMessage; processed++)
@@ -91,6 +112,14 @@ namespace SpaceEngineers.Services.Galnet
             var command = (argument ?? "").Trim();
             if (command.StartsWith("peer ", StringComparison.OrdinalIgnoreCase))
                 ChangePeer(command);
+            else if (string.Equals(command, "laser status", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var configured in _lasers)
+                {
+                    var antenna = FindLaser(configured.Key);
+                    Echo(configured.Key + ": " + (antenna == null ? "not found" : antenna.Status.ToString()));
+                }
+            }
             else if (command.StartsWith("send ", StringComparison.OrdinalIgnoreCase))
                 QueueMessage("DATA", command.Substring(5), 255);
             else if (command.StartsWith("app ", StringComparison.OrdinalIgnoreCase))
@@ -110,6 +139,31 @@ namespace SpaceEngineers.Services.Galnet
             Echo("Pending: " + _outbox.Count + " | " + _lastDelivery);
             foreach (var peer in _peers)
                 Echo(peer.Key + (IsLive(peer.Key) ? " online" : " offline"));
+        }
+
+        private IMyLaserAntenna FindLaser(string name)
+        {
+            var antenna = GridTerminalSystem.GetBlockWithName(name) as IMyLaserAntenna;
+            return antenna != null && antenna.CubeGrid == Me.CubeGrid ? antenna : null;
+        }
+
+        private void ReconnectLasers()
+        {
+            foreach (var configured in _lasers)
+            {
+                try
+                {
+                    var antenna = FindLaser(configured.Key);
+                    if (antenna == null || !antenna.IsWorking || antenna.Status != MyLaserAntennaStatus.Idle)
+                        continue;
+                    antenna.SetTargetCoords(configured.Value);
+                    antenna.Connect();
+                }
+                catch (Exception error)
+                {
+                    Echo(configured.Key + ": reconnect failed. " + error.Message);
+                }
+            }
         }
 
         private bool IsLive(long peer)

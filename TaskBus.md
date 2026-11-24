@@ -95,7 +95,14 @@ and recompile. Run `broker <TaskBroker PB ID>` on the worker while idle.
 The worker queues responses until its next invocation. The local bridge
 uses memory queues, with task checkpoints and completion recovery still
 owned by TaskBus. Direct IGC is used when no relay ID is configured.
-Other application bridges and explicit laser link control are separate work.
+Other application bridges are separate work.
+
+For a stationary laser link, add a line such as
+`Laser=Laser A|GPS:Peer:1:2:3:` to the relay Custom Data and recompile.
+Use the exact local antenna name and the remote antenna coordinates.
+The relay retries idle antennas every 60 Update10 calls while leaving
+active connections alone. `laser status` shows configured antenna states.
+Configure logical peers separately. Verify real link recovery in game.
 
 ### Select a broker
 

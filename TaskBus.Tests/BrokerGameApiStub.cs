@@ -5,6 +5,16 @@ namespace Sandbox.ModAPI.Ingame
 {
     public enum UpdateType { Update10 = 1, Terminal = 2 }
     public enum UpdateFrequency { Update10 }
+    public enum MyLaserAntennaStatus { Idle, Connected }
+    public interface IMyLaserAntenna
+    {
+        long CubeGrid { get; }
+        bool IsWorking { get; }
+        MyLaserAntennaStatus Status { get; }
+        void SetTargetCoords(string gps);
+        void Connect();
+    }
+
     public enum TransmissionDistance { TransmissionDistanceMax }
 
     public interface IMyRadioAntenna
@@ -60,8 +70,9 @@ namespace Sandbox.ModAPI.Ingame
     {
         public IMyProgrammableBlock Application;
         public IMyProgrammableBlock Relay;
+        public IMyLaserAntenna Laser;
         public object GetBlockWithName(string name) =>
-            name == "[GALNET APP]" ? Application : name == "[GALNET RELAY]" ? Relay : null;
+            name == "[GALNET APP]" ? Application : name == "[GALNET RELAY]" ? Relay : name == "Laser A" ? Laser : null;
 
         private sealed class Antenna : IMyRadioAntenna
         {
@@ -82,10 +93,13 @@ namespace Sandbox.ModAPI.Ingame
         public static string StorageAtStartup;
         [ThreadStatic]
         public static long EntityIdAtStartup;
+        [ThreadStatic]
+        public static string CustomDataAtStartup;
 
         public TestRadio IGC { get; } = new();
         public TestTerminal GridTerminalSystem { get; } = new();
-        public (long EntityId, string Name, long CubeGrid) Me { get; } = (EntityIdAtStartup == 0 ? 1 : EntityIdAtStartup, "Test node", 1);
+        public (long EntityId, string Name, long CubeGrid, string CustomData) Me { get; } =
+            (EntityIdAtStartup == 0 ? 1 : EntityIdAtStartup, "Test node", 1, CustomDataAtStartup ?? "");
         public TestRuntime Runtime { get; } = new();
         public string Storage { get; set; } = StorageAtStartup;
         public List<string> Output { get; } = new();

@@ -226,6 +226,42 @@ namespace TaskBus.Tests
             public bool TryRun(string command) => _run(command);
         }
 
+        [Fact]
+        public void ConfiguredLaserReconnectsOnlyWhileIdle()
+        {
+            MyGridProgram.CustomDataAtStartup = "Laser=Laser A|GPS:Peer:1:2:3:";
+            Relay relay;
+            try { relay = Start(4, "0"); }
+            finally { MyGridProgram.CustomDataAtStartup = null; }
+            var laser = new TestLaser();
+            relay.GridTerminalSystem.Laser = laser;
+            relay.Main("", UpdateType.Update10);
+            Assert.Equal(1, laser.Connects);
+            Assert.Equal("GPS:Peer:1:2:3:", laser.Target);
+
+            laser.State = MyLaserAntennaStatus.Connected;
+            for (int tick = 0; tick < 60; tick++)
+                relay.Main("", UpdateType.Update10);
+            Assert.Equal(1, laser.Connects);
+
+            laser.State = MyLaserAntennaStatus.Idle;
+            for (int tick = 0; tick < 60; tick++)
+                relay.Main("", UpdateType.Update10);
+            Assert.Equal(2, laser.Connects);
+        }
+
+        private sealed class TestLaser : IMyLaserAntenna
+        {
+            public long CubeGrid => 1;
+            public bool IsWorking => true;
+            public MyLaserAntennaStatus Status => State;
+            public MyLaserAntennaStatus State;
+            public int Connects;
+            public string Target;
+            public void SetTargetCoords(string gps) => Target = gps;
+            public void Connect() => Connects++;
+        }
+
         private static Relay Start(long id, string storage)
         {
             MyGridProgram.EntityIdAtStartup = id;
