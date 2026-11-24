@@ -104,17 +104,27 @@ namespace SpaceEngineers.Apps.Amn
                     Echo("Dispatch group: " + DispatchGroup);
                 }
             }
+            bool retryBrokerRequests = false;
             if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
             {
+                const string restoredCommand = "broker restored ";
+                bool restored = command.StartsWith(restoredCommand, StringComparison.OrdinalIgnoreCase);
                 long brokerId;
-                if (!long.TryParse(command.Substring(7).Trim(), out brokerId) || brokerId < 0)
-                    Echo("Usage: broker <block ID>, or broker 0 for broadcast.");
-                else if (_requestIds.Count != 0)
-                    Echo("Change broker only after open requests and cancellations are resolved.");
-                else
+                if (!long.TryParse(command.Substring(restored ? restoredCommand.Length : 7).Trim(), out brokerId) ||
+                    brokerId < 0 || (restored && brokerId == 0))
+                    Echo("Usage: broker <block ID>, broker 0, or broker restored <block ID>.");
+                else if (brokerId != _brokerId)
                 {
+                    if (!restored && _requestIds.Count != 0)
+                    {
+                        Echo("Resolve open requests before switching, or use broker restored for a restored queue.");
+                        return;
+                    }
+                    _galnet.DiscardPendingSends();
                     _brokerId = brokerId;
                     SaveMinimums();
+                    retryBrokerRequests = true;
+                    Echo("Broker selected: " + brokerId);
                 }
             }
             if (command.StartsWith("set ", StringComparison.OrdinalIgnoreCase) ||
@@ -196,7 +206,7 @@ namespace SpaceEngineers.Apps.Amn
             foreach (var resource in resources)
                 Echo($"{resource.Key}: {resource.Value:0.##}");
 
-            UpdateMinimumTasks(resources);
+            UpdateMinimumTasks(resources, retryBrokerRequests);
             UpdateCockpitPanel(resources);
             _galnet.Flush();
 
@@ -531,8 +541,9 @@ namespace SpaceEngineers.Apps.Amn
             surface.WriteText(display.ToString());
         }
 
-        private void UpdateMinimumTasks(Dictionary<string, double> resources)
+        private void UpdateMinimumTasks(Dictionary<string, double> resources, bool retryBrokerRequests)
         {
+            bool retryOutstanding = retryBrokerRequests || _tickCount % 60 == 1;
             var currentLowResources = new HashSet<string>();
             var stateChanged = false;
             var newClears = new HashSet<string>();
@@ -558,7 +569,7 @@ namespace SpaceEngineers.Apps.Amn
                         SaveMinimums();
                     }
 
-                    if (createdRequest || _tickCount % 60 == 1)
+                    if (createdRequest || retryOutstanding)
                         SendResourceRequest(minimum.Key, current, minimum.Value, requestId);
                 }
                 else
@@ -569,7 +580,7 @@ namespace SpaceEngineers.Apps.Amn
 
                     if (_dispatchToPoint)
                     {
-                        if (_lowResources.Contains(minimum.Key) || _tickCount % 60 == 1)
+                        if (_lowResources.Contains(minimum.Key) || retryOutstanding)
                             SendMessage("TASK_QUERY", "{\"request_id\":" +
                                 TaskBusIgcHelper.ToJsonString(requestId) + ",\"stock\":" +
                                 current.ToString("R", CultureInfo.InvariantCulture) + "}", _brokerId);
@@ -589,7 +600,7 @@ namespace SpaceEngineers.Apps.Amn
             if (stateChanged)
                 SaveMinimums();
 
-            var clearsToSend = _tickCount % 60 == 1 ? _pendingResourceClears : newClears;
+            var clearsToSend = retryOutstanding ? _pendingResourceClears : newClears;
             foreach (var resource in clearsToSend)
                 SendResourceClear(resource);
         }

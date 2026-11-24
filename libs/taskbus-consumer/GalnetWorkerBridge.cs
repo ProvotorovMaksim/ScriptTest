@@ -73,6 +73,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
+        public void DiscardPendingSends()
+        {
+            _outbox.Clear();
+        }
+
         public void Flush()
         {
             if (_outbox.Count == 0)
