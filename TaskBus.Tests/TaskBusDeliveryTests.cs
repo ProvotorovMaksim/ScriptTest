@@ -213,6 +213,83 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void TransportClosesOnlyAfterBaseStockAndActualHaulerCompletion()
+        {
+            var broker = StartBroker("");
+            var pointPackets = new Queue<string>();
+            var haulerPackets = new Queue<string>();
+            var point = new TaskBusConsumer((message, _) => pointPackets.Enqueue(message),
+                () => "", _ => { }, _ => { }, 40, "Point", 1, gridId: 500);
+            double cargo = 50;
+            long dock = 500;
+            var hauler = new TaskBusConsumer((message, _) => haulerPackets.Enqueue(message),
+                () => "", _ => { }, _ => { }, 42, "Hauler", 1, readHaulerCargo: _ => cargo,
+                readDockedGrid: () => dock, autoHauler: true);
+            point.ProcessCommand("broker 1");
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            hauler.ProcessCommand("broker 1");
+            hauler.ProcessCommand("group Haulers");
+
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"resource\":\"Ore/Iron\",\"amount\":50,\"minimum\":100," +
+                "\"group_id\":\"MiningPoints\",\"base_grid_id\":600,\"receipt_required\":true," +
+                "\"steps\":[\"transport\"]}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            point.Tick();
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_ASSIGN"));
+            Dispatch(broker, 40, pointPackets.Dequeue());
+
+            point.Tick();
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_ASSIGN"));
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_PUBLISHED_ACK"));
+            Dispatch(broker, 40, pointPackets.Dequeue());
+
+            hauler.Tick();
+            DeliverToWorker(hauler, Exchange(42, haulerPackets, "TASK_ASSIGN"));
+            Dispatch(broker, 42, haulerPackets.Dequeue());
+            hauler.Tick();
+            DeliverToWorker(hauler, Exchange(42, haulerPackets, "TASK_ASSIGN"));
+            Dispatch(broker, 42, haulerPackets.Dequeue());
+            Assert.Contains("Stage: deliver", hauler.GetStatus());
+
+            var stock = TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"parent\",\"stock\":100}", targetId: 1);
+            Dispatch(broker, 9, stock);
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            point.Tick();
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_ASSIGN"));
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_PUBLISHED_ACK"));
+            Dispatch(broker, 40, pointPackets.Dequeue());
+            Assert.Contains("Base stock confirmed", point.GetStatus());
+            Assert.Contains("Pending completion: none", point.GetStatus());
+
+            dock = 600;
+            cargo = 0;
+            hauler.Tick();
+            Exchange(42, haulerPackets, "TASK_ASSIGN");
+            DeliverToWorker(hauler, Exchange(42, haulerPackets, "TASK_DONE_ACK"));
+
+            point.Tick();
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_ASSIGN"));
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_PUBLISHED_ACK"));
+            Dispatch(broker, 40, pointPackets.Dequeue());
+            point.Tick();
+            Exchange(40, pointPackets, "TASK_ASSIGN");
+            DeliverToWorker(point, Exchange(40, pointPackets, "TASK_DONE_ACK"));
+
+            Dispatch(broker, 9, stock);
+            Assert.Contains("\"state\":\"DONE\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
+            Assert.DoesNotContain("TASK|", broker.Storage);
+
+            TaskBusEnvelope Exchange(long sender, Queue<string> packets, string response)
+            {
+                Dispatch(broker, sender, packets.Dequeue());
+                return TakeResponse(broker, response, sender);
+            }
+        }
+
+        [Fact]
         public void BaseStockConfirmationSurvivesReloadAndRequiresOriginalRequester()
         {
             var broker = StartBroker("");
