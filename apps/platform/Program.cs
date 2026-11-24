@@ -25,6 +25,7 @@ namespace SpaceEngineers.Apps.Platform
         private const double OreSampleWaitSeconds = 4;
         private const double MinimumViewSeparation = 10;
         private const int MaxSurveyViews = 64;
+        private const int MaxOreHits = 256;
         private readonly List<Vector3D> _surveyViews = new List<Vector3D>();
         private readonly HashSet<Vector3D> _oreHits = new HashSet<Vector3D>();
         private IMyOreDetector _sampleDetector;
@@ -77,6 +78,8 @@ namespace SpaceEngineers.Apps.Platform
                 BeginOreSurvey(command.Substring(11).Trim());
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
                 ScheduleOreSample();
+            else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
+                ShowOreBounds();
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
@@ -105,6 +108,37 @@ namespace SpaceEngineers.Apps.Platform
             _positiveViews = 0;
             _sampleDetector = null;
             _lastProbe = "Survey started. Move to a survey position and run ore sample.";
+        }
+
+        private void ShowOreBounds()
+        {
+            if (_oreHits.Count == 0)
+            {
+                Echo("No ore positions reported. Survey coverage unknown.");
+                return;
+            }
+
+            var min = new Vector3D(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
+            var max = new Vector3D(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
+            foreach (var hit in _oreHits)
+            {
+                min = Vector3D.Min(min, hit);
+                max = Vector3D.Max(max, hit);
+            }
+
+            Echo("Observed " + _surveyOre + " coordinate bounds (" + _oreHits.Count + " distinct positions):");
+            Echo(FormatSurveyGps("Observed minimum", min));
+            Echo(FormatSurveyGps("Observed maximum", max));
+            Echo("Box corners are reference points. Coverage between and beyond reports is unknown.");
+            if (_oreHits.Count >= MaxOreHits)
+                Echo("Observation limit reached. The box may omit additional reports.");
+        }
+
+        private static string FormatSurveyGps(string label, Vector3D position)
+        {
+            var culture = CultureInfo.InvariantCulture;
+            return "GPS:" + label + ":" + position.X.ToString("R", culture) + ":" +
+                position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
         }
 
         private void ScheduleOreSample()
@@ -175,7 +209,7 @@ namespace SpaceEngineers.Apps.Platform
                         string.Equals(ore, _surveyOre, StringComparison.OrdinalIgnoreCase))
                     {
                         hit = true;
-                        if (_oreHits.Count < 256) _oreHits.Add(new Vector3D(x, y, z));
+                        if (_oreHits.Count < MaxOreHits) _oreHits.Add(new Vector3D(x, y, z));
                     }
                 }
                 _surveyViews.Add(_samplePosition);

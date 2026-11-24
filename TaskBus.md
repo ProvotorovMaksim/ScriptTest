@@ -215,6 +215,10 @@ Run `ore survey Iron`, move to the first observation position, and run
 least 10 m apart. The worker counts positive views and distinct GPS hits
 in memory. Empty readings are recorded as unknown coverage. This command
 does not infer that a repeated GPS hit is a fresh detector result.
+Run `ore bounds` to see GPS coordinates for the two corners of the
+axis-aligned box enclosing the distinct ore reports from this survey.
+These corners are for inspection. Coverage between and beyond the
+reports is unknown, and the bounds do not establish a flight corridor.
 
 ### Mining dispatch acceptance test
 
