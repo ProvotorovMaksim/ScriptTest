@@ -38,6 +38,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public string Name;
             public long Source;
             public long Expires;
+            public bool Assistance;
             public Vector3D Position;
         }
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
@@ -86,7 +87,7 @@ namespace SpaceEngineers.Apps.ShipLink
             var command = (argument ?? string.Empty).Trim();
             if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
             {
-                ReceiveContact(command);
+                ReceiveFleetMark(command);
                 return;
             }
 
@@ -141,6 +142,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 }
             }
 
+            else if (command.StartsWith("assist send ", StringComparison.OrdinalIgnoreCase))
+                SendAssistance(command.Substring(12).Trim());
             else if (command.StartsWith("contact ", StringComparison.OrdinalIgnoreCase))
                 SendContact(command.Substring(8));
 
@@ -228,15 +231,37 @@ namespace SpaceEngineers.Apps.ShipLink
                 Echo("Join a fleet and use contact <relay ID> GPS:Name:X:Y:Z:.");
                 return;
             }
-            var relay = FindGalnetRelay();
-            if (relay == null || target == relay.EntityId || !relay.TryRun(
-                "app " + target + " contact|" + (DateTime.UtcNow.Ticks + ContactLifetime) + "|" +
-                TaskBusIgcHelper.EncodeStorage(_fleetName) + "|" +
-                TaskBusIgcHelper.EncodeStorage(argument.Substring(delimiter + 1))))
-                Echo("Could not hand the contact to the local Galnet relay.");
+            SendFleetMark(target, "contact", argument.Substring(delimiter + 1));
         }
 
-        private void ReceiveContact(string command)
+        private void SendAssistance(string argument)
+        {
+            long target;
+            if (string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 ||
+                !long.TryParse(argument, out target) || target == 0)
+            {
+                Echo("Join a fleet and use assist send <relay ID>.");
+                return;
+            }
+
+            var position = Me.CubeGrid.GetPosition();
+            var culture = CultureInfo.InvariantCulture;
+            var gps = "GPS:Assistance:" + position.X.ToString("R", culture) + ":" +
+                position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
+            SendFleetMark(target, "assist", gps);
+        }
+
+        private void SendFleetMark(long target, string kind, string gps)
+        {
+            var relay = FindGalnetRelay();
+            if (relay == null || target == relay.EntityId || !relay.TryRun(
+                "app " + target + " " + kind + "|" + (DateTime.UtcNow.Ticks + ContactLifetime) + "|" +
+                TaskBusIgcHelper.EncodeStorage(_fleetName) + "|" +
+                TaskBusIgcHelper.EncodeStorage(gps)))
+                Echo("Could not hand the fleet report to the local Galnet relay.");
+        }
+
+        private void ReceiveFleetMark(string command)
         {
             if (string.IsNullOrEmpty(_fleetName) || FindGalnetRelay() == null)
                 return;
@@ -248,7 +273,7 @@ namespace SpaceEngineers.Apps.ShipLink
             var fields = envelope[4].Split('|');
             long expiry;
             long now = DateTime.UtcNow.Ticks;
-            if (fields.Length != 4 || fields[0] != "contact" ||
+            if (fields.Length != 4 || (fields[0] != "contact" && fields[0] != "assist") ||
                 !long.TryParse(fields[1], out expiry) || expiry <= now || expiry - now > ContactLifetime)
                 return;
             try
@@ -263,13 +288,15 @@ namespace SpaceEngineers.Apps.ShipLink
                     out name, out x, out y, out z) || name.Length > 64)
                     return;
 
+                bool assistance = fields[0] == "assist";
                 _contacts.RemoveAll(contact => contact.Expires <= now);
-                var existing = _contacts.FirstOrDefault(contact => contact.Source == source && contact.Name == name);
+                var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
+                    contact.Assistance == assistance && (assistance || contact.Name == name));
                 if (existing == null)
                 {
                     if (_contacts.Count >= MaxContacts)
                         return;
-                    existing = new FleetContact { Source = source, Name = name };
+                    existing = new FleetContact { Source = source, Name = name, Assistance = assistance };
                     _contacts.Add(existing);
                 }
                 else if (existing.Expires >= expiry)
@@ -506,11 +533,11 @@ namespace SpaceEngineers.Apps.ShipLink
             _contacts.RemoveAll(contact => contact.Expires <= DateTime.UtcNow.Ticks);
             if (_contacts.Count > 0)
             {
-                display.AppendLine("=== GAME CONTACTS ===");
-                foreach (var contact in _contacts.OrderByDescending(entry => entry.Expires).Take(8))
+                display.AppendLine("=== GALNET FLEET MARKS ===");
+                foreach (var contact in _contacts.OrderByDescending(entry => entry.Assistance).ThenByDescending(entry => entry.Expires).Take(8))
                 {
                     var point = contact.Position;
-                    display.AppendLine(contact.Name + " | relay " + contact.Source);
+                    display.AppendLine((contact.Assistance ? "[ASSIST] " : "") + contact.Name + " | relay " + contact.Source);
                     display.AppendLine("X/Y/Z: " + Math.Round(point.X, 1) + " / " +
                         Math.Round(point.Y, 1) + " / " + Math.Round(point.Z, 1));
                 }

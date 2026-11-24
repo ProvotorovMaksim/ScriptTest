@@ -317,6 +317,12 @@ on the sending ShipLink. The recipient display shows the sender relay and
 coordinates for up to 30 seconds from the send time. Fleet names filter the
 display and do not authenticate the sender.
 
+Use `assist send <recipient relay ID>` to send the current ship position
+as a one-time assistance request to a wingmate over Galnet. The receiver
+shows it above other Galnet marks with an `[ASSIST]` label. It expires
+30 seconds after sending, including time spent in a relay queue. The
+existing `assist on` and `assist off` commands control the radio heartbeat.
+
 ### Flight control PB
 
 `apps/fcs` is an opt-in cockpit flight controller. Copy the contents of
