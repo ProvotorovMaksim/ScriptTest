@@ -70,6 +70,11 @@ namespace SpaceEngineers.Apps.Amn
                     Echo(observation);
                 return;
             }
+            if (command.StartsWith("survey nearest ", StringComparison.OrdinalIgnoreCase))
+            {
+                FindNearbyOre(command.Substring(15).Trim());
+                return;
+            }
             if (string.Equals(command, "survey cancel", StringComparison.OrdinalIgnoreCase))
             {
                 _surveyOutbox.Clear();
@@ -339,6 +344,23 @@ namespace SpaceEngineers.Apps.Amn
                 SaveMinimums();
             Echo(available == 0 ? "No working detector exposes " + SurveyProperty + "." :
                 "New observations: " + added + ". Catalog: " + _oreObservations.Count + "/" + MaxOreObservations + ".");
+        }
+
+        private void FindNearbyOre(string argument)
+        {
+            int split = argument.LastIndexOf(' ');
+            double radius;
+            if (split < 1 || !double.TryParse(argument.Substring(split + 1), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out radius) || !(radius > 0) || double.IsInfinity(radius))
+            {
+                Echo("Usage: survey nearest <ore name> <radius in metres>.");
+                return;
+            }
+
+            var position = Me.CubeGrid.GetPosition();
+            var report = TaskBusIgcHelper.FindNearestOre(_oreObservations, argument.Substring(0, split).Trim(),
+                position.X, position.Y, position.Z, radius);
+            Echo(report ?? "No catalogued observation in range. Survey coverage unknown.");
         }
 
         private void QueueSurveyTransfer(string argument)

@@ -30,6 +30,16 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void NearestOreUsesResourceAndRadiusWithDeterministicTies()
+        {
+            var reports = new[] { "GPS:Iron:13:0:0:", "GPS:Nickel:10:0:0:",
+                "GPS:Iron:7:0:0:", "GPS:Iron:10:0:5:", "invalid" };
+            Assert.Equal("GPS:Iron:13:0:0:",
+                TaskBusIgcHelper.FindNearestOre(reports, "iron", 10, 0, 0, 3));
+            Assert.Null(TaskBusIgcHelper.FindNearestOre(reports, "Iron", 10, 0, 0, 2));
+        }
+
+        [Fact]
         public void CreateEnvelope_Basic_ReturnsValidJson()
         {
             var json = TaskBusProtocol.CreateEnvelope("TASK_PUBLISH", "{\"request_id\":\"abc\"}");

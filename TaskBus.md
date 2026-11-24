@@ -189,6 +189,11 @@ to show the parent task, current stage, lease and last broker state for the
 child request. The panel also shows when the local radio is unavailable.
 The resource amount shown is the requested amount.
 
+On an AMN grid with a saved ore catalog, run `survey nearest Iron 5000`
+to print the nearest stored Iron GPS within 5000 m of the grid. A missing
+result leaves survey coverage unknown. A stored observation supplies a
+candidate coordinate for verification at the site.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both

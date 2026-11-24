@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Collections.Generic;
 using System.Text;
 using SpaceEngineers.Libs.IgcCore;
 
@@ -67,6 +68,35 @@ namespace SpaceEngineers.Libs.IgcCore
                 TryParseFiniteNumber(raw, out value);
         }
         /// <summary>Reads a GPS survey report from an ore detector adapter.</summary>
+        public static string FindNearestOre(IEnumerable<string> observations, string ore,
+            double originX, double originY, double originZ, double radius)
+        {
+            string best = null;
+            double bestDistanceSquared = radius * radius;
+            foreach (var report in observations)
+            {
+                string name;
+                double x;
+                double y;
+                double z;
+                if (!TryReadOreGps(report, out name, out x, out y, out z) ||
+                    !string.Equals(name, ore, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                double dx = x - originX;
+                double dy = y - originY;
+                double dz = z - originZ;
+                double distanceSquared = dx * dx + dy * dy + dz * dz;
+                if (distanceSquared < bestDistanceSquared ||
+                    (distanceSquared == bestDistanceSquared && (best == null || string.CompareOrdinal(report, best) < 0)))
+                {
+                    best = report;
+                    bestDistanceSquared = distanceSquared;
+                }
+            }
+            return best;
+        }
+
         public static bool TryReadOreGps(string report, out string ore, out double x, out double y, out double z)
         {
             ore = null;
