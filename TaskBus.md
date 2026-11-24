@@ -792,7 +792,11 @@ successful connected pose and compare the guide readings at the stall with
 the same ship, berth and cargo load in a copy of the world without the
 physics mods. Capture the connector state, position and alignment errors,
 and which controller was active. Keep the guide in readout-only use during
-the comparison.
+the stock-autopilot comparison. During an FCS-controlled approach the guide
+also shows the last FCS update's actual and target speeds, measured and
+requested thrust in controller axes, the smallest force margin after
+reserve, and the modeled residual moment. These readings remain available
+after FCS releases the approach, until the next FCS docking attempt.
 
 Thrust allocation uses effective thrust and each engine's moment arm from the
 ship's measured center of mass. The PB reports the modeled residual moment.

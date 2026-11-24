@@ -361,6 +361,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 dockTicks = 0;
                 dockProgressTick = 0;
                 dockProgressDistance = double.PositiveInfinity;
+                flight.ResetDockTelemetry();
                 showDockGuide = true;
                 status = "FCS dock: checking final approach.";
             }
@@ -470,7 +471,8 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nBerth correction R/U/F: " + Math.Round(correction.X, 2) + " / " +
                     Math.Round(correction.Y, 2) + " / " + Math.Round(-correction.Z, 2) + " m" +
                     "\nForward/up alignment errors: " + Math.Round(angle, 1) + " / " +
-                    Math.Round(upError, 1) + " deg";
+                    Math.Round(upError, 1) + " deg" +
+                    flight.GetDockTelemetry();
             }
             catch (Exception)
             {
@@ -1033,6 +1035,36 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
+            private bool hasDockTelemetry;
+            private Vector3D dockMeasuredForce;
+            private Vector3D dockRequestedForce;
+            private Vector3D dockDesiredVelocity;
+            private double dockMeasuredSpeed;
+            private double dockThrustMargin;
+            private double? dockResidualMoment;
+
+            public void ResetDockTelemetry()
+            {
+                hasDockTelemetry = false;
+            }
+
+            public string GetDockTelemetry()
+            {
+                if (!hasDockTelemetry)
+                    return "";
+
+                return "\nDock speed actual/target: " + Math.Round(dockMeasuredSpeed, 2) + " / " +
+                    Math.Round(dockDesiredVelocity.Length(), 2) + " m/s" +
+                    "\nDock thrust XYZ actual: " + FormatDockForce(dockMeasuredForce) +
+                    "\nDock thrust XYZ target: " + FormatDockForce(dockRequestedForce) +
+                    "\nDock minimum thrust margin: " + Math.Round(dockThrustMargin) + " N" +
+                    "\nDock modeled moment: " +
+                    (dockResidualMoment.HasValue ? Math.Round(dockResidualMoment.Value) + " N m" : "unavailable");
+            }
+
+            private static string FormatDockForce(Vector3D force) =>
+                Math.Round(force.X) + " / " + Math.Round(force.Y) + " / " + Math.Round(force.Z) + " N";
+
             public void Approach(IMyShipController pilot, Vector3D velocity, Vector3D angularVelocity,
                 Vector3D desiredVelocity)
             {
@@ -1042,18 +1074,30 @@ namespace SpaceEngineers.Apps.FlightControl
                 if (mass <= 0)
                     throw new InvalidOperationException("ship mass unavailable");
 
-                thrust.Measure(frame, pilot.CenterOfMass, capacity);
+                dockMeasuredForce = thrust.Measure(frame, pilot.CenterOfMass, capacity);
                 var acceleration = (desiredVelocity - velocity) * 1.5;
                 var target = Vector3D.TransformNormal((acceleration - pilot.GetNaturalGravity()) * mass, toLocal);
+                dockRequestedForce = target;
+                dockDesiredVelocity = desiredVelocity;
+                dockMeasuredSpeed = velocity.Length();
+                dockResidualMoment = null;
+                dockThrustMargin = double.PositiveInfinity;
+                hasDockTelemetry = true;
                 for (int axis = 0; axis < 3; axis++)
                 {
                     double force = target.GetDim(axis);
-                    if (force > capacity[axis * 2] * (1 - ThrustReserve) ||
-                        force < -capacity[axis * 2 + 1] * (1 - ThrustReserve))
-                        throw new InvalidOperationException("insufficient thrust reserve for docking");
+                    if (force == 0)
+                        continue;
+                    double available = capacity[axis * 2 + (force < 0 ? 1 : 0)] * (1 - ThrustReserve);
+                    dockThrustMargin = Math.Min(dockThrustMargin, available - Math.Abs(force));
                 }
+                if (double.IsPositiveInfinity(dockThrustMargin))
+                    dockThrustMargin = 0;
+                if (dockThrustMargin < 0)
+                    throw new InvalidOperationException("insufficient thrust reserve for docking");
 
                 var moment = thrust.Solve(target, Vector3D.One);
+                dockResidualMoment = moment.Length();
                 if (moment.LengthSquared() > target.LengthSquared() * MaximumResidualLeverArm * MaximumResidualLeverArm)
                     throw new InvalidOperationException("insufficient moment compensation for docking");
 
