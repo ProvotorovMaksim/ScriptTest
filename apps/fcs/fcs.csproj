@@ -12,9 +12,21 @@
     <AssemblyName>FlightControl</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="DockLease.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mal.Mdk2.PbPackager" Version="2.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

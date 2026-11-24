@@ -1,0 +1,17 @@
+[mdk]
+; Machine-specific MDK² settings. Copy to mdk.local.ini and adjust paths.
+; This file is NOT meant to be committed to version control.
+
+; Where the packaged script.cs should be deployed.
+; On Windows, auto resolves to %AppData%\SpaceEngineers\IngameScripts\local
+; On Linux, defaults to ~/.local/share/SpaceEngineers/IngameScripts/local
+output=auto
+
+; Path to Space Engineers Bin64 folder (DedicatedServer64 or game Bin64).
+; Required for game assembly references and for deploying scripts.
+; Example (Windows): binarypath=C:\Program Files (x86)\Steam\steamapps\common\Space Engineers\Bin64
+; Example (Linux/Wine): binarypath=/home/user/.steam/steam/steamapps/common/Space Engineers/Bin64
+binarypath=auto
+
+; Do not show Hub notifications when building (recommended for CI/CD).
+interactive=DoNothing

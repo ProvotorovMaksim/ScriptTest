@@ -27,14 +27,75 @@ tests/                # Unit tests for TaskBusProtocol
 
 ## Build and Install
 
+### Prerequisites
+
+- .NET 8 SDK (from `global.json`)
+- Space Engineers installed (game DLLs are required for compilation)
+- MDK² NuGet packages are restored automatically on first `dotnet build`
+
 ### Unified build (recommended)
 
 ```sh
 export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
-./build.sh
+dotnet build
 ```
 
-Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the nine PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
+Or on Windows, double-click **`build.bat`**:
+
+```bat
+build.bat
+```
+
+After `git pull`, simply run `dotnet build` (or `build.bat`) again. MDK²
+(`Mal.Mdk2.PbPackager`) automatically combines each PB project's code with
+the shared libraries from `libs/` into a single `script.cs` per Programmable
+Block and deploys it to the Space Engineers local IngameScripts folder
+(configured via `mdk.local.ini`).
+
+On Windows with the game installed, the generated `script.cs` files are
+deployed automatically to:
+
+```
+%AppData%\SpaceEngineers\IngameScripts\local
+```
+
+(or to the custom `output` path set in `mdk.local.ini`).
+
+Then in Space Engineers open a Programmable Block → Edit → Browse Scripts
+and select the desired script. Scripts already installed in a PB are not
+updated automatically — load them again via Browse Scripts.
+
+### Per-project configuration
+
+Each PB project has its own `mdk.ini` (committed) and an optional
+`mdk.local.ini` (machine-specific, not committed). Copy
+`mdk.local.ini.example` to `mdk.local.ini` and adjust `binarypath` and
+`output` for your machine:
+
+```ini
+[mdk]
+binarypath=C:\Program Files (x86)\Steam\steamapps\common\Space Engineers\Bin64
+output=auto
+interactive=DoNothing
+```
+
+### What changed vs the old build.sh
+
+The old `build.sh` manually concatenated `.pb.cs` files with `awk` and
+produced DLLs under `build/output/`. That approach has been replaced by
+MDK²: each PB `.csproj` now references `Mal.Mdk2.PbPackager` version `2.3.1`,
+includes shared library sources via wildcard (`../../libs/igc-core/**/*.cs`,
+etc.), and the packager generates `script.cs` on every build. The
+`build.sh` script is retained for the compile-check / test step but no
+longer performs manual script concatenation.
+
+### Libraries (`libs/`)
+
+The shared library projects (`libs/igc-core`, `libs/taskbus-consumer`,
+`libs/taskbus-producer`) are no longer built as separate DLLs for PB use.
+Their source files are included directly into each consuming PB project
+via `Compile Include`, so MDK² merges them into `script.cs`. The library
+projects are still built and used by `TaskBus.Tests` unchanged.
 
 ### Mining workflow reference
 

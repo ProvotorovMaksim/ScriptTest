@@ -9,7 +9,11 @@
     </Reference>
   </ItemDefinitionGroup>
 
-  <ItemGroup>
+  <!-- Game assembly references are only wired up when a Space Engineers installation is configured.
+       On machines without the game (macOS/Linux without Wine/Proton), these references are omitted
+       so the project file can still be loaded; compilation then requires MDK2-provided reference
+       assemblies or stubs, and script packaging is delegated to Mal.Mdk2.PbPackager. -->
+  <ItemGroup Condition="'$(SpaceEngineers)' != '' And Exists('$(SpaceEngineers)/Sandbox.Common.dll')">
     <Reference Include="Sandbox.Common">
       <HintPath>$(SpaceEngineers)/Sandbox.Common.dll</HintPath>
     </Reference>
@@ -36,7 +40,7 @@
     </Reference>
   </ItemGroup>
 
-  <Target Name="ValidateSpaceEngineersAssemblies" BeforeTargets="PrepareForBuild">
+  <Target Name="ValidateSpaceEngineersAssemblies" BeforeTargets="PrepareForBuild" Condition="'$(SpaceEngineers)' != ''">
     <Error Condition="'$(SpaceEngineers)' == '' Or !Exists('$(SpaceEngineers)/Sandbox.Common.dll') Or !Exists('$(SpaceEngineers)/Sandbox.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.ObjectBuilders.dll') Or !Exists('$(SpaceEngineers)/VRage.dll') Or !Exists('$(SpaceEngineers)/VRage.Game.dll') Or !Exists('$(SpaceEngineers)/VRage.Library.dll') Or !Exists('$(SpaceEngineers)/VRage.Math.dll')"
            Text="Required Space Engineers assemblies were not found in '$(SpaceEngineers)'. Set SPACE_ENGINEERS_BIN64 to the DedicatedServer64 directory." />
   </Target>

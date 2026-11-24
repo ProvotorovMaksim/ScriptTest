@@ -12,13 +12,26 @@
     <AssemblyName>AmnPlatform</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="../../libs/taskbus-consumer/**/*.cs">
+      <Exclude>../../libs/taskbus-consumer/obj/**;../../libs/taskbus-consumer/bin/**</Exclude>
+    </Compile>
+    <Compile Include="../../libs/igc-core/**/*.cs">
+      <Exclude>../../libs/igc-core/obj/**;../../libs/igc-core/bin/**</Exclude>
+    </Compile>
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../libs/taskbus-consumer/taskbus-consumer.csproj" />
-    <ProjectReference Include="../../libs/igc-core/igc-core.csproj" />
+    <PackageReference Include="Mal.Mdk2.PbPackager" Version="2.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>
