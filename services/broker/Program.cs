@@ -26,6 +26,7 @@ namespace SpaceEngineers.Services.Broker
         private int _tick;
         private int _sequence;
         private bool _paused;
+        private bool _retired;
         private long _resumeAfterUtc;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
         private readonly List<string> _cancelledRequestIds = new List<string>();
@@ -107,6 +108,11 @@ namespace SpaceEngineers.Services.Broker
                     _listener.AcceptMessage();
                 if (string.Equals(command, "broker resume", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_retired)
+                    {
+                        Echo("Broker retired after handoff. Resume is disabled.");
+                        return;
+                    }
                     if (DateTime.UtcNow.Ticks < _resumeAfterUtc)
                     {
                         Echo("Broker remains paused until " +
@@ -120,6 +126,8 @@ namespace SpaceEngineers.Services.Broker
                 }
                 else if (string.Equals(command, "broker export", StringComparison.OrdinalIgnoreCase))
                     TransferBackup(import: false);
+                else if (string.Equals(command, "broker handoff", StringComparison.OrdinalIgnoreCase))
+                    TransferBackup(import: false, retire: true);
                 else if (string.Equals(command, "broker import", StringComparison.OrdinalIgnoreCase))
                     TransferBackup(import: true);
                 else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
@@ -677,12 +685,12 @@ namespace SpaceEngineers.Services.Broker
         private void ShowStatus()
         {
             Echo("Broker block ID: " + Me.EntityId);
-            Echo((_paused ? "Paused. " : "Active. ") + "Tasks: " + _tasks.Count);
+            Echo((_retired ? "Retired. " : _paused ? "Paused. " : "Active. ") + "Tasks: " + _tasks.Count);
             foreach (var task in _tasks)
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);
         }
 
-        private void TransferBackup(bool import)
+        private void TransferBackup(bool import, bool retire = false)
         {
             var panel = GridTerminalSystem.GetBlockWithName(BackupPanelName) as IMyTextPanel;
             if (panel == null || !panel.IsWorking || panel.CubeGrid != Me.CubeGrid)
@@ -699,16 +707,22 @@ namespace SpaceEngineers.Services.Broker
                     Echo("Backup panel contains unrelated text.");
                     return;
                 }
-                var queueText = Storage.Replace("\r\n", "\n");
+                var queueText = Storage.Replace("\r\n", "\n").Replace("\nRETIRED|1\n", "\n");
                 var backup = BackupVersion + BackupChecksum(queueText) + "\n" + queueText;
                 if (!panel.WriteText(backup, false) || panel.GetText().Replace("\r\n", "\n") != backup)
                     Echo("Backup write failed verification.");
+                else if (retire)
+                {
+                    _retired = true;
+                    SaveQueue();
+                    Echo("Broker backup exported. Source is retired.");
+                }
                 else
                     Echo("Broker backup exported.");
                 return;
             }
 
-            if (_sequence != 0 || _tasks.Count != 0 || _completedRequestIds.Count != 0 ||
+            if (_retired || _sequence != 0 || _tasks.Count != 0 || _completedRequestIds.Count != 0 ||
                 _cancelledRequestIds.Count != 0 || _commits.Count != 0)
             {
                 Echo("Import requires an empty broker.");
@@ -725,7 +739,8 @@ namespace SpaceEngineers.Services.Broker
             var queue = snapshot.Substring(separator + 1);
             if (snapshot.Substring(BackupVersion.Length, separator - BackupVersion.Length) != BackupChecksum(queue) ||
                 !queue.StartsWith("SEQ|", StringComparison.Ordinal) ||
-                queue.IndexOf("\nPAUSED|1\n", StringComparison.Ordinal) < 0)
+                queue.IndexOf("\nPAUSED|1\n", StringComparison.Ordinal) < 0 ||
+                queue.IndexOf("\nRETIRED|1\n", StringComparison.Ordinal) >= 0)
             {
                 Echo("Broker backup failed verification.");
                 return;
@@ -754,6 +769,7 @@ namespace SpaceEngineers.Services.Broker
             _commits.Clear();
             _sequence = 0;
             _paused = false;
+            _retired = false;
             _resumeAfterUtc = -1;
             if (string.IsNullOrWhiteSpace(Storage))
                 return;
@@ -764,6 +780,11 @@ namespace SpaceEngineers.Services.Broker
                 if (parts.Length == 2 && parts[0] == "PAUSED")
                 {
                     _paused = parts[1].Trim() == "1";
+                    continue;
+                }
+                if (parts.Length == 2 && parts[0] == "RETIRED")
+                {
+                    _retired = parts[1].Trim() == "1";
                     continue;
                 }
                 if (parts.Length == 2 && parts[0] == "RESUME_AFTER_UTC")
@@ -867,6 +888,7 @@ namespace SpaceEngineers.Services.Broker
                     continue;
                 }
             }
+            _paused |= _retired;
             if (_paused && _resumeAfterUtc < 0)
                 _resumeAfterUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
         }
@@ -880,6 +902,8 @@ namespace SpaceEngineers.Services.Broker
                 storage.AppendLine("PAUSED|1");
                 storage.AppendLine("RESUME_AFTER_UTC|" + _resumeAfterUtc.ToString(CultureInfo.InvariantCulture));
             }
+            if (_retired)
+                storage.AppendLine("RETIRED|1");
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)

@@ -500,6 +500,12 @@ namespace TaskBus.Tests
             TakeResponse(source, "TASK_PUBLISHED_ACK", 9);
             source.Main("broker pause");
             source.Main("broker export");
+            Assert.DoesNotContain("RETIRED|1", source.Storage);
+            source.Main("broker handoff");
+            Assert.Contains("RETIRED|1", source.Storage);
+            source = StartBroker(AfterResumeDeadline(source.Storage));
+            source.Main("broker resume");
+            Assert.Contains("PAUSED|1", source.Storage);
 
             var destination = StartBroker("");
             destination.GridTerminalSystem.BackupPanel = panel;
@@ -512,7 +518,9 @@ namespace TaskBus.Tests
             panel.Text = backup.Replace("\n", "\r\n");
 
             destination.Main("broker import");
-            Assert.Equal(source.Storage.Replace("\r\n", "\n"), destination.Storage.Replace("\r\n", "\n"));
+            Assert.DoesNotContain("RETIRED|1", destination.Storage);
+            Assert.Contains("PAUSED|1", destination.Storage);
+            Assert.Contains("TASK|9-1|", destination.Storage);
             var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL",
                 "{\"group_id\":\"MiningPoints\"}", targetId: 1);
             Dispatch(destination, 42, poll);

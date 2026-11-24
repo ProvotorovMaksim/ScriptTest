@@ -80,8 +80,12 @@ start issuing work again.
 
 For a planned handoff, add a dedicated `[TASKBUS BACKUP]` text panel to
 the source and destination grids. A shared panel works when both brokers
-are on the same grid. Pause the source and run `broker export`. If using
-two panels, copy the complete text without editing it. Pause a fresh empty
+are on the same grid. Pause the source and run `broker handoff`. It
+exports a verified snapshot and durably retires the source. Check that
+`status` reports Retired before activating the destination. A retired
+broker can export its data again and rejects resume and import. Use
+`broker export` for a backup when you intend to keep using the source.
+If using two panels, copy the complete text without editing it. Pause a fresh empty
 destination and run `broker import`. A successful import restores the
 queue and its deduplication history and leaves the destination paused.
 Use the broker selection procedure below to switch idle workers. If a
