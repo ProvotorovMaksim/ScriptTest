@@ -771,6 +771,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
+        public long SupervisedCruiseRemote { get; private set; }
+
+        public void SetSupervisedCruiseRemote(long remoteId)
+        {
+            if (SupervisedCruiseRemote == remoteId)
+                return;
+            SupervisedCruiseRemote = remoteId;
+            SaveState();
+        }
+
         public string ConfirmedLeaseIdentity => HasActiveTask && HasRecentLeaseConfirmation
             ? _leaseConfirmationSource.ToString(CultureInfo.InvariantCulture) + ":" +
                 _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _activeTaskId
@@ -1113,6 +1123,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                             cargo >= 0 && !double.IsInfinity(cargo))
                             _pickupCargo = cargo;
                     }
+                    else if (key == "CRUISE_REMOTE")
+                    {
+                        long remoteId;
+                        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out remoteId))
+                            SupervisedCruiseRemote = remoteId;
+                    }
                     else if (key == "ORE_SITE") _oreSite = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "ORE_APPROACH") _oreApproach = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
@@ -1168,6 +1184,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             foreach (var site in _knownSites)
                 storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Key) +
                     "|" + TaskBusIgcHelper.EncodeStorage(site.Value));
+            if (SupervisedCruiseRemote != 0)
+                storage.AppendLine("CRUISE_REMOTE|" + SupervisedCruiseRemote.ToString(CultureInfo.InvariantCulture));
             if (_autoPoint) storage.AppendLine("POINT_AUTO|1");
             storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));

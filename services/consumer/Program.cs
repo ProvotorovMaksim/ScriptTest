@@ -62,8 +62,9 @@ namespace SpaceEngineers.Services.Consumer
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
                 gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
-                CanStartHaulerCruise);
+                CanStartHaulerCruise, GridTerminalSystem.GetBlockWithId);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
+            _routes.CheckCruiseLease();
         }
 
         public void Main(string argument)

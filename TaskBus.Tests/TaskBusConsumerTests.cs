@@ -8,6 +8,20 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void SupervisedCruiseRemoteSurvivesRestartEvenWithoutAnActiveTask()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Hauler");
+            var worker = Start();
+            worker.SetSupervisedCruiseRemote(123);
+            worker = Start();
+            Assert.Equal(123, worker.SupervisedCruiseRemote);
+            worker.SetSupervisedCruiseRemote(0);
+            Assert.Equal(0, Start().SupervisedCruiseRemote);
+        }
+
+        [Fact]
         public void AutomaticPointClosesTransportAfterHaulerAndBaseConfirm()
         {
             string storage = "";

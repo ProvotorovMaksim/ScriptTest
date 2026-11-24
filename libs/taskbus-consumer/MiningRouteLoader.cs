@@ -20,6 +20,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Action<string> _echo;
         private readonly Func<long, string> _findStationApproach;
         private readonly Func<bool> _canStartCruise;
+        private readonly Func<long, IMyTerminalBlock> _findBlockById;
         private IMyRemoteControl _cruiseRemote;
         private string _cruiseLease;
         private bool _cruisePickup;
@@ -27,7 +28,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         public MiningRouteLoader(TaskBusConsumer worker, IMyCubeGrid grid,
             Func<string, IMyTerminalBlock> findBlock, Action<string> echo, Func<long, string> findStationApproach = null,
-            Func<bool> canStartCruise = null)
+            Func<bool> canStartCruise = null, Func<long, IMyTerminalBlock> findBlockById = null)
         {
             _worker = worker;
             _grid = grid;
@@ -35,6 +36,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _echo = echo;
             _findStationApproach = findStationApproach;
             _canStartCruise = canStartCruise;
+            _findBlockById = findBlockById;
         }
 
         public bool TryHandle(string command)
@@ -127,6 +129,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     _echo("Load and review the current station route before starting cruise.");
                     return;
                 }
+                if (_worker.SupervisedCruiseRemote != 0)
+                {
+                    _echo("Stop the previously supervised cruise before starting another.");
+                    return;
+                }
+
+                _worker.SetSupervisedCruiseRemote(remote.EntityId);
                 _cruiseRemote = remote;
                 _cruiseLease = _worker.ConfirmedLeaseIdentity;
                 _cruisePickup = pickup;
@@ -142,8 +151,25 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         public void CheckCruiseLease()
         {
+            if (_cruiseRemote == null && _worker.SupervisedCruiseRemote != 0 && _findBlockById != null)
+            {
+                var saved = _findBlockById(_worker.SupervisedCruiseRemote) as IMyRemoteControl;
+                if (saved == null || saved.CubeGrid != _grid)
+                {
+                    _worker.SetSupervisedCruiseRemote(0);
+                    return;
+                }
+                _cruiseRemote = saved;
+                _cruiseLease = null;
+            }
             if (_cruiseRemote == null)
                 return;
+
+            if (_cruiseRemote.CubeGrid != _grid)
+            {
+                ForgetCruise();
+                return;
+            }
 
             string taskId;
             bool pickup;
@@ -152,7 +178,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _worker.ConfirmedLeaseIdentity != _cruiseLease || pickup != _cruisePickup || grid != _cruiseGrid)
                 StopCruise("Cruise stopped: the current leg lost lease confirmation.");
             else if (!_cruiseRemote.IsAutoPilotEnabled)
-                _cruiseRemote = null;
+                ForgetCruise();
+        }
+
+        private void ForgetCruise()
+        {
+            _cruiseRemote = null;
+            _worker.SetSupervisedCruiseRemote(0);
         }
 
         private void StopCruise(string reason)
@@ -165,7 +197,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     _cruiseRemote.SetAutoPilotEnabled(false);
                 if (!_cruiseRemote.IsAutoPilotEnabled)
                 {
-                    _cruiseRemote = null;
+                    ForgetCruise();
                     _echo(reason);
                 }
             }
