@@ -68,6 +68,14 @@ Record task IDs, lease epochs and any block errors. Use separate runs for the
 workflow, lease-expiry and cancellation checks so their state is easy to
 identify in the broker output.
 
+### Worker display
+
+To show a worker's TaskBus assignments on a ShipLink cockpit display, run
+`worker <consumer programmable block ID>` on ShipLink. Use the consumer block's
+entity ID shown as `Worker block ID` in the consumer output. The setting persists in Storage. Send `worker 0` to disable task
+monitoring. The display shows the assignment and its first workflow stage.
+Run `status` on the consumer for the actual stage checkpoint.
+
 ### Fleet display for Space Engineers combat
 
 Install `ShipLink.pb.cs` on each wingmate's grid with a working radio antenna

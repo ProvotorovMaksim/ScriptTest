@@ -53,6 +53,7 @@ namespace SpaceEngineers.Services.Consumer
                     _consumer.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
+            Echo("Worker block ID: " + Me.EntityId);
             Echo(_consumer.GetStatus());
         }
 

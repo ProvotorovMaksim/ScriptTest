@@ -37,7 +37,8 @@ namespace SpaceEngineers.Apps.ShipLink
         private bool _connectedToBase;
         private int _lastMessageTick;
         private string _lastEventType;
-        private string _lastPayload;
+        private long _workerId;
+        private int _activeLeaseEpoch;
         private string _activeTaskId;
         private string _activeTaskStage;
         private string _activeTaskDetails;
@@ -53,7 +54,10 @@ namespace SpaceEngineers.Apps.ShipLink
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
             _shipName = Me.CubeGrid.CustomName;
-            _fleetName = Storage;
+            var settings = Storage.Split(new[] { '\n' }, 2);
+            _fleetName = settings[0];
+            if (settings.Length == 2)
+                long.TryParse(settings[1], out _workerId);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
@@ -70,8 +74,22 @@ namespace SpaceEngineers.Apps.ShipLink
             {
                 var name = command.Substring(6).Trim();
                 _fleetName = string.Equals(name, "off", StringComparison.OrdinalIgnoreCase) ? "" : name;
-                Storage = _fleetName;
+                SaveSettings();
                 _fleetPeers.Clear();
+            }
+
+            else if (command.StartsWith("worker ", StringComparison.OrdinalIgnoreCase))
+            {
+                long workerId;
+                if (!long.TryParse(command.Substring(7), out workerId) || workerId < 0)
+                    Echo("Usage: worker <consumer programmable block ID>, or worker 0 to disable");
+                else
+                {
+                    _workerId = workerId;
+                    _connectedToBase = false;
+                    ClearTask();
+                    SaveSettings();
+                }
             }
 
             // Scan antennas
@@ -102,40 +120,10 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (message.Source == Me.EntityId)
                     continue;
 
-                var json = message.Data as string;
-                string eventType;
-                string payloadJson;
-                if (string.IsNullOrEmpty(json) || !TaskBusIgcHelper.TryParseEnvelope(json, out eventType, out payloadJson))
-                    continue;
-
-                _connectedToBase = true;
-                _lastMessageTick = _tick;
-                _lastEventType = eventType;
-                _lastPayload = payloadJson;
-
-                if (eventType == "TASK_ASSIGN")
-                {
-                    ParseTaskAssignment(payloadJson);
-                }
-                else if (eventType == "TASK_DONE_ACK")
-                {
-                    _activeTaskId = null;
-                    _activeTaskStage = null;
-                    _activeTaskDetails = null;
-                }
-                else if (eventType == "TASK_REVOKED")
-                {
-                    _activeTaskId = null;
-                    _activeTaskStage = null;
-                    _activeTaskDetails = null;
-                }
-                else if (eventType == "QUEUE_EMPTY")
-                {
-                    if (string.IsNullOrEmpty(_activeTaskId))
-                    {
-                        _lastEventType = "QUEUE_EMPTY";
-                    }
-                }
+                TaskBusEnvelope envelope;
+                if (_workerId != 0 && TaskBusProtocol.TryParseEnvelope(message.Data as string, out envelope) &&
+                    envelope.TargetId == _workerId)
+                    ReceiveWorkerStatus(envelope);
             }
 
             while (_fleetListener.HasPendingMessage)
@@ -149,8 +137,8 @@ namespace SpaceEngineers.Apps.ShipLink
                     ReceiveFleetStatus(message.Source, payload);
             }
 
-            // Connection timeout: if no message for 300 ticks (~5 seconds at Update1)
-            if (_tick - _lastMessageTick > 300)
+            // Allow for more than one worker poll interval before showing a timeout.
+            if (_tick - _lastMessageTick > 900)
             {
                 _connectedToBase = false;
             }
@@ -217,37 +205,63 @@ namespace SpaceEngineers.Apps.ShipLink
             status.SeenTick = _tick;
         }
 
-        private void ParseTaskAssignment(string payloadJson)
+        private void SaveSettings()
         {
-            string taskIdJson;
+            Storage = _fleetName + "\n" + _workerId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private void ReceiveWorkerStatus(TaskBusEnvelope envelope)
+        {
+            var eventType = envelope.EventType;
+            if (eventType != "TASK_ASSIGN" && eventType != "TASK_DONE_ACK" &&
+                eventType != "TASK_CANCEL" && eventType != "TASK_REVOKED" && eventType != "QUEUE_EMPTY")
+                return;
+
+            _connectedToBase = true;
+            _lastMessageTick = _tick;
+            _lastEventType = eventType;
+            if (eventType == "QUEUE_EMPTY")
+                return;
+
+            string value;
             string taskId;
-            if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "task_id", out taskIdJson) &&
-                TaskBusIgcHelper.TryReadJsonString(taskIdJson, out taskId))
-            {
-                _activeTaskId = taskId;
-            }
+            int epoch;
+            var payload = envelope.PayloadJson;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(payload, "task_id", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out taskId) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "lease_epoch", out value) ||
+                !int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch))
+                return;
 
-            string detailsJson;
+            if (eventType != "TASK_ASSIGN")
+            {
+                if (_activeTaskId == taskId && _activeLeaseEpoch == epoch)
+                    ClearTask();
+                return;
+            }
+            if (_activeTaskId == taskId && epoch < _activeLeaseEpoch)
+                return;
+
+            _activeTaskId = taskId;
+            _activeLeaseEpoch = epoch;
             string details;
-            if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "details", out detailsJson) &&
-                TaskBusIgcHelper.TryReadJsonString(detailsJson, out details))
-            {
-                _activeTaskDetails = details;
-            }
-
-            // Try to extract stage from details if it's a JSON with steps
+            string key;
+            _activeTaskDetails = TaskBusIgcHelper.TryGetJsonProperty(payload, "key", out value) &&
+                TaskBusIgcHelper.TryReadJsonString(value, out key) ? key : null;
             string stepsJson;
             List<string> steps;
-            if (TaskBusProtocol.TryGetProperty(detailsJson, "steps", out stepsJson) &&
-                TaskBusProtocol.TryReadStringArray(stepsJson, out steps) &&
-                steps.Count > 0)
-            {
-                _activeTaskStage = steps[0];
-            }
-            else
-            {
-                _activeTaskStage = "execute";
-            }
+            _activeTaskStage = TaskBusIgcHelper.TryGetJsonProperty(payload, "details", out details) &&
+                TaskBusProtocol.TryGetProperty(details, "steps", out stepsJson) &&
+                TaskBusProtocol.TryReadStringArray(stepsJson, out steps) && steps.Count > 0
+                ? steps[0] : "execute";
+        }
+
+        private void ClearTask()
+        {
+            _activeTaskId = null;
+            _activeTaskStage = null;
+            _activeTaskDetails = null;
+            _activeLeaseEpoch = 0;
         }
 
         private void UpdateCockpitDisplay()
@@ -262,7 +276,9 @@ namespace SpaceEngineers.Apps.ShipLink
             display.AppendLine();
 
             // Connection status
-            if (_connectedToBase)
+            if (_workerId == 0)
+                display.AppendLine("Task monitoring disabled. Run worker <consumer block ID>.");
+            else if (_connectedToBase)
             {
                 display.AppendLine("Connection: ONLINE");
                 display.AppendLine($"Last event: {_lastEventType}");
@@ -271,7 +287,7 @@ namespace SpaceEngineers.Apps.ShipLink
             else
             {
                 display.AppendLine("Connection: OFFLINE");
-                display.AppendLine("No IGC signal from base.");
+                display.AppendLine("No recent broker response for this worker.");
             }
 
             display.AppendLine();
@@ -285,9 +301,10 @@ namespace SpaceEngineers.Apps.ShipLink
             // Active task
             if (!string.IsNullOrEmpty(_activeTaskId))
             {
-                display.AppendLine("=== ACTIVE TASK ===");
+                display.AppendLine(_connectedToBase ? "=== ACTIVE TASK ===" : "=== LAST SEEN TASK ===");
                 display.AppendLine($"Task ID: {_activeTaskId}");
-                display.AppendLine($"Stage: {_activeTaskStage}");
+                display.AppendLine($"Lease: {_activeLeaseEpoch}");
+                display.AppendLine($"First workflow stage: {_activeTaskStage}");
                 if (!string.IsNullOrEmpty(_activeTaskDetails))
                 {
                     display.AppendLine($"Details: {_activeTaskDetails}");
@@ -297,7 +314,8 @@ namespace SpaceEngineers.Apps.ShipLink
             {
                 display.AppendLine("=== ACTIVE TASK ===");
                 display.AppendLine("No active task.");
-                display.AppendLine("Waiting for TASK_ASSIGN from base...");
+                if (_workerId != 0)
+                    display.AppendLine("Waiting for TASK_ASSIGN for this worker...");
             }
 
             display.AppendLine();
