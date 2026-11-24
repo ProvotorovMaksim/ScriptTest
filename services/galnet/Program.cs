@@ -347,9 +347,23 @@ namespace SpaceEngineers.Services.Galnet
                 }
             }
 
+            int replaceAt = -1;
+            string fleet;
+            if (kind == "APP" && deadline.HasValue && TryReadHeartbeatFleet(payload, expires, out fleet))
+            {
+                long existingExpiry;
+                replaceAt = FindPendingHeartbeat(destination, fleet, out existingExpiry);
+                if (replaceAt >= 0 && existingExpiry >= expires)
+                {
+                    if (expired > 0)
+                        SaveConfiguration();
+                    return;
+                }
+            }
+
             bool shortLived = deadline.HasValue || leaseTraffic;
             int limit = shortLived ? MaxPending - ReservedPending : MaxPending;
-            if (_outbox.Count >= limit)
+            if (replaceAt < 0 && _outbox.Count >= limit)
             {
                 if (expired > 0)
                     SaveConfiguration();
@@ -361,10 +375,56 @@ namespace SpaceEngineers.Services.Galnet
             var packet = kind + "|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
                 expires + "|" +
                 encoded;
-            _outbox.Add(packet);
+            if (replaceAt >= 0)
+                _outbox[replaceAt] = packet;
+            else
+                _outbox.Add(packet);
             SaveConfiguration();
             if (destination != Me.EntityId)
                 ForwardMessage(packet, 0);
+        }
+
+        private int FindPendingHeartbeat(long destination, string fleet, out long expires)
+        {
+            var prefix = "APP|" + Me.EntityId + "|" + destination + "|";
+            int newest = -1;
+            expires = 0;
+            for (int i = 0; i < _outbox.Count; i++)
+            {
+                var packet = _outbox[i];
+                if (!packet.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
+                var fields = packet.Split('|');
+                long deadline;
+                if (fields.Length != 7 || !long.TryParse(fields[5], out deadline) || deadline <= expires)
+                    continue;
+
+                string storedFleet;
+                try
+                {
+                    var payload = TaskBusIgcHelper.DecodeStorage(fields[6]);
+                    if (!TryReadHeartbeatFleet(payload, deadline, out storedFleet) || storedFleet != fleet)
+                        continue;
+                }
+                catch (FormatException) { continue; }
+                newest = i;
+                expires = deadline;
+            }
+            return newest;
+        }
+
+        private static bool TryReadHeartbeatFleet(string payload, long deadline, out string fleet)
+        {
+            fleet = null;
+            if (!payload.StartsWith("heartbeat|", StringComparison.Ordinal))
+                return false;
+            var fields = payload.Split('|');
+            long sampleExpiry;
+            if (fields.Length != 4 || !long.TryParse(fields[1], out sampleExpiry) ||
+                sampleExpiry != deadline || fields[2].Length == 0 || fields[3].Length == 0)
+                return false;
+            fleet = fields[2];
+            return true;
         }
 
         private void ForwardMessage(string packet, long previousHop)

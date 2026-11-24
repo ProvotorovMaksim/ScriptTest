@@ -346,6 +346,28 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void NewHeartbeatReplacesOlderSampleForTheSameDestinationAndFleetAcrossRestart()
+        {
+            long first = DateTime.UtcNow.AddSeconds(8).Ticks;
+            var relay = Start(4, "0\n1\n2");
+            string Command(long target, long deadline, string fleet, string payload) =>
+                "app-until " + deadline + " " + target + " heartbeat|" + deadline + "|" +
+                TaskBusIgcHelper.EncodeStorage(fleet) + "|" + TaskBusIgcHelper.EncodeStorage(payload);
+
+            relay.Main(Command(1, first, "fleet", "old"), UpdateType.Terminal);
+            relay.Main(Command(2, first, "fleet", "other destination"), UpdateType.Terminal);
+            relay.Main(Command(1, first, "second fleet", "other fleet"), UpdateType.Terminal);
+            relay = Start(4, relay.Storage);
+            relay.Main(Command(1, first + TimeSpan.TicksPerSecond, "fleet", "latest"), UpdateType.Terminal);
+            relay.Main(Command(1, first, "fleet", "late"), UpdateType.Terminal);
+
+            var values = relay.Storage.Split('\n').Where(line => line.StartsWith("SEND:"))
+                .Select(line => TaskBusIgcHelper.DecodeStorage(line.Split('|')[6]).Split('|')[3])
+                .Select(TaskBusIgcHelper.DecodeStorage).ToArray();
+            Assert.Equal(new[] { "latest", "other destination", "other fleet" }, values);
+        }
+
+        [Fact]
         public void TimedApplicationUsesItsOwnDeadlineAcrossRestart()
         {
             var relay = Start(4, "0\n1");

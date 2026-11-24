@@ -138,7 +138,9 @@ the five-minute UTC deadline
 expires. Lease polls, assignments, receipt notices and empty-queue replies
 expire after 20 seconds and use the short-lived queue limit. Later polls
 refresh the current lease state. Requests and completion messages keep
-the regular deadline. Upgrade all relays together. Older diagnostic packets without
+the regular deadline. A fleet heartbeat replaces the earlier queued
+heartbeat for the same destination and fleet. Delayed older samples leave
+the newer one queued. Upgrade all relays together. Older diagnostic packets without
 a deadline are discarded. The receiver retains up to 64 delivery IDs until their original deadlines
 for duplicate suppression across restarts. Once 48 slots are occupied,
 only addressed TaskBus messages can claim a remaining slot. If every
