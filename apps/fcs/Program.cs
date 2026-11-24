@@ -255,7 +255,8 @@ namespace SpaceEngineers.Apps.FlightControl
                         saturated |= Math.Abs(desired - force) > 1;
                     }
                     target.SetDim(axis, force);
-                    stabilization.SetDim(axis, overspeed ? force : Clamp(support, -reverse, forward));
+                    double dampedSupport = support - speed * mass * 0.6;
+                    stabilization.SetDim(axis, overspeed ? force : Clamp(dampedSupport, -reverse, forward));
                 }
 
                 var gyroMask = new Vector3D(Command(turn.X) == 0 ? 1 : 0,
@@ -264,12 +265,11 @@ namespace SpaceEngineers.Apps.FlightControl
                 bool turnRisk = !HasSupportDuringTurn(hold, target - hold, requestedRate, hasInstructionBudget);
                 bool balanceChecked = hasInstructionBudget();
                 bool balanceRisk = balanceChecked && !HasBalancedThrust(target, gyroMask);
-                if (mode == Mode.Normal && (!balanceChecked || balanceRisk))
-                    target = stabilization;
                 if (mode == Mode.Manual && balanceRisk && request.LengthSquared() > 0)
                     target = pilotOnly;
                 if (mode == Mode.Normal && (risk || turnRisk || balanceRisk || !balanceChecked))
                 {
+                    target = stabilization;
                     turn = Vector3D.Zero;
                     gyroMask = Vector3D.One;
                 }
