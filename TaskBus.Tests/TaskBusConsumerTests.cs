@@ -75,6 +75,7 @@ namespace TaskBus.Tests
             Assert.True(hauler.TryGetHaulerDestination(out _, out var pickup, out var grid));
             Assert.True(pickup);
             Assert.Equal(500, grid);
+            Assert.False(hauler.CanDepartHaulerPickup());
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
 
@@ -93,13 +94,16 @@ namespace TaskBus.Tests
             hauler = Start();
             Assert.Contains("Stage: deliver", hauler.GetStatus());
             Assert.False(hauler.TryGetHaulerDestination(out _, out _, out _));
+            Assert.False(hauler.CanDepartHaulerPickup());
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
             hauler.ProcessIncomingMessage(1, assignment);
             Assert.True(hauler.TryGetHaulerDestination(out _, out pickup, out grid));
             Assert.False(pickup);
             Assert.Equal(600, grid);
+            Assert.True(hauler.CanDepartHaulerPickup());
             dockedGrid = 600;
+            Assert.False(hauler.CanDepartHaulerPickup());
             cargo = null;
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());

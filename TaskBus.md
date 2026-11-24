@@ -273,6 +273,11 @@ FCS selects the recorded berth for that grid and applies its usual final
 approach checks. Turn off cruise autopilot and position the ship in the
 final approach envelope before requesting docking.
 
+With `HaulerDock` configured, use `route depart` after pickup while still
+connected to the assigned mining point. FCS checks the selected berth and
+the departure charge before disconnecting. If charge is low, repeat the
+command after charging. The hauler does not schedule a delayed departure.
+
 ### AMN platform worker
 
 Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both

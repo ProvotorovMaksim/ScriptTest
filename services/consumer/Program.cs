@@ -84,6 +84,8 @@ namespace SpaceEngineers.Services.Consumer
 
             if (string.Equals(command, "route dock", StringComparison.OrdinalIgnoreCase))
                 StartHaulerDock();
+            else if (string.Equals(command, "route depart", StringComparison.OrdinalIgnoreCase))
+                DepartHaulerPickup();
             else if (!_routes.TryHandle(command))
                 _consumer.ProcessCommand(argument);
             _galnet.Flush();
@@ -110,15 +112,31 @@ namespace SpaceEngineers.Services.Consumer
                 return;
             }
 
-            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
-            if (fcs == null || fcs.CubeGrid != Me.CubeGrid || fcs.EntityId == Me.EntityId || !fcs.IsWorking ||
-                !fcs.TryRun("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
+            if (RequestFcs("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
+                Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
+        }
+
+        private void DepartHaulerPickup()
+        {
+            if (!_consumer.CanDepartHaulerPickup())
             {
-                Echo("Could not send the final approach request to a working local [AMN FCS] block.");
+                Echo("A confirmed delivery lease, completed pickup and connection to its mining point are required.");
                 return;
             }
 
-            Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
+            if (RequestFcs("dock depart ready"))
+                Echo("FCS departure requested. Check the FCS status.");
+        }
+
+        private bool RequestFcs(string command)
+        {
+            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
+            if (fcs != null && fcs.CubeGrid == Me.CubeGrid && fcs.EntityId != Me.EntityId && fcs.IsWorking &&
+                fcs.TryRun(command))
+                return true;
+
+            Echo("Could not send the request to a working local [AMN FCS] block.");
+            return false;
         }
 
         private string ReadSetting(string key)

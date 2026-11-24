@@ -784,6 +784,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
+        public bool CanDepartHaulerPickup()
+        {
+            long pickupGrid;
+            return _consumerGroup == "Haulers" && HasActiveTask && HasRecentLeaseConfirmation &&
+                CurrentStage() == "deliver" && _stageIndex > 0 && _stages[_stageIndex - 1] == "pickup" &&
+                _readDockedGrid != null && TryReadHaulerGrid(true, out pickupGrid) &&
+                _readDockedGrid() == pickupGrid;
+        }
+
         private bool TryReadHaulerGrid(bool pickup, out long grid)
         {
             grid = 0;

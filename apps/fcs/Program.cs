@@ -128,6 +128,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "dock approach": BeginDockApproach(false); break;
                 case "dock drone": BeginDockApproach(true); break;
                 case "dock depart": DepartBerth(true); break;
+                case "dock depart ready": DepartBerth(false, requireReady: true); break;
                 case "dock guide":
                     dockConnector = FindDockConnector();
                     showDockGuide = dockConnector != null && dockPosition.HasValue;
@@ -673,7 +674,7 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private void DepartBerth(bool requestedNow)
+        private void DepartBerth(bool requestedNow, bool requireReady = false)
         {
             if (mode != Mode.Off)
             {
@@ -694,7 +695,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     SaveSettings();
                     return;
                 }
-                if (dockCharging && !disconnectPending)
+                if ((dockCharging || requireReady) && !disconnectPending)
                 {
                     double charge = GetBatteryChargePercent();
                     if (charge < departureCharge)
