@@ -125,48 +125,21 @@ namespace SpaceEngineers.Services.Broker
                 !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
                 return;
 
-            var task = _tasks.FirstOrDefault(entry => entry.Id == taskId);
-            if (task == null)
+            if (eventType == "TASK_DONE")
             {
-                if (eventType == "TASK_DONE")
-                {
-                    var commit = _commits.FirstOrDefault(entry => entry.TaskId == taskId && entry.ConsumerId == sourceId && entry.LeaseEpoch == leaseEpoch);
-                    if (commit != null)
-                        SendTaskDoneAck(commit);
-                }
+                MarkTaskDone(sourceId, taskId, leaseEpoch);
                 return;
             }
-            if (task.State == "CLEARED")
-                return;
-            if (task.WorkerId == sourceId && task.LeaseEpoch == leaseEpoch && task.State == "DONE" && eventType == "TASK_DONE")
-            {
-                SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) + ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", sourceId, "done-ack:" + taskId + ":" + leaseEpoch.ToString(CultureInfo.InvariantCulture));
-                return;
-            }
-            if (task.State == "DONE")
-                return;
-            if (task.WorkerId != sourceId || (task.State != "LEASED" && task.State != "ACTIVE"))
-                return;
-            if (leaseEpoch != task.LeaseEpoch)
+
+            var task = _tasks.FirstOrDefault(entry => entry.Id == taskId &&
+                entry.WorkerId == sourceId && entry.LeaseEpoch == leaseEpoch);
+            if (task == null || (task.State != "LEASED" && task.State != "ACTIVE"))
                 return;
 
-            if (eventType == "TASK_RECEIVED")
-            {
-                task.WorkerId = sourceId;
-                task.State = "ACTIVE";
-                task.LastDispatchTick = _tick;
-                Echo("Consumer " + sourceId + " persisted task " + task.Id);
-            }
-            else
-            {
-                AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId));
-                AddTaskCommit(task.Id, sourceId, leaseEpoch);
-                _tasks.Remove(task);
-                Echo("Completed: " + task.Id);
-            }
+            task.State = "ACTIVE";
+            task.LastDispatchTick = _tick;
             SaveQueue();
-            if (eventType == "TASK_DONE")
-                SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = sourceId, LeaseEpoch = leaseEpoch });
+            Echo("Consumer " + sourceId + " persisted task " + task.Id);
         }
 
         private void HandleTaskPublish(long requesterId, string requestJson)
@@ -263,6 +236,7 @@ namespace SpaceEngineers.Services.Broker
                 if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out completedEpochJson) &&
                     int.TryParse(completedEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out completedEpoch))
                     MarkTaskDone(consumerId, completedId, completedEpoch);
+                return;
             }
 
             string activeIdJson;
@@ -281,8 +255,7 @@ namespace SpaceEngineers.Services.Broker
                     previous.GroupId != groupId || previous.LeaseEpoch != activeEpoch ||
                     (previous.State != "LEASED" && previous.State != "ACTIVE"))
                 {
-                    SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(activeId) +
-                        ",\"lease_epoch\":" + activeEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
+                    SendTaskRevoked(consumerId, activeId, activeEpoch);
                     return;
                 }
             }
@@ -339,14 +312,20 @@ namespace SpaceEngineers.Services.Broker
                 var existingCommit = _commits.FirstOrDefault(entry => entry.TaskId == taskId && entry.ConsumerId == consumerId && entry.LeaseEpoch == leaseEpoch);
                 if (existingCommit != null)
                     SendTaskDoneAck(existingCommit);
+                else
+                    SendTaskRevoked(consumerId, taskId, leaseEpoch);
                 return;
             }
-            if (task.State == "CLEARED")
-                return;
 
             if (task.State == "DONE")
             {
                 SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = consumerId, LeaseEpoch = leaseEpoch });
+                return;
+            }
+
+            if (task.State != "LEASED" && task.State != "ACTIVE")
+            {
+                SendTaskRevoked(consumerId, taskId, leaseEpoch);
                 return;
             }
 
@@ -356,6 +335,12 @@ namespace SpaceEngineers.Services.Broker
             SaveQueue();
             SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = consumerId, LeaseEpoch = leaseEpoch });
             Echo("Completed: " + task.Id);
+        }
+
+        private void SendTaskRevoked(long consumerId, string taskId, int leaseEpoch)
+        {
+            SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
+                ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
         }
 
         private void AddTaskCommit(string taskId, long consumerId, int leaseEpoch)

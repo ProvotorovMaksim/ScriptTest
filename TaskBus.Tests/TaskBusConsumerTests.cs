@@ -7,6 +7,35 @@ namespace TaskBus.Tests
 {
     public sealed class TaskBusConsumerTests
     {
+        [Fact]
+        public void RevokedCompletionReleasesWorkerForAnotherTask()
+        {
+            string storage = "";
+            var worker = new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Worker", 1);
+
+            void Deliver(string type, string taskId, int epoch)
+            {
+                var envelope = TaskBusProtocol.CreateEnvelope(type,
+                    "{\"task_id\":\"" + taskId + "\",\"lease_epoch\":" + epoch + "}", targetId: 42);
+                Assert.True(worker.ProcessIncomingMessage(1, envelope));
+            }
+
+            Deliver("TASK_ASSIGN", "old", 3);
+            worker.ProcessCommand("stage execute");
+            Deliver("TASK_REVOKED", "old", 2);
+            Deliver("TASK_ASSIGN", "new", 1);
+            Assert.False(worker.HasActiveTask);
+            Assert.Contains("Pending completion: old", worker.GetStatus());
+
+            Deliver("TASK_REVOKED", "old", 3);
+            worker = new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Worker", 1);
+            Deliver("TASK_ASSIGN", "new", 1);
+            Assert.True(worker.HasActiveTask);
+            Assert.Contains("Pending completion: none", worker.GetStatus());
+        }
+
         [Theory]
         [InlineData("TASK_CANCEL")]
         [InlineData("TASK_REVOKED")]

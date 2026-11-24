@@ -202,8 +202,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 {
                     SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
                         ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
-                    return;
                 }
+                return;
             }
 
             if (_activeTaskId != taskId)
@@ -338,10 +338,22 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             int leaseEpoch;
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "task_id", out taskIdJson) ||
                 !TaskBusIgcHelper.TryReadJsonString(taskIdJson, out taskId) ||
-                taskId != _activeTaskId ||
                 !TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch) ||
-                leaseEpoch != _leaseEpoch)
+                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                return;
+
+            if (!string.IsNullOrEmpty(_pendingCompletedTaskId) &&
+                taskId == _pendingCompletedTaskId && leaseEpoch == _pendingCompletedEpoch)
+            {
+                _pendingCompletedTaskId = null;
+                _pendingCompletedEpoch = 0;
+                _lastRevokedTaskId = taskId;
+                SaveState();
+                _echo("Broker revoked the completion lease for " + taskId);
+                return;
+            }
+
+            if (taskId != _activeTaskId || leaseEpoch != _leaseEpoch)
                 return;
 
             _lastRevokedTaskId = taskId;
