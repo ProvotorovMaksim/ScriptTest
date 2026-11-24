@@ -48,8 +48,19 @@ namespace Sandbox.ModAPI.Ingame
         public (long Source, string Tag, object Data) AcceptMessage() => Inbox.Dequeue();
     }
 
+    public interface IMyProgrammableBlock
+    {
+        long EntityId { get; }
+        long CubeGrid { get; }
+        bool IsWorking { get; }
+        bool TryRun(string command);
+    }
+
     public sealed class TestTerminal
     {
+        public IMyProgrammableBlock Application;
+        public object GetBlockWithName(string name) => name == "[GALNET APP]" ? Application : null;
+
         private sealed class Antenna : IMyRadioAntenna
         {
             public bool Enabled => true;
@@ -72,7 +83,7 @@ namespace Sandbox.ModAPI.Ingame
 
         public TestRadio IGC { get; } = new();
         public TestTerminal GridTerminalSystem { get; } = new();
-        public (long EntityId, string Name) Me { get; } = (EntityIdAtStartup == 0 ? 1 : EntityIdAtStartup, "Test node");
+        public (long EntityId, string Name, long CubeGrid) Me { get; } = (EntityIdAtStartup == 0 ? 1 : EntityIdAtStartup, "Test node", 1);
         public TestRuntime Runtime { get; } = new();
         public string Storage { get; set; } = StorageAtStartup;
         public List<string> Output { get; } = new();

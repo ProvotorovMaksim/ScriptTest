@@ -88,6 +88,50 @@ namespace TaskBus.Tests
             Assert.DoesNotContain("SEEN:", relay.Storage);
         }
 
+        [Fact]
+        public void ApplicationPacketIsAcknowledgedOnlyAfterLocalHandoff()
+        {
+            var relay = Start(4, "0\n1");
+            var application = new TestApplication();
+            relay.GridTerminalSystem.Application = application;
+            var expires = System.DateTime.UtcNow.AddMinutes(1).Ticks;
+            var packet = "APP|1|4|1:7|8|" + expires + "|" + TaskBusIgcHelper.EncodeStorage("test payload");
+
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "LINK|1|1|1|8|4"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", packet));
+            relay.Main("", UpdateType.Update10);
+            Assert.DoesNotContain("SEEN:", relay.Storage);
+
+            application.Accept = true;
+            for (int repeat = 0; repeat < 2; repeat++)
+            {
+                relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", packet));
+                relay.Main("", UpdateType.Update10);
+            }
+            Assert.Equal(2, application.Calls);
+            Assert.Equal("galnet recv 1 1:7 test payload", application.LastCommand);
+            Assert.Single(relay.Storage.Split('\n').Where(line => line.StartsWith("SEEN:")));
+            Assert.Contains(relay.IGC.UnicastOutbox, message => message.Data.StartsWith("ACK|4|1|1:7|"));
+        }
+
+        private sealed class TestApplication : IMyProgrammableBlock
+        {
+            public long EntityId => 44;
+            public long CubeGrid => 1;
+            public bool IsWorking => true;
+            public bool Accept;
+            public int Calls;
+            public string LastCommand;
+
+            public bool TryRun(string command)
+            {
+                Calls++;
+                LastCommand = command;
+                return Accept;
+            }
+        }
+
         private static Relay Start(long id, string storage)
         {
             MyGridProgram.EntityIdAtStartup = id;

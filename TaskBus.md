@@ -77,9 +77,12 @@ up to 16 pending messages in Storage and retries them via the current
 route until the destination acknowledges or the five-minute UTC deadline
 expires. Upgrade all relays together. Older diagnostic packets without
 a deadline are discarded. The last 64 delivery IDs are
-retained for duplicate suppression across receiver restarts. Text delivery
-is a diagnostic. TaskBus integration and explicit laser link control are
-separate work.
+retained for duplicate suppression across receiver restarts. Text delivery is a diagnostic. Use `app <node ID> <payload>` to deliver
+up to 1024 characters to a working local programmable block named
+`[GALNET APP]`. The recipient script gets `galnet recv <origin> <ID> <payload>`.
+The relay acknowledges a successful local invocation. Application handlers
+must still make their own writes idempotent and confirm business outcomes.
+TaskBus integration and explicit laser link control are separate work.
 
 ### Select a broker
 

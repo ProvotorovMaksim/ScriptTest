@@ -21,6 +21,8 @@ namespace SpaceEngineers.Services.Galnet
         private long _sequence;
         private long _tick;
         private static readonly long MessageLifetime = TimeSpan.FromMinutes(5).Ticks;
+        private const string ApplicationBlockName = "[GALNET APP]";
+        private const int MaxApplicationLength = 1024;
         private const int MaxPending = 16;
         private const int MaxReceived = 64;
         private readonly List<string> _outbox = new List<string>();
@@ -90,7 +92,9 @@ namespace SpaceEngineers.Services.Galnet
             if (command.StartsWith("peer ", StringComparison.OrdinalIgnoreCase))
                 ChangePeer(command);
             else if (command.StartsWith("send ", StringComparison.OrdinalIgnoreCase))
-                QueueMessage(command.Substring(5));
+                QueueMessage("DATA", command.Substring(5), 255);
+            else if (command.StartsWith("app ", StringComparison.OrdinalIgnoreCase))
+                QueueMessage("APP", command.Substring(4), MaxApplicationLength);
             else if (command.StartsWith("route ", StringComparison.OrdinalIgnoreCase))
             {
                 long destination;
@@ -134,10 +138,11 @@ namespace SpaceEngineers.Services.Galnet
                 _peers[sender] = _tick;
                 return;
             }
-            if (!IsLive(sender) || string.IsNullOrEmpty(packet) || packet.Length > 2048)
+            if (!IsLive(sender) || string.IsNullOrEmpty(packet) || packet.Length > 6144)
                 return;
 
             if (packet.StartsWith("DATA|", StringComparison.Ordinal) ||
+                packet.StartsWith("APP|", StringComparison.Ordinal) ||
                 packet.StartsWith("ACK|", StringComparison.Ordinal))
             {
                 ForwardMessage(packet, sender);
@@ -175,20 +180,20 @@ namespace SpaceEngineers.Services.Galnet
                 Flood(owner, generation, sequence, remaining - 1, neighbors, sender);
         }
 
-        private void QueueMessage(string argument)
+        private void QueueMessage(string kind, string argument, int maxLength)
         {
             int split = argument.IndexOf(' ');
             long destination;
             if (split < 1 || !long.TryParse(argument.Substring(0, split), out destination) ||
-                destination == 0 || destination == Me.EntityId || argument.Length - split > 256 ||
+                destination == 0 || destination == Me.EntityId || argument.Length - split - 1 > maxLength || split == argument.Length - 1 ||
                 _outbox.Count >= MaxPending)
             {
-                Echo("Use send <node ID> <text up to 255 characters>. Outbox holds 16 messages.");
+                Echo("Use send/app <node ID> <payload>. Max " + maxLength + " characters. Outbox holds 16 messages.");
                 return;
             }
 
             var id = _generation + ":" + (++_sequence);
-            var packet = "DATA|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
+            var packet = kind + "|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
                 (DateTime.UtcNow.Ticks + MessageLifetime) + "|" +
                 TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
             _outbox.Add(packet);
@@ -203,7 +208,7 @@ namespace SpaceEngineers.Services.Galnet
             long destination;
             int hops;
             long expires;
-            if (fields.Length != 7 || (fields[0] != "DATA" && fields[0] != "ACK") ||
+            if (fields.Length != 7 || (fields[0] != "DATA" && fields[0] != "APP" && fields[0] != "ACK") ||
                 !long.TryParse(fields[5], out expires) || expires <= DateTime.UtcNow.Ticks ||
                 !long.TryParse(fields[1], out origin) || origin == 0 ||
                 !long.TryParse(fields[2], out destination) || destination == 0 ||
@@ -214,12 +219,13 @@ namespace SpaceEngineers.Services.Galnet
 
             if (destination == Me.EntityId)
             {
-                if (fields[0] == "DATA")
-                    AcceptData(origin, fields[3], expires, fields[6]);
+                if (fields[0] != "ACK")
+                    AcceptData(fields[0], origin, fields[3], expires, fields[6]);
                 else
                 {
-                    var prefix = "DATA|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
-                    if (_outbox.RemoveAll(item => item.StartsWith(prefix, StringComparison.Ordinal)) > 0)
+                    var address = "|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
+                    if (_outbox.RemoveAll(item => item.StartsWith("DATA" + address, StringComparison.Ordinal) ||
+                        item.StartsWith("APP" + address, StringComparison.Ordinal)) > 0)
                         SaveConfiguration();
                 }
                 return;
@@ -242,11 +248,11 @@ namespace SpaceEngineers.Services.Galnet
         {
             var fields = packet.Split('|');
             long expires;
-            return fields.Length == 7 && fields[0] == "DATA" && long.TryParse(fields[5], out expires) &&
+            return fields.Length == 7 && (fields[0] == "DATA" || fields[0] == "APP") && long.TryParse(fields[5], out expires) &&
                 expires > now;
         }
 
-        private void AcceptData(long origin, string id, long expires, string encoded)
+        private void AcceptData(string kind, long origin, string id, long expires, string encoded)
         {
             var key = origin + ":" + id;
             if (!_received.Contains(key))
@@ -254,15 +260,32 @@ namespace SpaceEngineers.Services.Galnet
                 string message;
                 try { message = TaskBusIgcHelper.DecodeStorage(encoded); }
                 catch (FormatException) { return; }
-                if (message.Length > 255)
+                if (message.Length > (kind == "APP" ? MaxApplicationLength : 255) ||
+                    (kind == "APP" && !DeliverApplication(origin, id, message)))
                     return;
                 if (_received.Count >= MaxReceived)
                     _received.Dequeue();
                 _received.Enqueue(key);
-                _lastDelivery = "From " + origin + ": " + message;
+                _lastDelivery = kind == "APP" ? "Application packet from " + origin + "." :
+                    "From " + origin + ": " + message;
                 SaveConfiguration();
             }
             ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|" + expires + "|", 0);
+        }
+
+        private bool DeliverApplication(long origin, string id, string payload)
+        {
+            try
+            {
+                var block = GridTerminalSystem.GetBlockWithName(ApplicationBlockName) as IMyProgrammableBlock;
+                return block != null && block.EntityId != Me.EntityId && block.CubeGrid == Me.CubeGrid &&
+                    block.IsWorking && block.TryRun("galnet recv " + origin + " " + id + " " + payload);
+            }
+            catch (Exception error)
+            {
+                Echo("Local Galnet application unavailable: " + error.Message);
+                return false;
+            }
         }
 
         private void Flood(long owner, long generation, long sequence, int remaining,
