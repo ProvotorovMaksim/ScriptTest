@@ -44,6 +44,10 @@ namespace SpaceEngineers.Apps.Platform
         private bool _platformMiningRetreat;
         private readonly bool _autoMiningRetreat;
         private readonly bool _autoMiningReturn;
+        private readonly bool _autoMiningPass;
+        private bool _platformMiningApproach;
+        private string _pendingPassLease;
+        private int _passSettleUpdates;
         private readonly bool _autoMiningDock;
         private bool _platformMiningReturn;
         private Vector3D _miningReturnEndpoint;
@@ -164,6 +168,7 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Use SurveyAutoAsteroid=<scan metres> <stand-off metres> <spacing metres>.");
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoMiningPass = string.Equals(ReadSetting("MiningAutoPass="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningDock = string.Equals(ReadSetting("MiningAutoDock="), "true", StringComparison.OrdinalIgnoreCase);
             var laneSetting = ReadSetting("MiningLaneRadius=");
@@ -276,6 +281,7 @@ namespace SpaceEngineers.Apps.Platform
                 _sampleDetector = null;
                 _platformFlightLease = null;
                 _pendingRetreatLease = null;
+                _pendingPassLease = null;
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
@@ -289,7 +295,10 @@ namespace SpaceEngineers.Apps.Platform
             else if (string.Equals(command, "mine plan", StringComparison.OrdinalIgnoreCase))
                 LoadAssignedMiningEndpoint();
             else if (string.Equals(command, "mine pass", StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingPassLease = null;
                 StartMiningPass();
+            }
             else if (string.Equals(command, "mine retreat plan", StringComparison.OrdinalIgnoreCase))
                 LoadAssignedMiningRetreat();
             else if (string.Equals(command, "mine retreat", StringComparison.OrdinalIgnoreCase))
@@ -329,6 +338,7 @@ namespace SpaceEngineers.Apps.Platform
             else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
             {
                 _pendingRetreatLease = null;
+                _pendingPassLease = null;
                 StopManagedDrills();
             }
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
@@ -350,6 +360,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             if ((updateSource & UpdateType.Update10) != 0)
             {
+                UpdateAutomaticMiningPass();
                 UpdateAutomaticRetreat();
                 UpdateAutomaticMiningReturn();
                 CheckLeasedMiningDock();
@@ -1456,7 +1467,11 @@ namespace SpaceEngineers.Apps.Platform
             if (returning)
                 _routes.LoadReturnRoute(StartMiningReturnFlight);
             else
-                _routes.LoadMiningApproach(remote => StartPlatformFlight(remote, "Mining approach", false));
+                _routes.LoadMiningApproach(remote =>
+                {
+                    StartPlatformFlight(remote, "Mining approach", false);
+                    _platformMiningApproach = _worker.SupervisedCruiseRemote == remote.EntityId;
+                });
         }
 
         private void StartMiningReturnFlight(IMyRemoteControl remote)
@@ -1530,7 +1545,7 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Review the loaded endpoint, ship alignment and drill clearance before running mine pass.");
         }
 
-        private void StartMiningPass()
+        private void StartMiningPass(bool automatic = false)
         {
             string taskId;
             double x;
@@ -1562,6 +1577,17 @@ namespace SpaceEngineers.Apps.Platform
             {
                 Echo("Load one reviewed mining endpoint inside the assigned lane.");
                 return;
+            }
+
+            if (automatic)
+            {
+                var offset = _surveyWaypoints[0].Coords - remote.GetPosition();
+                if (remote.Direction != Base6Directions.Direction.Forward || offset.LengthSquared() <= 4 ||
+                    Vector3D.Dot(Vector3D.Normalize(offset), remote.WorldMatrix.Forward) < 0.996)
+                {
+                    Echo("Automatic mining pass requires a Forward controller aligned to the reviewed endpoint.");
+                    return;
+                }
             }
 
             if (_surveyWaypoints[0].Name == MiningEndpointName)
@@ -1748,6 +1774,7 @@ namespace SpaceEngineers.Apps.Platform
             _worker.SetSupervisedCruiseRemote(remote.EntityId);
             _platformFlightLease = _worker.ConfirmedLeaseIdentity;
             _platformSurveyFlight = survey;
+            _platformMiningApproach = false;
             _platformMiningReturn = false;
             _flightProgressTicks = 0;
             _flightProgressPosition = remote.GetPosition();
@@ -1774,6 +1801,13 @@ namespace SpaceEngineers.Apps.Platform
                     _pendingRetreatLease = _drillingLease;
                     _retreatSettleUpdates = 0;
                 }
+                if (_autoMiningPass && _platformMiningApproach && _platformFlightLease != null &&
+                    _platformFlightLease == _worker.ConfirmedLeaseIdentity && remote != null &&
+                    remote.CubeGrid == Me.CubeGrid && remote.IsWorking && IsAtMiningApproach(remote, 4))
+                {
+                    _pendingPassLease = _platformFlightLease;
+                    _passSettleUpdates = 0;
+                }
                 if (_autoMiningReturn && _platformMiningRetreat && _platformFlightLease != null &&
                     _platformFlightLease == _worker.ConfirmedLeaseIdentity && remote != null &&
                     remote.CubeGrid == Me.CubeGrid && remote.IsWorking && CheckMiningFlightPosition(remote) &&
@@ -1794,6 +1828,7 @@ namespace SpaceEngineers.Apps.Platform
                 _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
                 _platformMiningRetreat = false;
+                _platformMiningApproach = false;
                 _platformMiningReturn = false;
                 return;
             }
@@ -1814,9 +1849,44 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.SetSupervisedCruiseRemote(0);
                 FinishMiningPass();
                 _platformMiningRetreat = false;
+                _platformMiningApproach = false;
                 _platformMiningReturn = false;
                 if (!_lastProbe.StartsWith("Platform movement halted", StringComparison.Ordinal))
                     _lastProbe = "Platform flight stopped. Check the lease and flight conditions.";
+            }
+        }
+
+        private bool IsAtMiningApproach(IMyRemoteControl remote, double maxDistanceSquared)
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            return _worker.TryGetMiningApproach(out taskId, out x, out y, out z) &&
+                Vector3D.DistanceSquared(remote.GetPosition(), new Vector3D(x, y, z)) <= maxDistanceSquared;
+        }
+
+        private void UpdateAutomaticMiningPass()
+        {
+            if (_pendingPassLease == null)
+                return;
+            if (_pendingPassLease != _worker.ConfirmedLeaseIdentity || _worker.SupervisedCruiseRemote != 0)
+            {
+                _pendingPassLease = null;
+                return;
+            }
+
+            var remote = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
+            if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
+                !remote.IsAutoPilotEnabled && remote.GetShipSpeed() <= 0.25 && IsAtMiningApproach(remote, 25))
+            {
+                _pendingPassLease = null;
+                StartMiningPass(automatic: true);
+            }
+            else if (++_passSettleUpdates >= 30)
+            {
+                _pendingPassLease = null;
+                _lastProbe = "Automatic mining pass cancelled: the platform did not settle at the approach.";
             }
         }
 

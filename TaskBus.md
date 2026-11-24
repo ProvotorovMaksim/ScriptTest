@@ -433,7 +433,13 @@ Run `mine plan` to load a candidate endpoint from the assigned ore GPS.
 It offsets for the controller's current position relative to the grid
 origin and preserves manually prepared waypoints. It leaves the autopilot
 and drills idle while the operator checks alignment and clearance.
-Run `mine pass` to start both the drills and the controller. The pass
+Run `mine pass` to start both the drills and the controller. With
+`MiningAutoPass=true`, arriving within 2 m of the assignment approach
+under the same lease enables a single attempt to start the preloaded
+pass. The ship must settle, and the pass controller must face Forward
+within about five degrees of its reviewed endpoint. The automatic
+handoff requires the endpoint to be prepared before the approach.
+`ore stop` or `mine drills off` cancels a pending automatic start. The pass
 stops on completion, lease loss, lane or cargo limits, or speed above
 1.5 m/s. It also stops if it advances less than 0.5 m toward its endpoint
 over 60 scheduled updates (about 10 seconds at normal simulation speed).
