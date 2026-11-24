@@ -45,6 +45,25 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void MiningCompletionRequiresTheFullDepositUnderTheCurrentLease()
+        {
+            var platform = new TaskBusConsumer((_, __) => { }, () => "", _ => { }, _ => { },
+                42, "Platform", miningPlatform: true);
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"mine\",\"lease_epoch\":1,\"group_id\":\"MiningFleet\"," +
+                "\"details\":{\"resource\":\"Ore/Iron\",\"amount\":100,\"steps\":[\"mine\"]}}", targetId: 42);
+            platform.ProcessIncomingMessage(1, assignment);
+            platform.RecordMiningDeposit(99);
+            Assert.False(platform.TryCompleteMiningDeposit());
+            platform.RecordMiningDeposit(1);
+            platform.Tick(false);
+            Assert.False(platform.TryCompleteMiningDeposit());
+            platform.ProcessIncomingMessage(1, assignment);
+            Assert.True(platform.TryCompleteMiningDeposit());
+            Assert.Contains("Pending completion: mine", platform.GetStatus());
+        }
+
+        [Fact]
         public void SupervisedCruiseRemoteSurvivesRestartEvenWithoutAnActiveTask()
         {
             string storage = "";

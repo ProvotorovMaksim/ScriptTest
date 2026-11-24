@@ -820,6 +820,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             SaveState();
         }
 
+        public bool TryCompleteMiningDeposit()
+        {
+            string resource;
+            double target;
+            if (!TryGetMiningCargoTarget(out resource, out target) || MiningDeposited + 0.0000001 < target)
+                return false;
+            AdvanceStage("mine");
+            return true;
+        }
+
         public long SupervisedCruiseRemote { get; private set; }
 
         public void SetSupervisedCruiseRemote(long remoteId)

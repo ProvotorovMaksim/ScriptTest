@@ -167,6 +167,10 @@ namespace SpaceEngineers.Apps.Platform
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
                 UnloadMiningCargo();
+            else if (string.Equals(command, "mine finish", StringComparison.OrdinalIgnoreCase) ||
+                (_miningUnloadTo != null && command.StartsWith("stage ", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(command.Substring(6).Trim(), "mine", StringComparison.OrdinalIgnoreCase)))
+                FinishMiningDeposit();
             else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
                 StopManagedDrills();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
@@ -218,10 +222,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            var connector = GridTerminalSystem.GetBlockWithName("[FCS DOCK]") as IMyShipConnector;
-            var partner = connector == null || connector.CubeGrid != Me.CubeGrid ||
-                connector.Status != MyShipConnectorStatus.Connected ? null : connector.OtherConnector;
-            if (partner == null || partner.CubeGrid.EntityId != grid || grid == Me.CubeGrid.EntityId)
+            if (!IsDockedAtMiningPoint(grid))
             {
                 Echo("Dock at the assigned mining point before unloading.");
                 return;
@@ -251,8 +252,9 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            double bufferBefore = MeasureMiningCargo(destination, resource);
             double before = MeasureMiningCargo(source, resource);
-            bool attempted = false;
+            double attempted = 0;
             foreach (var item in _miningItems)
             {
                 if (!MatchesMiningResource(item, resource))
@@ -262,11 +264,14 @@ namespace SpaceEngineers.Apps.Platform
                 if ((double)quantity > 0)
                 {
                     source.TransferItemTo(destination, item, quantity);
-                    attempted = true;
+                    attempted = (double)quantity;
                 }
                 break;
             }
-            double transferred = attempted ? before - MeasureMiningCargo(source, resource) : 0;
+            double transferred = attempted > 0
+                ? Math.Min(attempted, Math.Min(before - MeasureMiningCargo(source, resource),
+                    MeasureMiningCargo(destination, resource) - bufferBefore))
+                : 0;
             if (transferred > 0)
             {
                 _worker.RecordMiningDeposit(transferred);
@@ -275,6 +280,28 @@ namespace SpaceEngineers.Apps.Platform
             }
             else
                 Echo("No requested ore transferred. Check cargo, available space and conveyor permissions.");
+        }
+
+        private bool IsDockedAtMiningPoint(long grid)
+        {
+            if (grid == Me.CubeGrid.EntityId)
+                return false;
+            var connector = GridTerminalSystem.GetBlockWithName("[FCS DOCK]") as IMyShipConnector;
+            var partner = connector == null || connector.CubeGrid != Me.CubeGrid ||
+                connector.Status != MyShipConnectorStatus.Connected ? null : connector.OtherConnector;
+            return partner != null && partner.CubeGrid.EntityId == grid;
+        }
+
+        private void FinishMiningDeposit()
+        {
+            long grid;
+            if (_drillingLease != null || !_worker.TryGetMiningPoint(out grid) || !IsDockedAtMiningPoint(grid))
+            {
+                Echo("Stop the drills and dock at the assigned mining point under a confirmed lease.");
+                return;
+            }
+            if (!_worker.TryCompleteMiningDeposit())
+                Echo("Unload the requested quantity with mine unload before completing mining.");
         }
 
         private void RequestMiningPointDock()

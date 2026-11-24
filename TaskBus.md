@@ -322,10 +322,11 @@ a local `[AMN FCS]` PB and a previously recorded berth for that grid.
 Set `MiningUnloadTo=<mining point cargo container name>` and run
 `mine unload` while docked there with drills off. Each command transfers
 up to one stack of the requested resource from `MiningCargo` into the
-named conveyor-connected buffer. The platform saves the measured decrease
-in its cargo after each transfer, up to the assignment total. The tally
-resumes after confirmation of the same lease. Check the deposited quantity
-before confirming the mining stage. A restart during the transfer itself
+named conveyor-connected buffer. The platform counts the measured decrease
+in its cargo and increase in the buffer, bounded by the attempted quantity.
+The tally resumes after confirmation of the same lease. With
+`MiningUnloadTo` configured, `stage mine` and `mine finish` require
+the full recorded deposit and a connection to the assigned point. A restart during the transfer itself
 can require manual inventory reconciliation.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
