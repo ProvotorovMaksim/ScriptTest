@@ -476,6 +476,15 @@ order, with the result of each completed sample. A position marked
 sample. Earlier saves retain their aggregate count and list individual
 positions as `unknown`. New results survive a recompile.
 
+Run `ore bracket 100` to propose up to nine additional detector samples
+between positions that reported the requested ore and positions that
+reported none, using pairs 20 to 100 m apart. The planner prefers nearby
+opposite readings, skips old or crowded sample positions, and estimates
+the survey remote waypoint using the current detector-to-remote offset.
+Review the proposed flight path before running `ore sweep`. Repeat after
+sampling to narrow open intervals. Opposite detector results suggest a
+change in detection and may depend on range, orientation or terrain.
+
 Use `ore perimeter` to list the convex outline of the reported ore GPS
 positions and their vertical span. The outline uses the local gravity
 plane or, in space, the ship plane at the time of the command. Vertices

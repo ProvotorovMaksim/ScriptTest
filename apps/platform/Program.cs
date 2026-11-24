@@ -190,6 +190,8 @@ namespace SpaceEngineers.Apps.Platform
                 PlanSurvey(command.Substring(9).Trim());
             else if (command.StartsWith("ore refine ", StringComparison.OrdinalIgnoreCase))
                 PlanPerimeterSurvey(command.Substring(11).Trim());
+            else if (command.StartsWith("ore bracket ", StringComparison.OrdinalIgnoreCase))
+                PlanSurveyBrackets(command.Substring(12).Trim());
             else if (string.Equals(command, "ore route", StringComparison.OrdinalIgnoreCase))
                 LoadNextSurveyWaypoint();
             else if (string.Equals(command, "ore fly", StringComparison.OrdinalIgnoreCase))
@@ -860,7 +862,7 @@ namespace SpaceEngineers.Apps.Platform
                 var point = edgeStart + direction * along +
                     new Vector3D(direction.Y, -direction.X, 0) * offset;
                 var waypoint = origin + right * point.X + across * point.Y;
-                if (!IsNewSurveyPosition(waypoint) || IsNearPlannedSurveyPosition(waypoint))
+                if (!IsNewSurveyPosition(waypoint) || IsNearPlannedSurveyPosition(waypoint, _surveyPlan))
                     continue;
                 _surveyPlan.Add(waypoint);
             }
@@ -871,9 +873,76 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Unvisited points: " + _surveyPlan.Count + ". Review terrain and approach clearance.");
         }
 
-        private bool IsNearPlannedSurveyPosition(Vector3D position)
+        private void PlanSurveyBrackets(string argument)
         {
-            foreach (var point in _surveyPlan)
+            double maxGap;
+            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out maxGap) ||
+                !(maxGap >= 2 * MinimumViewSeparation && maxGap <= 500))
+            {
+                Echo("Use ore bracket <maximum sample gap in metres, 20 to 500>.");
+                return;
+            }
+            if (FindSurveyPlanningController() == null)
+                return;
+            var remote = FindSurveyRemote();
+            var detector = GridTerminalSystem.GetBlockWithName(DetectorName) as IMyOreDetector;
+            if (remote == null || remote.IsAutoPilotEnabled || detector == null ||
+                detector.CubeGrid != Me.CubeGrid || !detector.IsWorking)
+            {
+                Echo("Bracketing requires a working local detector and an idle survey remote.");
+                return;
+            }
+
+            var noReports = new List<Vector3D>();
+            foreach (var view in _surveyViews)
+            {
+                if (view.FoundOre == false)
+                    noReports.Add(view.Position);
+            }
+            var planned = new List<Vector3D>();
+            var remoteOffset = remote.GetPosition() - detector.GetPosition();
+            double minimumGap = 2 * MinimumViewSeparation;
+            foreach (var view in _surveyViews)
+            {
+                if (view.FoundOre != true)
+                    continue;
+
+                double bestGapSquared = maxGap * maxGap;
+                Vector3D? next = null;
+                foreach (var noReport in noReports)
+                {
+                    double gapSquared = Vector3D.DistanceSquared(view.Position, noReport);
+                    if (gapSquared > bestGapSquared)
+                        continue;
+                    next = view.Position + (noReport - view.Position) * 0.5;
+                    bestGapSquared = gapSquared;
+                }
+                if (!next.HasValue || bestGapSquared < minimumGap * minimumGap || !IsNewSurveyPosition(next.Value))
+                    continue;
+                var waypoint = next.Value + remoteOffset;
+                if (IsNearPlannedSurveyPosition(waypoint, planned))
+                    continue;
+                planned.Add(waypoint);
+                if (planned.Count == MaxSurveyPlanPoints)
+                    break;
+            }
+
+            if (planned.Count == 0)
+            {
+                Echo("No new midpoint between opposite detector readings within the selected gap.");
+                return;
+            }
+            _surveyPlan.Clear();
+            _surveyPlan.AddRange(planned);
+            SaveSurvey();
+            for (int i = 0; i < _surveyPlan.Count; i++)
+                Echo(FormatSurveyGps("Ore bracket " + (i + 1), _surveyPlan[i]));
+            Echo("Review terrain and approach clearance before running ore sweep.");
+        }
+
+        private static bool IsNearPlannedSurveyPosition(Vector3D position, List<Vector3D> plan)
+        {
+            foreach (var point in plan)
             {
                 if (Vector3D.DistanceSquared(point, position) < MinimumViewSeparation * MinimumViewSeparation)
                     return true;
