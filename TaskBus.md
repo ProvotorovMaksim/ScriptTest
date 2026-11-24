@@ -462,6 +462,14 @@ once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use
 `ore auto off` to stop automatic sampling. Re-enable it after a recompile.
 
+During a confirmed survey, run `ore refine 25` to generate up to nine
+follow-up sample waypoints 25 m outside the observed outline. The route
+lies in the plane through the current platform controller, so first
+position the ship at a suitable flight height. Points within 10 m of a
+previous sample or another planned point are omitted. The generated
+route is saved. Review it before running `ore sweep`; the usual lease,
+clearance and detector refresh checks still apply.
+
 Use `ore perimeter` to list the convex outline of the reported ore GPS
 positions and their vertical span. The outline uses the local gravity
 plane or, in space, the ship plane at the time of the command. Vertices
