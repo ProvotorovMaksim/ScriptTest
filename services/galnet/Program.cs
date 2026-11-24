@@ -29,6 +29,7 @@ namespace SpaceEngineers.Services.Galnet
         private const int MaxPending = 16;
         private const int ReservedPending = 4;
         private const int MaxReceived = 64;
+        private const int ReservedTaskReceipts = 16;
         private readonly List<string> _outbox = new List<string>();
         private readonly Dictionary<string, long> _received = new Dictionary<string, long>();
         private string _lastDelivery = "No message received.";
@@ -423,6 +424,11 @@ namespace SpaceEngineers.Services.Galnet
                 string message;
                 try { message = TaskBusIgcHelper.DecodeStorage(encoded); }
                 catch (FormatException) { return; }
+                long target;
+                if (_received.Count >= MaxReceived - ReservedTaskReceipts &&
+                    (kind != "APP" || !TryReadApplicationTarget(message, out target)))
+                    return;
+
                 if (message.Length > (kind == "APP" ? MaxApplicationLength : 255) ||
                     (kind == "APP" && !DeliverApplication(origin, id, message)))
                     return;
