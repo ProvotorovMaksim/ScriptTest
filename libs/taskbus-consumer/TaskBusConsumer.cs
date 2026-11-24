@@ -588,7 +588,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 .Append(",\"group_id\":").Append(TaskBusIgcHelper.ToJsonString(group))
                 .Append(",\"parent_task_id\":").Append(TaskBusIgcHelper.ToJsonString(_activeTaskId))
                 .Append(",\"parent_lease_epoch\":").Append(_leaseEpoch.ToString(CultureInfo.InvariantCulture))
-                .Append(",\"steps\":[").Append(TaskBusIgcHelper.ToJsonString(childStage)).Append(']');
+                .Append(",\"steps\":[");
+            if (group == "Haulers")
+                payload.Append("\"pickup\",");
+            payload.Append(TaskBusIgcHelper.ToJsonString(childStage)).Append(']');
             foreach (var field in new[] { "key", "resource", "amount", "base_grid_id", "base_grid_name", "base_position" })
             {
                 string value;

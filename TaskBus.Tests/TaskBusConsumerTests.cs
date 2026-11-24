@@ -22,9 +22,36 @@ namespace TaskBus.Tests
             point.Tick();
 
             Assert.Contains("\"group_id\":\"Haulers\"", sent[sent.Count - 1]);
+            Assert.Contains("\"steps\":[\"pickup\",\"deliver\"]", sent[sent.Count - 1]);
             Assert.Contains("\"pickup_name\":\"Mining point\"", sent[sent.Count - 1]);
             Assert.Contains("\"pickup_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
             Assert.Contains("\"base_position\":{\"x\":40,\"y\":50,\"z\":60}", sent[sent.Count - 1]);
+        }
+
+        [Fact]
+        public void HaulerMustConfirmPickupBeforeDeliveryAndResumesAfterRestart()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Hauler", 1);
+            var hauler = Start();
+            hauler.ProcessCommand("group Haulers");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"steps\":[\"pickup\",\"deliver\"]}}", targetId: 42);
+            hauler.ProcessIncomingMessage(1, assignment);
+            hauler.ProcessCommand("stage deliver");
+            Assert.Contains("Stage: pickup", hauler.GetStatus());
+
+            hauler.ProcessCommand("stage pickup");
+            hauler = Start();
+            Assert.Contains("Stage: deliver", hauler.GetStatus());
+            hauler.ProcessCommand("stage deliver");
+            Assert.Contains("Pending completion: none", hauler.GetStatus());
+            hauler.ProcessIncomingMessage(1, assignment);
+            hauler.ProcessCommand("stage deliver");
+            Assert.Contains("Pending completion: haul", hauler.GetStatus());
+            Assert.Contains("TASK_DONE", sent[sent.Count - 1]);
         }
 
         [Fact]
