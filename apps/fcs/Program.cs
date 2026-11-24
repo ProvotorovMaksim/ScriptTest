@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
+using SpaceEngineers.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using VRageMath;
 
@@ -11,6 +12,8 @@ namespace SpaceEngineers.Apps.FlightControl
         // PB BODY START
         private readonly FlightController flight = new FlightController();
         private readonly List<IMyShipController> controllers = new List<IMyShipController>();
+        private const string DockSuccessTimer = "[FCS DOCK OK]";
+        private const string DockFailureTimer = "[FCS DOCK FAIL]";
         private const string DroneControllerName = "[FCS DRONE]";
         private bool droneDock;
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
@@ -20,6 +23,8 @@ namespace SpaceEngineers.Apps.FlightControl
         private MatrixD dockFrame;
         private long dockPortId;
         private int dockTicks;
+        private bool dockCharging;
+        private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
         private bool showDockGuide;
         private const string StatusPanelName = "[FCS STATUS]";
         private const int StatusPanelInterval = 15;
@@ -50,8 +55,11 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 dockPosition = position;
                 dockFrame = MatrixD.CreateWorld(position, forward, up);
-                if (settings.Length == 5)
+                if (settings.Length >= 5)
                     long.TryParse(settings[4], out dockPortId);
+                dockCharging = dockPortId != 0 && settings.Length >= 6 && settings[5] == "charging";
+                if (dockCharging)
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
             }
         }
 
@@ -72,6 +80,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "dock record": RecordDockPose(); break;
                 case "dock approach": BeginDockApproach(false); break;
                 case "dock drone": BeginDockApproach(true); break;
+                case "dock depart": DepartBerth(); break;
                 case "dock guide":
                     dockConnector = FindDockConnector();
                     showDockGuide = dockConnector != null && dockPosition.HasValue;
@@ -113,6 +122,9 @@ namespace SpaceEngineers.Apps.FlightControl
                     Release("FCS off: " + error.Message);
                 }
             }
+
+            if (dockCharging && (source & UpdateType.Update10) != 0)
+                CheckDockPower();
 
             var displayStatus = showDockGuide ? status + GetDockStatus() : status;
             Echo(displayStatus);
@@ -172,6 +184,7 @@ namespace SpaceEngineers.Apps.FlightControl
             if (uncrewed && mode != Mode.Off)
             {
                 Echo("Turn FCS off before starting an uncrewed approach.");
+                SignalDockResult(false);
                 return;
             }
 
@@ -179,16 +192,20 @@ namespace SpaceEngineers.Apps.FlightControl
             if (!dockPosition.HasValue || dockPortId == 0 || dockConnector == null)
             {
                 Echo("Record the berth while connected before starting an approach.");
+                if (uncrewed)
+                    SignalDockResult(false);
                 return;
             }
 
-            Activate(Mode.Dock, uncrewed);
+            bool activationHandled = Activate(Mode.Dock, uncrewed);
             if (mode == Mode.Dock)
             {
                 dockTicks = 0;
                 showDockGuide = true;
                 status = "FCS dock: checking final approach.";
             }
+            else if (uncrewed && !activationHandled)
+                SignalDockResult(false);
         }
 
         private void UpdateDockApproach()
@@ -212,8 +229,9 @@ namespace SpaceEngineers.Apps.FlightControl
             var connectorStatus = dockConnector.Status;
             if (connectorStatus == MyShipConnectorStatus.Connected)
             {
-                Release(port != null && port.EntityId == dockPortId ?
-                    "FCS off: connected to recorded berth." : "FCS off: connected to a different port.");
+                bool atRecordedBerth = port != null && port.EntityId == dockPortId;
+                Release(atRecordedBerth ? "FCS off: connected to recorded berth." :
+                    "FCS off: connected to a different port.", atRecordedBerth);
                 return;
             }
 
@@ -241,7 +259,7 @@ namespace SpaceEngineers.Apps.FlightControl
                     dockConnector.Connect();
                     if (dockConnector.Status == MyShipConnectorStatus.Connected)
                     {
-                        Release("FCS off: connected to recorded berth.");
+                        Release("FCS off: connected to recorded berth.", true);
                         return;
                     }
                 }
@@ -289,7 +307,8 @@ namespace SpaceEngineers.Apps.FlightControl
             if (dockPosition.HasValue)
                 Storage += "\n" + FormatDockVector(dockPosition.Value) + "\n" +
                     FormatDockVector(dockFrame.Forward) + "\n" + FormatDockVector(dockFrame.Up) +
-                    "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                (dockCharging ? "\ncharging" : "");
         }
 
         private static string FormatDockVector(Vector3D vector) =>
@@ -332,14 +351,14 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private void Activate(Mode requested, bool uncrewed = false)
+        private bool Activate(Mode requested, bool uncrewed = false)
         {
             if (droneDock)
                 Release("FCS off: switching from uncrewed docking.");
             if (mode != Mode.Off)
             {
                 mode = requested;
-                return;
+                return true;
             }
 
             IMyShipController selected = null;
@@ -361,7 +380,7 @@ namespace SpaceEngineers.Apps.FlightControl
                         if (selected != null)
                         {
                             status = "FCS off: more than one " + DroneControllerName + " controller.";
-                            return;
+                            return false;
                         }
                         selected = controller;
                     }
@@ -373,19 +392,19 @@ namespace SpaceEngineers.Apps.FlightControl
             if (uncrewed && PilotHasControl())
             {
                 status = "FCS off: leave all controllers before starting an uncrewed approach.";
-                return;
+                return false;
             }
 
             if (RemoteAutopilotEnabled())
             {
                 status = "FCS off: disable the remote autopilot first.";
-                return;
+                return false;
             }
             if (selected == null)
             {
                 status = uncrewed ? "FCS off: need a controller named " + DroneControllerName + "." :
                     "FCS off: occupy a cockpit tagged [FCS].";
-                return;
+                return false;
             }
 
             var thrusters = new List<IMyThrust>();
@@ -398,7 +417,7 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 cockpit = null;
                 status = "FCS off: need thrusters and gyros free of existing overrides.";
-                return;
+                return false;
             }
 
             cockpit = selected;
@@ -408,12 +427,13 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 cockpit.ControlThrusters = false;
                 cockpit.DampenersOverride = false;
-                Runtime.UpdateFrequency = UpdateFrequency.Update1;
+                Runtime.UpdateFrequency = dockCharging ? UpdateFrequency.Update1 | UpdateFrequency.Update10 : UpdateFrequency.Update1;
             }
             catch (Exception error)
             {
                 Release("FCS off: engagement failed. " + error.Message);
             }
+            return true;
         }
 
         private bool PilotHasControl()
@@ -432,17 +452,18 @@ namespace SpaceEngineers.Apps.FlightControl
             return false;
         }
 
-        private void Release(string reason)
+        private void Release(string reason, bool dockingSucceeded = false)
         {
             status = reason;
             if (mode == Mode.Off)
                 return;
 
+            bool signalDroneResult = droneDock;
             var previousCockpit = cockpit;
             cockpit = null;
             mode = Mode.Off;
             droneDock = false;
-            Runtime.UpdateFrequency = UpdateFrequency.None;
+            Runtime.UpdateFrequency = dockCharging ? UpdateFrequency.Update10 : UpdateFrequency.None;
 
             int failures = flight.Release();
             try { previousCockpit.ControlThrusters = previousThrusterControl; }
@@ -452,6 +473,116 @@ namespace SpaceEngineers.Apps.FlightControl
 
             if (failures > 0)
                 status += "\nCould not restore " + failures + " actuator or cockpit settings.";
+            if (signalDroneResult)
+            {
+                bool ready = dockingSucceeded && failures == 0;
+                if (ready)
+                {
+                    dockCharging = true;
+                    SaveSettings();
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                    ready = SetDockBatteryMode(ChargeMode.Recharge);
+                }
+                SignalDockResult(ready);
+            }
+        }
+
+        private bool SetDockBatteryMode(ChargeMode chargeMode)
+        {
+            try
+            {
+                batteries.Clear();
+                GridTerminalSystem.GetBlocksOfType(batteries, battery => battery.CubeGrid == Me.CubeGrid);
+                bool allSet = true;
+                foreach (var battery in batteries)
+                {
+                    try { battery.ChargeMode = chargeMode; }
+                    catch (Exception) { allSet = false; }
+                }
+                if (allSet)
+                    return true;
+            }
+            catch (Exception)
+            {
+                // A later power check can retry after the terminal becomes available.
+            }
+
+            status = "FCS: could not set all ship batteries to " + chargeMode + ".";
+            return false;
+        }
+
+        private void CheckDockPower()
+        {
+            try
+            {
+                var connector = FindDockConnector();
+                if (connector != null && connector.Status == MyShipConnectorStatus.Connected)
+                    return;
+
+                if (SetDockBatteryMode(ChargeMode.Auto))
+                {
+                    dockCharging = false;
+                    SaveSettings();
+                    if (mode == Mode.Off)
+                        Runtime.UpdateFrequency = UpdateFrequency.None;
+                    status = "FCS: undocked. Ship batteries set to Auto.";
+                }
+            }
+            catch (Exception error)
+            {
+                status = "FCS: dock power check failed. " + error.Message;
+            }
+        }
+
+        private void DepartBerth()
+        {
+            if (mode != Mode.Off)
+            {
+                Echo("Turn FCS off before requesting departure.");
+                return;
+            }
+
+            try
+            {
+                var connector = FindDockConnector();
+                var port = connector == null ? null : connector.OtherConnector;
+                if (connector == null || connector.Status != MyShipConnectorStatus.Connected ||
+                    port == null || port.EntityId != dockPortId)
+                {
+                    Echo("Departure requires a connection to the recorded berth.");
+                    return;
+                }
+                if (!SetDockBatteryMode(ChargeMode.Auto))
+                    return;
+
+                connector.Disconnect();
+                if (connector.Status != MyShipConnectorStatus.Connected)
+                {
+                    dockCharging = false;
+                    SaveSettings();
+                    Runtime.UpdateFrequency = UpdateFrequency.None;
+                }
+                status = "FCS: ship batteries set to Auto. Disconnect requested.";
+            }
+            catch (Exception error)
+            {
+                status = "FCS: departure failed. " + error.Message;
+            }
+        }
+
+        private void SignalDockResult(bool success)
+        {
+            string timerName = success ? DockSuccessTimer : DockFailureTimer;
+            try
+            {
+                var timer = GridTerminalSystem.GetBlockWithName(timerName) as IMyTimerBlock;
+                if (timer != null && timer.CubeGrid == Me.CubeGrid && timer.IsWorking)
+                    timer.StartCountdown();
+            }
+            catch (Exception error)
+            {
+                Echo("Could not start " + timerName + ": " + error.Message);
+            }
         }
 
         private enum Mode { Off, Normal, Manual, Dock }

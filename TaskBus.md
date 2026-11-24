@@ -36,6 +36,15 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 
 Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
 
+### Mining workflow reference
+
+[PAM by Keks](https://steamcommunity.com/sharedfiles/filedetails/?id=1553126390)
+is the reference for the mining cycle: teach a route between a stationary
+berth and the work site, configure the excavation area, then repeat trips
+while unloading and recharging at home. In ScriptTest, TaskBus owns dispatch
+and checkpoints, FCS owns the last metres and the berth battery cycle, and
+the mining script owns route following and drilling.
+
 ### Select a broker
 
 Update all brokers sharing the channel before using broker selection. In a
@@ -185,6 +194,23 @@ into the final corridor and disabled its remote autopilot, it can run the
 FCS block with `dock drone`. This mode starts from FCS off with no player
 controlling the grid. It releases control if a player takes over or the
 remote autopilot restarts. It covers the final approach only.
+
+To hand control back to the mining workflow, optionally add timer blocks
+named `[FCS DOCK OK]` and `[FCS DOCK FAIL]` on the drone grid. FCS starts
+the success timer after connecting to the recorded port and restoring the
+controls. A refused or aborted uncrewed approach starts the failure timer.
+Give each timer a short delay. Set the success timer to run the unload stage
+and the failure timer to notify
+the operator or hold the workflow. Reissuing `dock drone` while an approach
+is running leaves the in-flight attempt alone.
+
+After a successful uncrewed docking, FCS sets the batteries on the drone
+grid to Recharge before starting the success timer. Use `dock depart` when
+the mining workflow is ready to leave. FCS sets those batteries to Auto
+before requesting disconnect. If the connector releases separately while the programmable block stays
+powered, FCS sets the batteries to Auto on its next power check. The
+charging state survives a programmable-block recompile. Test the cycle
+with the base powered and verify both charge modes at the drone terminal.
 
 To investigate an automatic approach that stalls near the port, record a
 successful connected pose and compare the guide readings at the stall with
