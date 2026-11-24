@@ -58,5 +58,14 @@ namespace SpaceEngineers.Libs.IgcCore
                 return string.Empty;
             return Encoding.UTF8.GetString(Convert.FromBase64String(value));
         }
+
+        public static bool TryReadFiniteNumber(string json, string key, out double value)
+        {
+            value = 0;
+            string raw;
+            return TryGetJsonProperty(json, key, out raw) &&
+                double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+                !double.IsNaN(value) && !double.IsInfinity(value);
+        }
     }
 }

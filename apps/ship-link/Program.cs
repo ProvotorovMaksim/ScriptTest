@@ -45,6 +45,8 @@ namespace SpaceEngineers.Apps.ShipLink
         private string _activeTaskId;
         private string _activeTaskStage;
         private string _activeTaskDetails;
+        private double? _requestedAmount;
+        private Vector3D? _deliveryPosition;
         private int _tick;
         private int _displayTick;
         private IMyBroadcastListener _listener;
@@ -294,6 +296,19 @@ namespace SpaceEngineers.Apps.ShipLink
                 TaskBusProtocol.TryGetProperty(details, "steps", out stepsJson) &&
                 TaskBusProtocol.TryReadStringArray(stepsJson, out steps) && steps.Count > 0
                 ? steps[0] : "execute";
+            double amount;
+            _requestedAmount = TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) &&
+                amount > 0 ? (double?)amount : null;
+
+            string position;
+            double x;
+            double y;
+            double z;
+            _deliveryPosition = TaskBusIgcHelper.TryGetJsonProperty(details, "base_position", out position) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z)
+                ? (Vector3D?)new Vector3D(x, y, z) : null;
         }
 
         private void ClearTask()
@@ -301,6 +316,8 @@ namespace SpaceEngineers.Apps.ShipLink
             _activeTaskId = null;
             _activeTaskStage = null;
             _activeTaskDetails = null;
+            _requestedAmount = null;
+            _deliveryPosition = null;
             _activeLeaseEpoch = 0;
         }
 
@@ -350,6 +367,15 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (!string.IsNullOrEmpty(_activeTaskDetails))
                 {
                     display.AppendLine($"Details: {_activeTaskDetails}");
+                }
+                if (_requestedAmount.HasValue)
+                    display.AppendLine("Requested: " + _requestedAmount.Value.ToString("G", CultureInfo.InvariantCulture));
+                if (_deliveryPosition.HasValue)
+                {
+                    double distance = Vector3D.Distance(Me.CubeGrid.GetPosition(), _deliveryPosition.Value);
+                    if (!double.IsInfinity(distance) && !double.IsNaN(distance))
+                        display.AppendLine("Range to recorded base: " +
+                            (distance / 1000).ToString("0.000", CultureInfo.InvariantCulture) + " km");
                 }
             }
             else

@@ -97,8 +97,10 @@ To show a worker's TaskBus assignments on a ShipLink cockpit display, run
 entity ID shown as `Worker block ID` in the consumer output. Send `worker 0`
 to disable task monitoring. Both the worker and broker selections persist. In a multi-broker world, run `broker <ID>` on ShipLink with the
 same ID as its worker so another broker's traffic cannot update this display.
-The display shows the assignment and its first workflow stage. Run `status` on
-the consumer for the actual stage checkpoint.
+The display shows the assignment and its first workflow stage. For mining
+requests it also shows the requested amount and the current range to the
+base position recorded in the request. Run `status` on the consumer for
+the actual stage checkpoint.
 
 ### Fleet display for Space Engineers combat
 

@@ -425,7 +425,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             double amount;
             if (!TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out resourceJson) ||
                 !TaskBusIgcHelper.TryReadJsonString(resourceJson, out resource) ||
-                !TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
+                !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
                 return key + " details=" + details;
 
             var summary = new StringBuilder();
@@ -443,9 +443,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             double y;
             double z;
             if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_position", out position) &&
-                TryReadFiniteNumber(position, "x", out x) &&
-                TryReadFiniteNumber(position, "y", out y) &&
-                TryReadFiniteNumber(position, "z", out z))
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z))
             {
                 var culture = CultureInfo.InvariantCulture;
                 summary.Append("\nBase at request time (X, Y, Z): " +
@@ -453,15 +453,6 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
 
             return summary.ToString();
-        }
-
-        private static bool TryReadFiniteNumber(string json, string key, out double value)
-        {
-            value = 0;
-            string raw;
-            return TaskBusIgcHelper.TryGetJsonProperty(json, key, out raw) &&
-                double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
-                !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         private void ShowStatus()
