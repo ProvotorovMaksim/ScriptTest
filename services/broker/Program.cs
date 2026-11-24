@@ -172,6 +172,12 @@ namespace SpaceEngineers.Services.Broker
                 SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"state\":\"CANCELLED\"}", requesterId, "ack:" + requestId);
                 return;
             }
+            if (!HasParentLease(requesterId, requestJson))
+            {
+                SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) +
+                    ",\"reason\":\"PARENT_LEASE_INVALID\"}", requesterId);
+                return;
+            }
             if (_tasks.Count(task => task.State == "QUEUED" || task.State == "LEASED" || task.State == "ACTIVE") >= MaxTasks)
             {
                 SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"reason\":\"QUEUE_FULL\"}", requesterId);
@@ -198,6 +204,26 @@ namespace SpaceEngineers.Services.Broker
             SaveQueue();
             SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(id) + ",\"state\":\"QUEUED\"}", requesterId, "ack:" + requestId);
             Echo("Queued " + id + " (" + taskKey + ")");
+        }
+
+        private bool HasParentLease(long requesterId, string requestJson)
+        {
+            string parentIdJson;
+            string epochJson;
+            bool hasParentId = TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out parentIdJson);
+            bool hasEpoch = TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out epochJson);
+            if (!hasParentId && !hasEpoch)
+                return true;
+
+            string parentId;
+            int epoch;
+            if (!hasParentId || !hasEpoch || !TaskBusIgcHelper.TryReadJsonString(parentIdJson, out parentId) ||
+                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch))
+                return false;
+
+            return _tasks.Any(task => task.Id == parentId && task.GroupId == "MiningPoints" &&
+                task.WorkerId == requesterId && task.LeaseEpoch == epoch &&
+                (task.State == "LEASED" || task.State == "ACTIVE"));
         }
 
         private void CancelTask(long requesterId, string payloadJson)

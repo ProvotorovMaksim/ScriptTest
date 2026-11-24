@@ -133,6 +133,32 @@ namespace TaskBus.Tests
             Assert.DoesNotContain("TASK|", broker.Storage);
         }
 
+        [Fact]
+        public void MiningPointCanPublishChildOnlyWithCurrentParentLease()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+
+            Dispatch(broker, 42, TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\"}", targetId: 1));
+            var parent = TakeResponse(broker, "TASK_ASSIGN", 42);
+            Assert.Contains("\"task_id\":\"9-1\"", parent.PayloadJson);
+            Assert.Contains("\"lease_epoch\":1", parent.PayloadJson);
+
+            string Child(string id, int epoch) => TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"" + id + "\",\"group_id\":\"Scouts\",\"parent_task_id\":\"9-1\"," +
+                "\"parent_lease_epoch\":" + epoch + "}", targetId: 1);
+
+            Dispatch(broker, 43, Child("wrong-worker", 1));
+            Assert.Contains("PARENT_LEASE_INVALID", TakeResponse(broker, "TASK_REJECTED", 43).PayloadJson);
+            Dispatch(broker, 42, Child("wrong-epoch", 0));
+            Assert.Contains("PARENT_LEASE_INVALID", TakeResponse(broker, "TASK_REJECTED", 42).PayloadJson);
+            Dispatch(broker, 42, Child("survey", 1));
+            Assert.Contains("\"state\":\"QUEUED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 42).PayloadJson);
+        }
+
         private static Broker StartBroker(string storage)
         {
             MyGridProgram.StorageAtStartup = storage;

@@ -82,6 +82,11 @@ those stages on the point's consumer. `dispatch fleet` restores the direct
 fleet workflow. AMN saves the dispatch setting and refuses to change it
 while requests or cancellations are outstanding.
 
+A point publishing a child includes `parent_task_id` and
+`parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
+children only from the block holding that lease in `MiningPoints`.
+Retries of an already admitted request return its existing result.
+
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.
