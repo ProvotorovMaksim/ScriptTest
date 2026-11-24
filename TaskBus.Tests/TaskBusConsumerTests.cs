@@ -135,6 +135,12 @@ namespace TaskBus.Tests
             point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
                 "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"," +
                 "\"survey_report\":\"1 positive sample. GPS:Iron:10:20:30:\"}", targetId: 42));
+            point = Start();
+            Assert.Contains("Child status: DONE", point.GetStatus());
+            point.ProcessIncomingMessage(1, parent);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:0\",\"state\":\"ACTIVE\"}", targetId: 42));
+            Assert.Contains("Child status: DONE", point.GetStatus());
             point.ProcessCommand("site report");
             point.ProcessCommand("site remember");
             point.ProcessCommand("stage survey");

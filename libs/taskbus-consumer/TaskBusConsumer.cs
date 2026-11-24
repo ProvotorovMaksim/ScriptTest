@@ -243,7 +243,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (IsAutomaticPoint)
             {
                 sb.AppendLine("Child request: " + CurrentChildRequestId());
-                sb.AppendLine("Child status: " + (_childState ?? "awaiting broker"));
+                sb.AppendLine("Child status: " + (_completedChildRequest == CurrentChildRequestId() ?
+                    "DONE" : (_childState ?? "awaiting broker")));
                 if (CurrentStage() == "survey" && _childSurveyReport != null)
                     sb.AppendLine("Survey report: " + _childSurveyReport);
                 if (CurrentStage() == "transport" && AssignmentRequires("receipt_required"))
@@ -600,18 +601,25 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryReadJsonString(value, out state))
                 return false;
 
-            _childState = state;
-            if (state == "DONE")
+            if (state != "DONE")
             {
-                _completedChildRequest = request;
-                string report;
-                if (CurrentStage() == "survey" && TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out value) &&
-                    TaskBusIgcHelper.TryReadJsonString(value, out report) && report.Length <= 320)
-                {
-                    _childSurveyReport = report;
-                    SaveState();
-                }
+                if (_completedChildRequest != request)
+                    _childState = state;
+                return true;
             }
+
+            bool changed = _completedChildRequest != request;
+            _childState = state;
+            _completedChildRequest = request;
+            string report;
+            if (CurrentStage() == "survey" && TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out value) &&
+                TaskBusIgcHelper.TryReadJsonString(value, out report) && report.Length <= 320 && report != _childSurveyReport)
+            {
+                _childSurveyReport = report;
+                changed = true;
+            }
+            if (changed)
+                SaveState();
             return true;
         }
 
@@ -678,6 +686,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             _stageIndex++;
             _childState = null;
+            _completedChildRequest = null;
+            _childSurveyReport = null;
             if (_stageIndex >= _stages.Count)
             {
                 _pendingCompletedTaskId = _activeTaskId;
@@ -934,6 +944,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     }
                     else if (key == "REVOKED") _lastRevokedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "SURVEY_RESULT") _pendingSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "CHILD_COMPLETED") _completedChildRequest = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "CHILD_SURVEY_RESULT") _childSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "LEASE_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseEpoch);
@@ -964,6 +975,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(CultureInfo.InvariantCulture));
                 var stagesJson = "[" + string.Join(",", _stages.Select(TaskBusIgcHelper.ToJsonString).ToArray()) + "]";
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
+                if (_completedChildRequest != null) storage.AppendLine("CHILD_COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_completedChildRequest));
                 if (_childSurveyReport != null) storage.AppendLine("CHILD_SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_childSurveyReport));
                 if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
