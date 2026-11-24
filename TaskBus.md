@@ -36,6 +36,38 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 
 Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. GitHub Actions includes these files in the `taskbus-build` artifact.
 
+### Mining dispatch acceptance test
+
+Use a test world with in-game scripts enabled and two grids in radio range.
+Install `AMN.Base.pb.cs` and `TaskBroker.pb.cs` on the base and
+`TaskConsumer.pb.cs` on the worker. Power a functional radio antenna on each
+grid. On the worker, run `group MiningFleet`. Use a resource such as
+`Ore/Iron` in the base cargo and set a threshold with `set Ore/Iron 100`
+on AMN.
+
+1. Start below the threshold. Run `status` on the broker and record the task
+   ID. Leave the shortage in place through a publication retry. The worker
+   should retain the same task ID and the broker should show one open task.
+2. Run `stage survey` on the worker. Recompile its Programmable Block without
+   clearing Storage. Verify that it restores the same task and displays
+   `mine` as the next stage. Run `stage mine`, `stage intermediate` and
+   `stage deliver` as you complete those actions. Bring the base stock above
+   the minimum after the worker reports the broker commit. The stage commands
+   record operator confirmation of each action.
+3. Create a new shortage. Disable the worker antenna after it receives an
+   assignment. Wait until the broker reports the lease expired, then enable
+   the antenna. The worker should clear the stale lease and receive a new
+   lease epoch on a subsequent poll. With no other worker, the task ID should
+   remain the same.
+4. With a shortage task open, disable the broker block. Raise the base stock
+   above the minimum and let AMN scan it, then lower it again. Re-enable the
+   broker and watch AMN retry cancellation. The broker should close the old
+   request and receive a new request ID if the stock is still below minimum.
+
+Record task IDs, lease epochs and any block errors. Use separate runs for the
+workflow, lease-expiry and cancellation checks so their state is easy to
+identify in the broker output.
+
 ### Flight control PB
 
 `apps/fcs` is an opt-in cockpit flight controller. Copy the contents of

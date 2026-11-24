@@ -22,8 +22,6 @@ namespace SpaceEngineers.Apps.Amn
         private string _gridName;
         private int _tickCount = 0;
         private int _requestSequence;
-        private Autopilot _autopilot;
-        private Logger _logger;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly List<IMyCargoContainer> _containers = new List<IMyCargoContainer>();
         private readonly List<IMyAssembler> _assemblers = new List<IMyAssembler>();
@@ -45,13 +43,6 @@ namespace SpaceEngineers.Apps.Amn
             _taskBusProducer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
                 IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
 
-            var autopilotBlockName = "RemCon";
-            var programmingBlockName = "Prog";
-            _autopilot = new Autopilot(GridTerminalSystem.GetBlockWithName(autopilotBlockName));
-            var programBlock = GridTerminalSystem.GetBlockWithName(programmingBlockName) as IMyProgrammableBlock;
-            _logger = new Logger(programBlock);
-            _logger.Clear();
-            _logger.LogTrace("Logger initialized");
             LoadMinimums();
         }
         public void Main(string args)

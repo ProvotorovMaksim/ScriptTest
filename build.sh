@@ -64,7 +64,7 @@ producer=libs/taskbus-producer/TaskBusProducer.cs
 package_taskbus_pb services/broker TaskBroker "$producer"
 package_taskbus_pb services/consumer TaskConsumer libs/taskbus-consumer/TaskBusConsumer.cs
 package_taskbus_pb services/producer TaskProducer "$producer"
-package_taskbus_pb apps/amn AMN.Base "$producer" libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
+package_taskbus_pb apps/amn AMN.Base "$producer"
 package_taskbus_pb apps/sample SampleMain libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
 package_taskbus_pb apps/ship-link ShipLink "$producer"
 
