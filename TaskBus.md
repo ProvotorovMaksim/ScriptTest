@@ -338,15 +338,17 @@ and requires a new `route cruise` command after lease confirmation.
 
 Name the hauler FCS programmable block `[AMN FCS]` and record each station
 berth with FCS while connected. At the final approach, run `route dock`
-on the hauler to request `dock drone <grid ID>` for the current assignment.
-FCS selects the recorded berth for that grid and applies its usual final
-approach checks. Turn off cruise autopilot and position the ship in the
+on the hauler to request FCS docking for the current assignment. FCS
+selects the recorded berth for that grid and applies its usual final
+approach checks. The hauler passes the current broker lease deadline and
+requests cancellation if it loses the lease. Update the hauler and its
+local FCS together. Turn off cruise autopilot and position the ship in the
 final approach envelope before requesting docking. Set
 `HaulerAutoDock=true` to request that handoff once after the supervised
 cruise controller disengages within 2 m of its endpoint, the ship slows
 to 0.35 m/s or less, and the lease is still confirmed. Place the endpoint
 so the ship arrives inside the FCS final approach envelope. Use
-`route stop` to cancel a supervised leg and its handoff.
+`route stop` to cancel a supervised leg or the matching leased FCS approach.
 
 With `HaulerDock` configured, use `route depart` after pickup while still
 connected to the assigned mining point. FCS checks the selected berth and

@@ -18,6 +18,10 @@ namespace SpaceEngineers.Services.Consumer
         private int _monitorTicks;
         private int _departureTicks;
         private bool _autoDepart;
+        private string _fcsDockLease;
+        private long _fcsDockDeadlineUtc;
+        private long _fcsDockGrid;
+        private bool _cancelFcsDock;
         private readonly string _haulerCargo;
         private readonly string _miningBuffer;
         private readonly string _haulerDock;
@@ -102,7 +106,10 @@ namespace SpaceEngineers.Services.Consumer
             else
             {
                 if (string.Equals(command, "route stop", StringComparison.OrdinalIgnoreCase))
+                {
                     _autoDepart = false;
+                    _cancelFcsDock = true;
+                }
                 if (!_routes.TryHandle(command))
                     _consumer.ProcessCommand(argument);
             }
@@ -112,6 +119,7 @@ namespace SpaceEngineers.Services.Consumer
                 if (_consumer.CanDepartHaulerPickup())
                     RequestFcs("dock depart ready");
             }
+            CheckLeasedHaulerDock();
             _routes.CheckCruiseLease();
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
@@ -144,8 +152,42 @@ namespace SpaceEngineers.Services.Consumer
 
         private void RequestHaulerApproach(long grid)
         {
-            if (RequestFcs("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
-                Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
+            CheckLeasedHaulerDock();
+            if (_fcsDockLease != null)
+            {
+                Echo("A leased docking request is already pending.");
+                return;
+            }
+            long deadline = _consumer.ConfirmedLeaseDeadlineUtc;
+            if (deadline <= DateTime.UtcNow.Ticks)
+            {
+                Echo("Docking requires an active broker lease with a UTC deadline.");
+                return;
+            }
+            if (!RequestFcs("dock leased " + grid.ToString(CultureInfo.InvariantCulture) + " " +
+                deadline.ToString(CultureInfo.InvariantCulture)))
+                return;
+
+            _fcsDockLease = _consumer.ConfirmedLeaseIdentity;
+            _fcsDockDeadlineUtc = deadline;
+            _fcsDockGrid = grid;
+            _cancelFcsDock = false;
+            Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
+        }
+
+        private void CheckLeasedHaulerDock()
+        {
+            if (_fcsDockLease == null)
+                return;
+            if (DateTime.UtcNow.Ticks >= _fcsDockDeadlineUtc || ReadDockedGrid() == _fcsDockGrid)
+            {
+                _fcsDockLease = null;
+                return;
+            }
+            _cancelFcsDock |= _fcsDockLease != _consumer.ConfirmedLeaseIdentity;
+            if (_cancelFcsDock &&
+                RequestFcs("dock lease stop " + _fcsDockDeadlineUtc.ToString(CultureInfo.InvariantCulture)))
+                _fcsDockLease = null;
         }
 
         private void DepartHaulerPickup()
