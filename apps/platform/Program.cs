@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.TaskBusConsumer;
+using SpaceEngineers.Libs.IgcCore;
+using VRageMath;
 
 namespace SpaceEngineers.Apps.Platform
 {
@@ -17,6 +19,18 @@ namespace SpaceEngineers.Apps.Platform
         private readonly TaskBusConsumer _worker;
         private readonly IMyBroadcastListener _listener;
         private string _lastProbe = "No scan yet.";
+
+        private const double OreSampleWaitSeconds = 4;
+        private const double MinimumViewSeparation = 10;
+        private const int MaxSurveyViews = 64;
+        private readonly List<Vector3D> _surveyViews = new List<Vector3D>();
+        private readonly HashSet<Vector3D> _oreHits = new HashSet<Vector3D>();
+        private IMyOreDetector _sampleDetector;
+        private string _surveyOre;
+        private Vector3D _samplePosition;
+        private double _sampleWait;
+        private int _positiveViews;
+        private const string DetectorName = "[AMN ORE]";
 
         public Program()
         {
@@ -44,15 +58,123 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
+            UpdateOreSample();
             var command = (argument ?? "").Trim();
             if (command.StartsWith("probe ", StringComparison.OrdinalIgnoreCase))
                 Probe(command.Substring(6));
+            else if (command.StartsWith("ore survey ", StringComparison.OrdinalIgnoreCase))
+                BeginOreSurvey(command.Substring(11).Trim());
+            else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
+                ScheduleOreSample();
             else
                 _worker.ProcessCommand(command);
 
             Echo(_worker.GetStatus());
             Echo(online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
+            if (_surveyOre != null)
+                Echo("Ore survey " + _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
+                    " views reported ore, " + _oreHits.Count + " distinct positions.");
+            if (_sampleDetector != null)
+                Echo("Waiting for ore detector refresh.");
+        }
+
+        private void BeginOreSurvey(string ore)
+        {
+            if (string.IsNullOrWhiteSpace(ore) || ore.Length > 64)
+            {
+                _lastProbe = "Use ore survey <ore name>.";
+                return;
+            }
+            _surveyOre = ore;
+            _surveyViews.Clear();
+            _oreHits.Clear();
+            _positiveViews = 0;
+            _sampleDetector = null;
+            _lastProbe = "Survey started. Move to a survey position and run ore sample.";
+        }
+
+        private void ScheduleOreSample()
+        {
+            if (_surveyOre == null || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews)
+            {
+                _lastProbe = "Start an ore survey, or wait for the current sample.";
+                return;
+            }
+
+            var detector = GridTerminalSystem.GetBlockWithName(DetectorName) as IMyOreDetector;
+            if (detector == null || detector.CubeGrid != Me.CubeGrid || !detector.IsWorking)
+            {
+                _lastProbe = "A working local " + DetectorName + " detector is required.";
+                return;
+            }
+
+            var position = detector.GetPosition();
+            foreach (var view in _surveyViews)
+            {
+                if (Vector3D.DistanceSquared(view, position) < MinimumViewSeparation * MinimumViewSeparation)
+                {
+                    _lastProbe = "Move at least 10 m from previous survey positions.";
+                    return;
+                }
+            }
+            _sampleDetector = detector;
+            _samplePosition = position;
+            _sampleWait = 0;
+        }
+
+        private void UpdateOreSample()
+        {
+            if (_sampleDetector == null)
+                return;
+            try
+            {
+                if (!_sampleDetector.IsWorking || _sampleDetector.CubeGrid != Me.CubeGrid ||
+                    Vector3D.DistanceSquared(_sampleDetector.GetPosition(), _samplePosition) > 4)
+                {
+                    _lastProbe = "Sample cancelled: detector unavailable or moved more than 2 m.";
+                    _sampleDetector = null;
+                    return;
+                }
+
+                _sampleWait += Runtime.TimeSinceLastRun.TotalSeconds;
+                if (_sampleWait < OreSampleWaitSeconds)
+                    return;
+
+                var property = _sampleDetector.GetProperty("Survey.DetectedOre")
+                    as Sandbox.ModAPI.Interfaces.ITerminalProperty<string>;
+                var reports = property == null ? null : property.GetValue(_sampleDetector);
+                _sampleDetector = null;
+                if (property == null)
+                {
+                    _lastProbe = "Ore detector survey API is unavailable.";
+                    return;
+                }
+
+                bool hit = false;
+                foreach (var report in (reports ?? "").Split('\n'))
+                {
+                    string ore;
+                    double x;
+                    double y;
+                    double z;
+                    if (TaskBusIgcHelper.TryReadOreGps(report, out ore, out x, out y, out z) &&
+                        string.Equals(ore, _surveyOre, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hit = true;
+                        if (_oreHits.Count < 256) _oreHits.Add(new Vector3D(x, y, z));
+                    }
+                }
+                _surveyViews.Add(_samplePosition);
+                if (hit)
+                    _positiveViews++;
+                _lastProbe = hit ? "Detector reported the requested ore." : "No matching report. Coverage unknown.";
+            }
+            catch (Exception error)
+            {
+                _sampleDetector = null;
+                _lastProbe = "Ore sample failed: " + error.Message;
+            }
         }
 
         private IMyCameraBlock FindCamera()

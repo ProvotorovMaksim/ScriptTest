@@ -144,6 +144,13 @@ in natural gravity, the detected entity type and the hit position.
 Camera hits identify geometry. Ore observations come from the ore
 detector adapter. The platform does not start flight or drills yet.
 
+For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
+Run `ore survey Iron`, move to the first observation position, and run
+`ore sample`. Hold position for four seconds. Repeat from positions at
+least 10 m apart. The worker counts positive views and distinct GPS hits
+in memory. Empty readings are recorded as unknown coverage. This command
+does not infer that a repeated GPS hit is a fresh detector result.
+
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.
