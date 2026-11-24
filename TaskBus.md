@@ -310,7 +310,10 @@ platform undocked and holding a confirmed mining assignment with an
 approach waypoint, use `mine drills on` to enable those drills while
 piloting the pass. Use `mine drills off` to stop them. The platform also
 disables its named drills on restart or if the mining lease or stage
-changes.
+changes. Set `MiningCargo=<local cargo container name>` to measure the
+requested resource in a dedicated inventory and stop the drills when its
+requested amount is reached or the inventory is at least 95% full. This
+counts existing cargo in that inventory and does not complete the assignment.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 With a confirmed ore survey assignment, run `ore task` to use its ore

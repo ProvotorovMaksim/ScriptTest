@@ -320,6 +320,20 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
+        public bool TryGetMiningCargoTarget(out string resource, out double amount)
+        {
+            resource = null;
+            amount = 0;
+            if (!_miningPlatform || !HasActiveTask || CurrentStage() != "mine" || !HasRecentLeaseConfirmation)
+                return false;
+
+            string details;
+            resource = GetRequestedResource();
+            return !string.IsNullOrEmpty(resource) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) && amount > 0;
+        }
+
         public bool TryGetMiningApproach(out string taskId, out double x, out double y, out double z)
         {
             taskId = null;

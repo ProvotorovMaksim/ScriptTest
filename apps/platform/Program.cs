@@ -7,6 +7,7 @@ using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.TaskBusConsumer;
 using SpaceEngineers.Libs.IgcCore;
 using VRageMath;
+using VRage.Game.ModAPI.Ingame;
 
 namespace SpaceEngineers.Apps.Platform
 {
@@ -18,6 +19,8 @@ namespace SpaceEngineers.Apps.Platform
         private const string DrillPrefix = "[AMN DRILL]";
         private readonly List<IMyShipDrill> _managedDrills = new List<IMyShipDrill>();
         private string _drillingLease;
+        private readonly string _miningCargoName;
+        private readonly List<MyInventoryItem> _miningItems = new List<MyInventoryItem>();
         private const string ControllerName = "[AMN PLATFORM]";
         private const string SurveyRemoteName = "[AMN SURVEY ROUTE]";
         private const string SurveyWaypointName = "AMN survey sample";
@@ -64,6 +67,14 @@ namespace SpaceEngineers.Apps.Platform
         public Program()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            const string cargoSetting = "MiningCargo=";
+            foreach (var line in Me.CustomData.Split('\n'))
+            {
+                if (!line.StartsWith(cargoSetting, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                _miningCargoName = line.Substring(cargoSetting.Length).Trim();
+                break;
+            }
             _listener = IGC.RegisterBroadcastListener(Channel);
             _galnet = new GalnetWorkerBridge(Me, Me.CustomData,
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
@@ -212,6 +223,11 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            if (!CheckMiningCargo())
+            {
+                Echo(_lastProbe);
+                return;
+            }
             FindManagedDrills();
             if (_managedDrills.Count == 0)
             {
@@ -237,6 +253,49 @@ namespace SpaceEngineers.Apps.Platform
                 StopManagedDrills();
                 _lastProbe = "Managed drills stopped: the mining lease or stage changed.";
             }
+            else if (!CheckMiningCargo())
+                StopManagedDrills();
+        }
+
+        private bool CheckMiningCargo()
+        {
+            if (_miningCargoName == null)
+                return true;
+
+            var container = string.IsNullOrEmpty(_miningCargoName) ? null :
+                GridTerminalSystem.GetBlockWithName(_miningCargoName) as IMyCargoContainer;
+            var inventory = container != null && container.CubeGrid == Me.CubeGrid && container.IsFunctional
+                ? container.GetInventory() : null;
+            string resource;
+            double target;
+            if (inventory == null || !_worker.TryGetMiningCargoTarget(out resource, out target))
+            {
+                _lastProbe = "Managed drills halted: cargo inventory or mining target unavailable.";
+                return false;
+            }
+            double collected = 0;
+            _miningItems.Clear();
+            inventory.GetItems(_miningItems);
+            foreach (var item in _miningItems)
+            {
+                var type = item.Type.TypeId.ToString().Replace("MyObjectBuilder_", string.Empty);
+                if (string.Equals(type + "/" + item.Type.SubtypeId, resource, StringComparison.OrdinalIgnoreCase))
+                    collected += (double)item.Amount;
+            }
+
+            _lastProbe = "Mining cargo " + resource + ": " + collected.ToString("G", CultureInfo.InvariantCulture) +
+                " / " + target.ToString("G", CultureInfo.InvariantCulture);
+            if (collected >= target)
+            {
+                _lastProbe += ". Target reached; drills halted.";
+                return false;
+            }
+            if ((double)inventory.CurrentVolume >= 0.95 * (double)inventory.MaxVolume)
+            {
+                _lastProbe += ". Container at least 95% full; drills halted.";
+                return false;
+            }
+            return true;
         }
 
         private void StopManagedDrills()
