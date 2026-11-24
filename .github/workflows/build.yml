@@ -30,11 +30,24 @@ jobs:
           New-Item -ItemType Directory -Force build/logs | Out-Null
           Invoke-WebRequest https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip -OutFile $zip
           Expand-Archive $zip -DestinationPath $steam
-          & (Join-Path $steam steamcmd.exe) +force_install_dir $server +login anonymous +app_update 298740 validate +quit |
-            Tee-Object -FilePath build/logs/steamcmd.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
+          $exe = Join-Path $steam steamcmd.exe
           $bin = Join-Path $server DedicatedServer64
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            "SteamCMD installation attempt $attempt" | Tee-Object -FilePath build/logs/steamcmd.log -Append
+            & $exe '+@sSteamCmdForcePlatformType' windows '+@sSteamCmdForcePlatformBitness' 64 `
+              +force_install_dir $server +login anonymous +app_info_update 1 +app_info_print 298740 `
+              +app_update 298740 validate +quit |
+              Tee-Object -FilePath build/logs/steamcmd.log -Append
+            if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $bin Sandbox.Common.dll))) { break }
+            if ($attempt -eq 3) { throw "SteamCMD failed to install app 298740 (exit code $LASTEXITCODE)." }
+            Start-Sleep -Seconds (5 * $attempt)
+          }
+
+          $manifest = Join-Path $server steamapps/appmanifest_298740.acf
+          if (Test-Path $manifest) {
+            Select-String -Path $manifest -Pattern '"buildid"' | ForEach-Object { $_.Line.Trim() } |
+              Tee-Object -FilePath build/logs/game-versions.log -Append
+          }
           $libraries = @(
             'Sandbox.Common', 'Sandbox.Game', 'SpaceEngineers.Game',
             'SpaceEngineers.ObjectBuilders', 'VRage', 'VRage.Game',
