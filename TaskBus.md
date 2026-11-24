@@ -147,6 +147,12 @@ engaging. The controller starts off after compilation or reload.
   control while the PB is running. If an actuator is unavailable during
   release, FCS attempts the remaining settings and reports a warning.
 
+The FCS status shows speed and the highest stopping-distance estimate across
+the cockpit's local X, Y and Z axes. Compare it with the 50 m braking budget.
+The estimate assumes current orientation, effective thrust and estimated
+external acceleration on that axis. In-game trials should compare the
+estimate with measured stopping distance at several loads and orientations.
+
 Thrust allocation uses effective thrust and each engine's moment arm from the
 ship's measured center of mass. The PB reports the modeled residual moment.
 Verify actuator behavior, gyro signs, and instruction usage in game before

@@ -216,6 +216,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 var stabilization = Vector3D.Zero;
                 bool risk = false;
                 bool saturated = false;
+                double longestStop = 0;
+                int limitingAxis = 0;
 
                 for (int axis = 0; axis < 3; axis++)
                 {
@@ -226,7 +228,18 @@ namespace SpaceEngineers.Apps.FlightControl
                     double axisInput = request.GetDim(axis);
                     double command = axisInput * mass * Acceleration;
                     double brakingForce = speed >= 0 ? reverse + support : forward - support;
-                    double safeSpeed = Math.Sqrt(2 * BrakingDistance * Math.Max(0, brakingForce) / mass);
+                    double brakingAcceleration = Math.Max(0, brakingForce) / mass;
+                    double safeSpeed = Math.Sqrt(2 * BrakingDistance * brakingAcceleration);
+                    if (speed != 0)
+                    {
+                        double stoppingDistance = brakingAcceleration > 0
+                            ? speed * speed / (2 * brakingAcceleration) : double.PositiveInfinity;
+                        if (stoppingDistance > longestStop)
+                        {
+                            longestStop = stoppingDistance;
+                            limitingAxis = axis;
+                        }
+                    }
                     bool overspeed = Math.Abs(speed) > safeSpeed;
                     bool buildsSpeedWithoutBrake = command > 0 && reverse + support <= 0 ||
                         command < 0 && forward - support <= 0;
@@ -312,6 +325,9 @@ namespace SpaceEngineers.Apps.FlightControl
                     (saturated ? "\nThrust saturated." : "") +
                     (balanceRisk ? "\nWarning: limited moment compensation for the requested thrust." : "") +
                     (!balanceChecked ? "\nThrust balance check skipped: instruction budget." : "") +
+                    "\nSpeed: " + Math.Round(localVelocity.Length(), 1) + " m/s" +
+                    "\nMax axis stopping estimate (" + "XYZ"[limitingAxis] + "): " +
+                    (double.IsPositiveInfinity(longestStop) ? "unavailable" : Math.Round(longestStop, 1) + " m") +
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
