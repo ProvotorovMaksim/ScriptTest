@@ -82,12 +82,13 @@ namespace SpaceEngineers.Apps.ShipLink
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
             _shipName = Me.CubeGrid.CustomName;
-            var settings = Storage.Split(new[] { '\n' }, 3);
+            var settings = Storage.Split('\n');
             _fleetName = settings[0];
             if (settings.Length > 1)
                 long.TryParse(settings[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _workerId);
             if (settings.Length > 2)
                 long.TryParse(settings[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
+            LoadWithdrawnMarks(settings);
             const string heartbeatSetting = "GalnetFleetPeer=";
             foreach (var line in Me.CustomData.Split('\n'))
             {
@@ -116,15 +117,17 @@ namespace SpaceEngineers.Apps.ShipLink
             else if (command.StartsWith("fleet ", StringComparison.OrdinalIgnoreCase))
             {
                 var name = command.Substring(6).Trim();
-                _fleetName = string.Equals(name, "off", StringComparison.OrdinalIgnoreCase) ? "" : name;
-                SaveSettings();
+                var nextFleet = string.Equals(name, "off", StringComparison.OrdinalIgnoreCase) ? "" : name;
+                if (_fleetName != nextFleet)
+                    _withdrawnMarks.Clear();
+                _fleetName = nextFleet;
                 _needsAssistance = false;
                 _fleetPeers.Clear();
                 _galnetPeers.Clear();
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
-                _withdrawnMarks.Clear();
                 _trackedContact = null;
+                SaveSettings();
             }
 
             else if (command.StartsWith("worker ", StringComparison.OrdinalIgnoreCase))
@@ -386,6 +389,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_withdrawnMarks.Count >= 32 && !_withdrawnMarks.ContainsKey(id))
                 _withdrawnMarks.Remove(_withdrawnMarks.OrderBy(mark => mark.Value).First().Key);
             _withdrawnMarks[id] = expires;
+            SaveSettings();
             _contacts.RemoveAll(mark => mark.Source == source && mark.Assistance == assistance && !mark.Hazard &&
                 (assistance || mark.Name == name) && mark.Expires <= expires);
             if (_trackedContact != null && _trackedContact.Source == source &&
@@ -587,10 +591,40 @@ namespace SpaceEngineers.Apps.ShipLink
             }
         }
 
+        private void LoadWithdrawnMarks(string[] settings)
+        {
+            long now = DateTime.UtcNow.Ticks;
+            for (int i = 3; i < settings.Length && _withdrawnMarks.Count < 32; i++)
+            {
+                var fields = settings[i].Split('|');
+                long deadline;
+                if (fields.Length != 3 || fields[0] != "MARK_CLEAR" ||
+                    !long.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deadline) ||
+                    deadline <= now || deadline - now > ContactLifetime)
+                    continue;
+                try
+                {
+                    var key = TaskBusIgcHelper.DecodeStorage(fields[1]);
+                    if (key.Length > 0 && key.Length <= 100)
+                        _withdrawnMarks[key] = deadline;
+                }
+                catch (FormatException) { }
+            }
+        }
+
         private void SaveSettings()
         {
-            Storage = _fleetName + "\n" + _workerId.ToString(CultureInfo.InvariantCulture) +
-                "\n" + _brokerId.ToString(CultureInfo.InvariantCulture);
+            var saved = new StringBuilder(_fleetName).Append('\n')
+                .Append(_workerId.ToString(CultureInfo.InvariantCulture)).Append('\n')
+                .Append(_brokerId.ToString(CultureInfo.InvariantCulture));
+            long now = DateTime.UtcNow.Ticks;
+            foreach (var withdrawal in _withdrawnMarks)
+            {
+                if (withdrawal.Value > now)
+                    saved.Append("\nMARK_CLEAR|").Append(TaskBusIgcHelper.EncodeStorage(withdrawal.Key))
+                        .Append('|').Append(withdrawal.Value.ToString(CultureInfo.InvariantCulture));
+            }
+            Storage = saved.ToString();
         }
 
         private void ResetWorkerStatus()
