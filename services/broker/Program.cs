@@ -145,7 +145,7 @@ namespace SpaceEngineers.Services.Broker
             }
             if (task.State == "DONE")
                 return;
-            if (task.WorkerId != 0 && task.WorkerId != sourceId)
+            if (task.WorkerId != sourceId || (task.State != "LEASED" && task.State != "ACTIVE"))
                 return;
             if (leaseEpoch != task.LeaseEpoch)
                 return;
@@ -265,16 +265,6 @@ namespace SpaceEngineers.Services.Broker
                     MarkTaskDone(consumerId, completedId, completedEpoch);
             }
 
-            var assigned = _tasks.FirstOrDefault(task => task.WorkerId == consumerId &&
-                task.GroupId == groupId && (task.State == "LEASED" || task.State == "ACTIVE"));
-            if (assigned != null)
-            {
-                assigned.LastDispatchTick = _tick;
-                DispatchTask(assigned);
-                SaveQueue();
-                return;
-            }
-
             string activeIdJson;
             string activeId;
             if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "active_task_id", out activeIdJson) &&
@@ -285,11 +275,26 @@ namespace SpaceEngineers.Services.Broker
                 var activeEpoch = -1;
                 var hasActiveEpoch = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "active_lease_epoch", out activeEpochJson) &&
                     int.TryParse(activeEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out activeEpoch);
-                if (previous != null && (previous.WorkerId != consumerId || !hasActiveEpoch || previous.LeaseEpoch != activeEpoch))
+                if (!hasActiveEpoch)
+                    return;
+                if (previous == null || previous.WorkerId != consumerId ||
+                    previous.GroupId != groupId || previous.LeaseEpoch != activeEpoch ||
+                    (previous.State != "LEASED" && previous.State != "ACTIVE"))
                 {
-                    SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(activeId) + ",\"lease_epoch\":" + previous.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
+                    SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(activeId) +
+                        ",\"lease_epoch\":" + activeEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
                     return;
                 }
+            }
+
+            var assigned = _tasks.FirstOrDefault(task => task.WorkerId == consumerId &&
+                task.GroupId == groupId && (task.State == "LEASED" || task.State == "ACTIVE"));
+            if (assigned != null)
+            {
+                assigned.LastDispatchTick = _tick;
+                DispatchTask(assigned);
+                SaveQueue();
+                return;
             }
 
             var next = _tasks.FirstOrDefault(task => task.State == "QUEUED" && task.GroupId == groupId && task.RequesterId != consumerId);

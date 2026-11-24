@@ -346,9 +346,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             string taskIdJson;
             string taskId;
+            string epochJson;
+            int leaseEpoch;
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "task_id", out taskIdJson) ||
                 !TaskBusIgcHelper.TryReadJsonString(taskIdJson, out taskId) ||
-                taskId != _activeTaskId)
+                taskId != _activeTaskId ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
+                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch) ||
+                leaseEpoch != _leaseEpoch)
                 return;
 
             _lastRevokedTaskId = taskId;
