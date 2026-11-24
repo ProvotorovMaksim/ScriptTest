@@ -136,7 +136,11 @@ application submits the same pending message again. Delivery is retried
 until acknowledgement or until
 the five-minute UTC deadline
 expires. Lease polls, assignments, receipt notices and empty-queue replies
-expire after 20 seconds and use the short-lived queue limit. Later polls
+expire after 20 seconds and use the short-lived queue limit. Receivers
+keep their receipts in a separate 32-entry log, evicting the earliest
+expiry when full. A replay after eviction is handled by TaskBus lease
+and completion checks. Regular delivery receipts keep their own capacity.
+Later polls
 refresh the current lease state. Requests and completion messages keep
 the regular deadline. A fleet heartbeat replaces the earlier queued
 heartbeat for the same destination and fleet. Delayed older samples leave

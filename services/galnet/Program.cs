@@ -33,6 +33,8 @@ namespace SpaceEngineers.Services.Galnet
         private static readonly long LeaseTrafficLifetime = TimeSpan.FromSeconds(20).Ticks;
         private readonly List<string> _outbox = new List<string>();
         private readonly Dictionary<string, long> _received = new Dictionary<string, long>();
+        private const int MaxLeaseReceipts = 32;
+        private readonly Dictionary<string, long> _leaseReceipts = new Dictionary<string, long>();
         private string _lastDelivery = "No message received.";
 
         public Program()
@@ -60,6 +62,13 @@ namespace SpaceEngineers.Services.Galnet
                         continue;
                     var key = delimiter < 0 ? line.Substring(5) : line.Substring(5, delimiter - 5);
                     _received[key] = expires;
+                }
+                else if (line.StartsWith("LEASE_SEEN:", StringComparison.Ordinal) && _leaseReceipts.Count < MaxLeaseReceipts)
+                {
+                    int delimiter = line.IndexOf('|', 11);
+                    long expires;
+                    if (delimiter > 11 && long.TryParse(line.Substring(delimiter + 1), out expires) && expires > now)
+                        _leaseReceipts[line.Substring(11, delimiter - 11)] = expires;
                 }
                 else if (line.StartsWith("LAST:", StringComparison.Ordinal))
                 {
@@ -323,9 +332,7 @@ namespace SpaceEngineers.Services.Galnet
                 Echo("Local delivery requires an allowed addressed TaskBus application.");
                 return;
             }
-            bool leaseTraffic = addressed && (application.EventType == "TASK_POLL" ||
-                application.EventType == "TASK_ASSIGN" || application.EventType == "TASK_RECEIVED" ||
-                application.EventType == "QUEUE_EMPTY");
+            bool leaseTraffic = addressed && IsLeaseTraffic(application.EventType);
             if (leaseTraffic)
                 expires = Math.Min(expires, now + LeaseTrafficLifetime);
 
@@ -492,28 +499,42 @@ namespace SpaceEngineers.Services.Galnet
             foreach (var entry in _received.Where(entry => entry.Value <= now).ToArray())
                 _received.Remove(entry.Key);
 
-            if (!_received.ContainsKey(key))
+            foreach (var entry in _leaseReceipts.Where(entry => entry.Value <= now).ToArray())
+                _leaseReceipts.Remove(entry.Key);
+
+            if (!_received.ContainsKey(key) && !_leaseReceipts.ContainsKey(key))
             {
-                if (_received.Count >= MaxReceived)
-                    return;
                 string message;
                 try { message = TaskBusIgcHelper.DecodeStorage(encoded); }
                 catch (FormatException) { return; }
-                long target;
-                if (_received.Count >= MaxReceived - ReservedTaskReceipts &&
-                    (kind != "APP" || !TryReadApplicationTarget(message, out target)))
+                TaskBusEnvelope application = null;
+                bool addressed = kind == "APP" && TryReadTaskBusApplication(message, out application);
+                bool leaseTraffic = addressed && IsLeaseTraffic(application.EventType);
+                if (!leaseTraffic && (_received.Count >= MaxReceived ||
+                    (_received.Count >= MaxReceived - ReservedTaskReceipts && !addressed)))
                     return;
 
                 if (message.Length > (kind == "APP" ? MaxApplicationLength : 255) ||
                     (kind == "APP" && !DeliverApplication(origin, id, message)))
                     return;
-                _received[key] = expires;
+                if (leaseTraffic)
+                {
+                    if (_leaseReceipts.Count >= MaxLeaseReceipts)
+                        _leaseReceipts.Remove(_leaseReceipts.OrderBy(entry => entry.Value).First().Key);
+                    _leaseReceipts[key] = expires;
+                }
+                else
+                    _received[key] = expires;
                 _lastDelivery = kind == "APP" ? "Application packet from " + origin + "." :
                     "From " + origin + ": " + message;
                 SaveConfiguration();
             }
             ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|" + expires + "|", 0);
         }
+
+        private static bool IsLeaseTraffic(string eventType) =>
+            eventType == "TASK_POLL" || eventType == "TASK_ASSIGN" || eventType == "TASK_RECEIVED" ||
+            eventType == "QUEUE_EMPTY";
 
         private static bool TryReadApplicationTarget(string payload, out long target)
         {
@@ -592,6 +613,7 @@ namespace SpaceEngineers.Services.Galnet
             foreach (var peer in _peers.Keys) lines.Add(peer.ToString());
             foreach (var packet in _outbox) lines.Add("SEND:" + packet);
             foreach (var entry in _received) lines.Add("SEEN:" + entry.Key + "|" + entry.Value);
+            foreach (var entry in _leaseReceipts) lines.Add("LEASE_SEEN:" + entry.Key + "|" + entry.Value);
             lines.Add("LAST:" + TaskBusIgcHelper.EncodeStorage(_lastDelivery));
             Storage = string.Join("\n", lines);
         }

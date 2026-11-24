@@ -548,6 +548,121 @@ namespace TaskBus.Tests
             Assert.Empty(broker.IGC.Outbox);
         }
 
+        [Fact]
+        public void MiningPointClosesSurveyMineAndTransportThroughGalnetWithBaseReceipt()
+        {
+            Relay workerRelay;
+            MyGridProgram.CustomDataAtStartup = "App=9\nApp=40\nApp=42\nApp=43";
+            try { workerRelay = Start(21, "0\n22"); }
+            finally { MyGridProgram.CustomDataAtStartup = null; }
+            var brokerRelay = Start(22, "0\n21");
+            var broker = new Broker();
+            brokerRelay.GridTerminalSystem.Application = new ApplicationBlock(1, command =>
+            {
+                broker.Main(command);
+                return true;
+            });
+            broker.GridTerminalSystem.Relay = new ApplicationBlock(22, command =>
+            {
+                brokerRelay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+
+            var relayBlock = new ApplicationBlock(21, command =>
+            {
+                workerRelay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+            var bridges = new List<GalnetWorkerBridge>();
+            GalnetWorkerBridge Connect(long id, Action<long, string> receive)
+            {
+                var bridge = new GalnetWorkerBridge(new ApplicationBlock(id, _ => true), "GalnetBrokerRelay=22",
+                    () => relayBlock, (_, __) => throw new InvalidOperationException("Direct IGC disabled"), _ => { });
+                workerRelay.GridTerminalSystem.ApplicationsById[id] = new ApplicationBlock(id,
+                    command => bridge.TryReceive(command, receive));
+                bridges.Add(bridge);
+                return bridge;
+            }
+
+            var replies = new List<string>();
+            var baseBridge = Connect(9, (_, envelope) => replies.Add(envelope));
+            TaskBusConsumer point = null;
+            var pointBridge = Connect(40, (source, envelope) => point.ProcessIncomingMessage(source, envelope));
+            double buffer = 0;
+            point = new TaskBusConsumer(pointBridge.Send, () => "", _ => { }, _ => { }, 40, "Point",
+                gridId: 500, readMiningBuffer: _ => buffer, autoAcceptSurvey: true);
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+
+            TaskBusConsumer platform = null;
+            var platformBridge = Connect(42, (source, envelope) => platform.ProcessIncomingMessage(source, envelope));
+            platform = new TaskBusConsumer(platformBridge.Send, () => "", _ => { }, _ => { }, 42, "Platform",
+                miningPlatform: true);
+
+            TaskBusConsumer hauler = null;
+            var haulerBridge = Connect(43, (source, envelope) => hauler.ProcessIncomingMessage(source, envelope));
+            long dock = 500;
+            double cargo = 50;
+            hauler = new TaskBusConsumer(haulerBridge.Send, () => "", _ => { }, _ => { }, 43, "Hauler",
+                readHaulerCargo: _ => cargo, readDockedGrid: () => dock, autoHauler: true);
+            hauler.ProcessCommand("group Haulers");
+            foreach (var worker in new[] { point, platform, hauler })
+                worker.ProcessCommand("broker 1");
+
+            void Move(Relay from, long source, Relay to, long target)
+            {
+                foreach (var packet in from.IGC.UnicastOutbox.Where(packet => packet.Target == target))
+                    to.IGC.UnicastListener.Inbox.Enqueue((source, packet.Tag, packet.Data));
+                from.IGC.UnicastOutbox.Clear();
+            }
+
+            void Until(Func<bool> done)
+            {
+                for (int tick = 0; tick < 600 && !done(); tick++)
+                {
+                    foreach (var worker in new[] { point, platform, hauler })
+                        worker.Tick();
+                    foreach (var bridge in bridges)
+                        bridge.Flush();
+                    broker.Main("");
+                    workerRelay.Main("", UpdateType.Update10);
+                    brokerRelay.Main("", UpdateType.Update10);
+                    Move(workerRelay, 21, brokerRelay, 22);
+                    Move(brokerRelay, 22, workerRelay, 21);
+                }
+                Assert.True(done(), point.GetStatus() + "\n" + platform.GetStatus() + "\n" + hauler.GetStatus());
+            }
+
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"replenish\",\"group_id\":\"MiningPoints\",\"resource\":\"Ore/Iron\",\"amount\":50," +
+                "\"minimum\":100,\"base_grid_id\":600,\"receipt_required\":true,\"site_required\":true," +
+                "\"steps\":[\"survey\",\"mine\",\"transport\"]}", targetId: 1), 1);
+            Until(() => platform.TryGetSurveyLease(out _, out _));
+            platform.CompleteSurvey("1 positive sample. GPS:Iron:10:20:30: | GPS:Observation:10:20:60:");
+            Until(() => platform.TryGetMiningApproach(out _, out _, out _, out _));
+            platform.RecordMiningDeposit(50);
+            Assert.True(platform.TryCompleteMiningDeposit());
+            Until(() => point.GetStatus().Contains("Mining child complete"));
+            Assert.Contains("Stage: mine", point.GetStatus());
+
+            buffer = 50;
+            Until(() => hauler.GetStatus().Contains("Stage: deliver"));
+            dock = 600;
+            cargo = 0;
+            Until(() => point.GetStatus().Contains("Hauler task complete."));
+            Assert.True(point.HasActiveTask);
+            Assert.Contains("Waiting for base stock confirmation", point.GetStatus());
+
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"replenish\",\"stock\":100}", targetId: 1), 1);
+            Until(() => !point.HasActiveTask && point.GetStatus().Contains("Pending completion: none"));
+            baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"replenish\"}", targetId: 1), 1);
+            Until(() => replies.Any(reply => reply.Contains("\"request_id\":\"replenish\"") &&
+                reply.Contains("\"state\":\"DONE\"")));
+            Assert.DoesNotContain("TASK|", broker.Storage);
+        }
+
         private sealed class ApplicationBlock : IMyProgrammableBlock
         {
             private readonly Func<string, bool> _run;
