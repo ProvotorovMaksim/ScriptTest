@@ -22,6 +22,7 @@ namespace SpaceEngineers.Apps.Amn
         private string _gridName;
         private int _tickCount = 0;
         private int _requestSequence;
+        private long _brokerId;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly List<IMyCargoContainer> _containers = new List<IMyCargoContainer>();
         private readonly List<IMyAssembler> _assemblers = new List<IMyAssembler>();
@@ -49,6 +50,19 @@ namespace SpaceEngineers.Apps.Amn
         {
             _tickCount++;
             var command = args ?? string.Empty;
+            if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
+            {
+                long brokerId;
+                if (!long.TryParse(command.Substring(7).Trim(), out brokerId) || brokerId < 0)
+                    Echo("Usage: broker <block ID>, or broker 0 for broadcast.");
+                else if (_requestIds.Count != 0)
+                    Echo("Change broker only after open requests and cancellations are resolved.");
+                else
+                {
+                    _brokerId = brokerId;
+                    SaveMinimums();
+                }
+            }
             if (command.StartsWith("set ", StringComparison.OrdinalIgnoreCase) ||
                 command.StartsWith("remove ", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(command, "help", StringComparison.OrdinalIgnoreCase))
@@ -89,6 +103,10 @@ namespace SpaceEngineers.Apps.Amn
                 if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
                     long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
                     targetId != 0 && targetId != Me.EntityId)
+                    continue;
+
+                if (_brokerId != 0 && message.Source != _brokerId &&
+                    (eventType == "TASK_PUBLISHED_ACK" || eventType == "TASK_CANCEL_ACK" || eventType == "TASK_REJECTED"))
                     continue;
 
                 if (eventType == "PING")
@@ -247,6 +265,11 @@ namespace SpaceEngineers.Apps.Amn
             var lines = Storage.Split('\n');
             foreach (var line in lines)
             {
+                if (line.StartsWith("BROKER|", StringComparison.Ordinal))
+                {
+                    long.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
+                    continue;
+                }
                 if (line.StartsWith("REQSEQ|", StringComparison.Ordinal))
                 {
                     int.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _requestSequence);
@@ -293,6 +316,7 @@ namespace SpaceEngineers.Apps.Amn
         private void SaveMinimums()
         {
             var storage = new StringBuilder();
+            storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("REQSEQ|" + _requestSequence.ToString(CultureInfo.InvariantCulture));
             foreach (var minimum in _minimums.OrderBy(entry => entry.Key))
                 storage.AppendLine("MIN|" + minimum.Key + "=" + minimum.Value.ToString(CultureInfo.InvariantCulture));
@@ -418,7 +442,7 @@ namespace SpaceEngineers.Apps.Amn
                 ",\"base_position\":{\"x\":" + position.X.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"y\":" + position.Y.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"z\":" + position.Z.ToString("R", CultureInfo.InvariantCulture) + "}}";
-            SendMessage("TASK_PUBLISH", payload, 0, requestId);
+            SendMessage("TASK_PUBLISH", payload, _brokerId, requestId);
         }
 
         private void SendResourceClear(string resource)
@@ -426,7 +450,7 @@ namespace SpaceEngineers.Apps.Amn
             string requestId;
             if (!_requestIds.TryGetValue(resource, out requestId))
                 return;
-            SendMessage("TASK_CANCEL", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", 0, "cancel:" + requestId);
+            SendMessage("TASK_CANCEL", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", _brokerId, "cancel:" + requestId);
         }
 
         private void SendMessage(string eventType, string payloadJson, long targetId = 0, string messageId = null)

@@ -8,6 +8,31 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void WorkerPollsAndAcceptsAssignmentsOnlyFromStoredBroker()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Worker", 1);
+
+            var worker = Start();
+            worker.ProcessCommand("broker 17");
+            worker = Start();
+            worker.Tick();
+            Assert.True(TaskBusProtocol.TryParseEnvelope(Assert.Single(sent), out var poll));
+            Assert.Equal(17L, poll.TargetId);
+
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"work-1\",\"lease_epoch\":3}", targetId: 42);
+            Assert.False(worker.ProcessIncomingMessage(18, assignment));
+            Assert.False(worker.HasActiveTask);
+            Assert.True(worker.ProcessIncomingMessage(17, assignment));
+            Assert.True(worker.HasActiveTask);
+            worker.ProcessCommand("broker 18");
+            Assert.Contains("Broker: 17", worker.GetStatus());
+        }
+
+        [Fact]
         public void MiningStatusShowsQuantityAndDeliveryBaseAfterRestart()
         {
             string storage = "";

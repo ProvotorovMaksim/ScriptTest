@@ -41,6 +41,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly long _entityId;
         private readonly string _gridName;
 
+        private long _brokerId;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
@@ -82,7 +83,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// </summary>
         public bool ProcessIncomingMessage(long sourceId, string json)
         {
-            if (string.IsNullOrEmpty(json))
+            if ((_brokerId != 0 && sourceId != _brokerId) || string.IsNullOrEmpty(json))
                 return false;
 
             string eventType;
@@ -128,6 +129,20 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ShowStatus();
                 return;
             }
+            if (cmd.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
+            {
+                long brokerId;
+                if (!long.TryParse(cmd.Substring(7).Trim(), out brokerId) || brokerId < 0)
+                    _echo("Usage: broker <block ID>, or broker 0 for broadcast.");
+                else if (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId))
+                    _echo("Change broker only after the current task and completion are resolved.");
+                else
+                {
+                    _brokerId = brokerId;
+                    SaveState();
+                }
+                return;
+            }
             if (cmd.StartsWith("group ", StringComparison.OrdinalIgnoreCase))
             {
                 SetConsumerGroup(cmd.Substring(6).Trim());
@@ -163,6 +178,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             var sb = new StringBuilder();
             sb.AppendLine("Consumer: " + _gridName);
             sb.AppendLine("Group: " + _consumerGroup);
+            sb.AppendLine("Broker: " + (_brokerId == 0 ? "broadcast" : _brokerId.ToString(CultureInfo.InvariantCulture)));
             sb.AppendLine("Active task: " + (_activeTaskId ?? "none"));
             sb.AppendLine("Stage: " + (string.IsNullOrEmpty(_activeTaskId) ? "idle" : CurrentStage()));
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
@@ -481,6 +497,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                         if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
+                    else if (key == "BROKER") long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "REVOKED") _lastRevokedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
@@ -512,6 +529,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
             }
+            storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));
             if (!string.IsNullOrEmpty(_lastRevokedTaskId))
                 storage.AppendLine("REVOKED|" + TaskBusIgcHelper.EncodeStorage(_lastRevokedTaskId));
@@ -523,10 +541,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _setStorage(storage.ToString());
         }
 
-        private void SendMessage(string eventType, string payloadJson, long targetId = 0, string messageId = null)
+        private void SendMessage(string eventType, string payloadJson)
         {
-            var envelope = TaskBusProtocol.CreateEnvelope(eventType, payloadJson, messageId, targetId);
-            _send(envelope, targetId);
+            var envelope = TaskBusProtocol.CreateEnvelope(eventType, payloadJson, targetId: _brokerId);
+            _send(envelope, _brokerId);
         }
 
     }

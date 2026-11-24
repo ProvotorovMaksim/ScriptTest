@@ -83,13 +83,12 @@ namespace SpaceEngineers.Services.Broker
                 if (message.Source == Me.EntityId)
                     continue;
 
-                var json = message.Data as string;
-                string eventType;
-                string payloadJson;
-                if (string.IsNullOrEmpty(json) || !TaskBusIgcHelper.TryParseEnvelope(json, out eventType, out payloadJson))
+                TaskBusEnvelope envelope;
+                if (!TaskBusProtocol.TryParseEnvelope(message.Data as string, out envelope) ||
+                    (envelope.TargetId != 0 && envelope.TargetId != Me.EntityId))
                     continue;
 
-                HandleMessage(message.Source, eventType, payloadJson);
+                HandleMessage(message.Source, envelope.EventType, envelope.PayloadJson);
             }
         }
 
@@ -411,6 +410,7 @@ namespace SpaceEngineers.Services.Broker
 
         private void ShowStatus()
         {
+            Echo("Broker block ID: " + Me.EntityId);
             Echo("Tasks: " + _tasks.Count);
             foreach (var task in _tasks)
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);

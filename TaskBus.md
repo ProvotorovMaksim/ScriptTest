@@ -36,6 +36,16 @@ export SPACE_ENGINEERS_BIN64="/path/to/DedicatedServer64"
 
 Use the .NET 8 SDK from `global.json` and the Windows Dedicated Server libraries from Steam app `298740`. The script builds the seven PB projects, three libraries, and test project into separate directories under `build/output/`, then runs the tests. The DLLs are compile outputs. The build also creates one paste-ready `*.pb.cs` file per Programmable Block. Each file contains the block script and its shared TaskBus code. Copy the entire file into the in-game editor. The build compiles the generated files inside C# 6 Programmable Block wrappers. Successful GitHub Actions runs include these files in the `taskbus-build` artifact.
 
+### Select a broker
+
+Update all brokers sharing the channel before using broker selection. In a
+world with multiple TaskBus brokers, run `status` on the intended
+broker and note its `Broker block ID`. Run `broker <ID>` on AMN and its
+workers before creating requests. Each block stores the selection and sends
+its TaskBus traffic to that broker ID. `broker 0` restores broadcast mode.
+Resolve existing tasks, reports and cancellations before switching brokers.
+Messages travel over IGC broadcast, with the recipient ID in the envelope.
+
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.
