@@ -47,6 +47,16 @@ namespace SpaceEngineers.Services.Broker
             public int LeaseEpoch;
         }
 
+        private readonly Dictionary<string, string> _surveyReports = new Dictionary<string, string>();
+
+        private static string ReadSurveyReport(string payload)
+        {
+            string raw;
+            string report;
+            return TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out report) && report.Length <= 320 ? report : null;
+        }
+
         private sealed class TaskCommit
         {
             public string TaskId;
@@ -213,7 +223,7 @@ namespace SpaceEngineers.Services.Broker
 
             if (eventType == "TASK_DONE")
             {
-                MarkTaskDone(sourceId, taskId, leaseEpoch);
+                MarkTaskDone(sourceId, taskId, leaseEpoch, ReadSurveyReport(payloadJson));
                 return;
             }
 
@@ -309,15 +319,19 @@ namespace SpaceEngineers.Services.Broker
                 _cancelledRequestIds.Contains(scopedId) ? "CANCELLED" : null;
             if (state == null)
                 return false;
-            SendRequestStatus(requesterId, requestId, state);
+            string report;
+            _surveyReports.TryGetValue(scopedId, out report);
+            SendRequestStatus(requesterId, requestId, state, surveyReport: report);
             return true;
         }
 
-        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null)
+        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null, string surveyReport = null)
         {
             var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId);
             if (taskId != null)
                 payload += ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId);
+            if (surveyReport != null)
+                payload += ",\"survey_report\":" + TaskBusIgcHelper.ToJsonString(surveyReport);
             payload += ",\"state\":" + TaskBusIgcHelper.ToJsonString(state) + "}";
             SendMessage("TASK_PUBLISHED_ACK", payload, requesterId, "ack:" + requestId);
         }
@@ -413,7 +427,7 @@ namespace SpaceEngineers.Services.Broker
                 int completedEpoch;
                 if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out completedEpochJson) &&
                     int.TryParse(completedEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out completedEpoch))
-                    MarkTaskDone(consumerId, completedId, completedEpoch);
+                    MarkTaskDone(consumerId, completedId, completedEpoch, ReadSurveyReport(payloadJson));
                 return;
             }
 
@@ -486,7 +500,7 @@ namespace SpaceEngineers.Services.Broker
                 SaveQueue();
         }
 
-        private void MarkTaskDone(long consumerId, string taskId, int leaseEpoch)
+        private void MarkTaskDone(long consumerId, string taskId, int leaseEpoch, string surveyReport)
         {
             var task = _tasks.FirstOrDefault(entry => entry.Id == taskId && entry.WorkerId == consumerId && entry.LeaseEpoch == leaseEpoch);
             if (task == null)
@@ -511,7 +525,8 @@ namespace SpaceEngineers.Services.Broker
                 return;
             }
 
-            AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId));
+            AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId),
+                task.HasParent && task.GroupId == "Scouts" ? surveyReport : null);
             AddTaskCommit(taskId, consumerId, leaseEpoch);
             _tasks.Remove(task);
             if (task.GroupId == "MiningPoints")
@@ -569,13 +584,18 @@ namespace SpaceEngineers.Services.Broker
             Echo("Purged " + removed + " terminal records; request dedupe tombstones are retained.");
         }
 
-        private void AddCompletedRequest(string requestId)
+        private void AddCompletedRequest(string requestId, string surveyReport = null)
         {
             if (string.IsNullOrEmpty(requestId) || _completedRequestIds.Contains(requestId))
                 return;
             _completedRequestIds.Add(requestId);
+            if (surveyReport != null)
+                _surveyReports[requestId] = surveyReport;
             while (_completedRequestIds.Count > RetainedRequestCount)
+            {
+                _surveyReports.Remove(_completedRequestIds[0]);
                 _completedRequestIds.RemoveAt(0);
+            }
         }
 
         private bool AddCancelledRequest(string requestId)
@@ -606,6 +626,7 @@ namespace SpaceEngineers.Services.Broker
             _tasks.Clear();
             _cancelledRequestIds.Clear();
             _completedRequestIds.Clear();
+            _surveyReports.Clear();
             _commits.Clear();
             _sequence = 0;
             if (string.IsNullOrWhiteSpace(Storage))
@@ -625,9 +646,10 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts.Length == 2 && parts[0] == "COMPLETE")
+                if ((parts.Length == 2 || parts.Length == 3) && parts[0] == "COMPLETE")
                 {
-                    try { AddCompletedRequest(TaskBusIgcHelper.DecodeStorage(parts[1])); }
+                    try { AddCompletedRequest(TaskBusIgcHelper.DecodeStorage(parts[1]),
+                        parts.Length == 3 ? TaskBusIgcHelper.DecodeStorage(parts[2]) : null); }
                     catch (FormatException) { }
                     continue;
                 }
@@ -711,7 +733,13 @@ namespace SpaceEngineers.Services.Broker
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)
-                storage.AppendLine("COMPLETE|" + TaskBusIgcHelper.EncodeStorage(requestId));
+            {
+                storage.Append("COMPLETE|").Append(TaskBusIgcHelper.EncodeStorage(requestId));
+                string report;
+                if (_surveyReports.TryGetValue(requestId, out report))
+                    storage.Append('|').Append(TaskBusIgcHelper.EncodeStorage(report));
+                storage.AppendLine();
+            }
             foreach (var commit in _commits)
                 storage.AppendLine("COMMIT|" + TaskBusIgcHelper.EncodeStorage(commit.TaskId) + "|" + commit.ConsumerId.ToString(CultureInfo.InvariantCulture) + "|" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             foreach (var task in _tasks)

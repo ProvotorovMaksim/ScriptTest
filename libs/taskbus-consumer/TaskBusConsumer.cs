@@ -44,6 +44,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private long _brokerId;
         private bool _autoPoint;
         private string _completedChildRequest;
+        private string _childSurveyReport;
+        private string _pendingSurveyReport;
         private string _childState;
         private string _oreSite;
         private string _oreApproach;
@@ -230,6 +232,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 sb.AppendLine("Child request: " + CurrentChildRequestId());
                 sb.AppendLine("Child status: " + (_childState ?? "awaiting broker"));
+                if (CurrentStage() == "survey" && _childSurveyReport != null)
+                    sb.AppendLine("Survey report: " + _childSurveyReport);
                 if (CurrentStage() == "transport" && AssignmentRequires("receipt_required"))
                     sb.AppendLine(_baseStockConfirmed ? "Base stock confirmed" : "Waiting for base stock confirmation");
                 if (_completedChildRequest == CurrentChildRequestId())
@@ -301,7 +305,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ",\"active_task_id\":" + (string.IsNullOrEmpty(_activeTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_activeTaskId)) +
                 ",\"active_lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) +
                 ",\"completed_task_id\":" + (string.IsNullOrEmpty(_pendingCompletedTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId)) +
-                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) + "}";
+                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) + SurveyReportField() + "}";
             SendMessage("TASK_POLL", payload);
         }
 
@@ -336,8 +340,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 if (_pendingCompletedTaskId == taskId && _pendingCompletedEpoch == leaseEpoch)
                 {
-                    SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
-                        ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
+                    SendPendingCompletion();
                 }
                 return;
             }
@@ -352,6 +355,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
                 _activeTaskId = taskId;
                 _completedChildRequest = null;
+                _childSurveyReport = null;
                 _childState = null;
                 _oreSite = null;
                 _oreApproach = null;
@@ -367,6 +371,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _leaseEpoch = leaseEpoch;
                 _completedChildRequest = null;
+                _childSurveyReport = null;
                 _childState = null;
                 _activeTaskJson = taskJson;
                 SaveState();
@@ -540,11 +545,41 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             _childState = state;
             if (state == "DONE")
+            {
                 _completedChildRequest = request;
+                string report;
+                if (CurrentStage() == "survey" && TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out value) &&
+                    TaskBusIgcHelper.TryReadJsonString(value, out report) && report.Length <= 320)
+                {
+                    _childSurveyReport = report;
+                    SaveState();
+                }
+            }
             return true;
         }
 
-        private void AdvanceStage(string completedStage)
+        public void CompleteSurvey(string report)
+        {
+            string lease;
+            string ore;
+            if (TryGetSurveyLease(out lease, out ore) && !string.IsNullOrWhiteSpace(report) && report.Length <= 320)
+                AdvanceStage("survey", report);
+        }
+
+        private string SurveyReportField()
+        {
+            return _pendingSurveyReport == null ? "" :
+                ",\"survey_report\":" + TaskBusIgcHelper.ToJsonString(_pendingSurveyReport);
+        }
+
+        private void SendPendingCompletion()
+        {
+            SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId) +
+                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) +
+                SurveyReportField() + "}");
+        }
+
+        private void AdvanceStage(string completedStage, string surveyReport = null)
         {
             if (string.IsNullOrEmpty(_activeTaskId))
             {
@@ -590,13 +625,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _pendingCompletedTaskId = _activeTaskId;
                 _pendingCompletedEpoch = _leaseEpoch;
+                _pendingSurveyReport = surveyReport;
                 _activeTaskId = null;
                 _activeTaskJson = null;
                 _stages.Clear();
                 _stageIndex = 0;
                 SaveState();
-                SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId) +
-                    ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) + "}");
+                SendPendingCompletion();
                 _echo("Workflow complete; waiting for broker commit ACK.");
             }
             else
@@ -673,6 +708,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _pendingCompletedTaskId = null;
                 _pendingCompletedEpoch = 0;
+                _pendingSurveyReport = null;
                 SaveState();
                 _echo("Broker committed " + taskId);
             }
@@ -695,6 +731,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _pendingCompletedTaskId = null;
                 _pendingCompletedEpoch = 0;
+                _pendingSurveyReport = null;
                 _lastRevokedTaskId = taskId;
                 _lastRevokedEpoch = leaseEpoch;
                 SaveState();
@@ -837,6 +874,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                             _lastRevokedEpoch = revokedEpoch;
                     }
                     else if (key == "REVOKED") _lastRevokedTaskId = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "SURVEY_RESULT") _pendingSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "CHILD_SURVEY_RESULT") _childSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "LEASE_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseEpoch);
                     else if (key == "COMPLETED_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _pendingCompletedEpoch);
@@ -864,6 +903,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(CultureInfo.InvariantCulture));
                 var stagesJson = "[" + string.Join(",", _stages.Select(TaskBusIgcHelper.ToJsonString).ToArray()) + "]";
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
+                if (_childSurveyReport != null) storage.AppendLine("CHILD_SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_childSurveyReport));
                 if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
@@ -882,6 +922,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (!string.IsNullOrEmpty(_pendingCompletedTaskId))
             {
                 storage.AppendLine("COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_pendingCompletedTaskId));
+                if (_pendingSurveyReport != null) storage.AppendLine("SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_pendingSurveyReport));
                 storage.AppendLine("COMPLETED_EPOCH|" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture));
             }
             _setStorage(storage.ToString());

@@ -212,7 +212,11 @@ detector adapter. The platform does not start flight or drills yet.
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 With a confirmed ore survey assignment, run `ore task` to use its ore
 type. Repeating it for the same lease keeps completed samples. Sampling
-pauses when that lease is no longer confirmed. For standalone surveys
+pauses when that lease is no longer confirmed. Run `ore report` to
+complete the survey child with sample counts and one observed GPS, when
+available. The broker retains this report and returns it to the mining
+point with the child status. The mining point still records both the
+verified site and an approach waypoint before starting mining. For standalone surveys
 use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits

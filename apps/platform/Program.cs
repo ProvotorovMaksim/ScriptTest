@@ -97,6 +97,8 @@ namespace SpaceEngineers.Apps.Platform
                 BeginOreSurvey(command.Substring(11).Trim());
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
                 ScheduleOreSample();
+            else if (string.Equals(command, "ore report", StringComparison.OrdinalIgnoreCase))
+                SubmitOreSurvey();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
@@ -206,6 +208,24 @@ namespace SpaceEngineers.Apps.Platform
                 saved.AppendLine(FormatSurveyGps("hit", hit));
             _surveyStorage = saved.ToString();
             Storage = _workerStorage + _surveyStorage;
+        }
+
+        private void SubmitOreSurvey()
+        {
+            if (_surveyLease == null || !SurveyLeaseIsCurrent() || _surveyViews.Count == 0 || _sampleDetector != null)
+            {
+                _lastProbe = "A confirmed task survey and a completed sample are required.";
+                return;
+            }
+
+            var report = _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
+                " positive samples, " + _oreHits.Count + " distinct reports. Coverage unknown.";
+            foreach (var hit in _oreHits)
+            {
+                report += " " + FormatSurveyGps(_surveyOre, hit);
+                break;
+            }
+            _worker.CompleteSurvey(report);
         }
 
         private void ShowOreBounds()

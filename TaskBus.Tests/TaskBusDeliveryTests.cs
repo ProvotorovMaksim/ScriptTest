@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.IgcCore;
@@ -233,6 +234,47 @@ namespace TaskBus.Tests
             broker = StartBroker(broker.Storage);
             Dispatch(broker, 42, poll);
             Assert.Contains("\"base_stock_confirmed\":true", TakeResponse(broker, "TASK_ASSIGN", 42).PayloadJson);
+        }
+
+        [Fact]
+        public void SurveyReportSurvivesLostCompletionAndBrokerRestart()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"parent\",\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+            Dispatch(broker, 40, TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"MiningPoints\"}", targetId: 1));
+            TakeResponse(broker, "TASK_ASSIGN", 40);
+            Dispatch(broker, 40, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"survey\",\"group_id\":\"Scouts\",\"parent_task_id\":\"9-1\"," +
+                "\"parent_lease_epoch\":1,\"resource\":\"Ore/Iron\",\"steps\":[\"survey\"]}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 40);
+
+            string storage = "";
+            var requests = new List<string>();
+            TaskBusConsumer StartPlatform() => new TaskBusConsumer((message, _) => requests.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Platform", 1, miningPlatform: true);
+            var platform = StartPlatform();
+            platform.Tick();
+            Dispatch(broker, 42, Assert.Single(requests));
+            requests.Clear();
+            DeliverToWorker(platform, TakeResponse(broker, "TASK_ASSIGN", 42));
+
+            const string report = "Iron observed at GPS:Iron:10:20:30:";
+            platform.CompleteSurvey(report);
+            requests.Clear();
+            platform = StartPlatform();
+            platform.Tick();
+            Dispatch(broker, 42, Assert.Single(requests));
+            TakeResponse(broker, "TASK_DONE_ACK", 42);
+
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 40, TaskBusProtocol.CreateEnvelope("TASK_QUERY",
+                "{\"request_id\":\"survey\"}", targetId: 1));
+            var status = TakeResponse(broker, "TASK_PUBLISHED_ACK", 40);
+            Assert.Contains("\"state\":\"DONE\"", status.PayloadJson);
+            Assert.Contains("\"survey_report\":\"" + report + "\"", status.PayloadJson);
         }
 
         [Fact]
