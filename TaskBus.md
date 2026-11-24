@@ -280,6 +280,11 @@ finish transport and commit it. The base clears its local request when
 the broker reports a terminal state. A request never seen by the broker
 is retired through the existing cancellation exchange.
 
+On AMN.Base the cockpit and an optional local `[AMN STATUS]` panel
+show stock targets and each open resource request's last broker state,
+rejection reason or pending cancellation. After a restart or broker
+switch, open requests display Awaiting broker until the next reply.
+
 Name a text panel on the point consumer's grid exactly `[AMN STATUS]`
 to show the parent task, current stage, lease and last broker state for the
 child request. The panel also shows when the local radio is unavailable.

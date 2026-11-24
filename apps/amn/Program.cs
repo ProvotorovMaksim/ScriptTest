@@ -40,6 +40,7 @@ namespace SpaceEngineers.Apps.Amn
         private readonly List<IMyRemoteControl> _remoteControls = new List<IMyRemoteControl>();
         private readonly Dictionary<string, double> _minimums = new Dictionary<string, double>();
         private readonly Dictionary<string, string> _requestIds = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> _requestStates = new Dictionary<string, string>();
         private readonly HashSet<string> _lowResources = new HashSet<string>();
         private readonly HashSet<string> _pendingResourceClears = new HashSet<string>();
         private IMyBroadcastListener _listener;
@@ -121,6 +122,7 @@ namespace SpaceEngineers.Apps.Amn
                         return;
                     }
                     _galnet.DiscardPendingSends();
+                    _requestStates.Clear();
                     _brokerId = brokerId;
                     SaveMinimums();
                     retryBrokerRequests = true;
@@ -502,17 +504,11 @@ namespace SpaceEngineers.Apps.Amn
             GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.IsSameConstructAs(Me));
 
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
-            if (cockpit == null || cockpit.SurfaceCount == 0)
-            {
-                Echo("No cockpit text surface found.");
+            var monitor = GridTerminalSystem.GetBlockWithName("[AMN STATUS]") as IMyTextPanel;
+            if (monitor != null && (monitor.CubeGrid != Me.CubeGrid || !monitor.IsWorking))
+                monitor = null;
+            if ((cockpit == null || cockpit.SurfaceCount == 0) && monitor == null)
                 return;
-            }
-
-            var surface = cockpit.GetSurface(0);
-            surface.ContentType = ContentType.TEXT_AND_IMAGE;
-            surface.Font = "Monospace";
-            surface.FontSize = 0.8f;
-            surface.Alignment = TextAlignment.LEFT;
 
             var display = new StringBuilder();
             display.AppendLine(_gridName);
@@ -535,10 +531,35 @@ namespace SpaceEngineers.Apps.Amn
                 }
             }
 
-            display.AppendLine();
-            display.AppendLine("PB argument:");
-            display.AppendLine("set Type/Subtype amount");
-            surface.WriteText(display.ToString());
+            if (_requestIds.Count != 0)
+            {
+                display.AppendLine();
+                display.AppendLine("AMN REQUESTS");
+                foreach (var request in _requestIds.OrderBy(entry => entry.Key))
+                {
+                    string state;
+                    if (_pendingResourceClears.Contains(request.Key))
+                        state = "Cancelling";
+                    else if (!_requestStates.TryGetValue(request.Key, out state))
+                        state = "Awaiting broker";
+                    display.AppendLine(request.Key + " | " + state);
+                }
+            }
+
+            var text = display.ToString();
+            if (cockpit != null && cockpit.SurfaceCount > 0)
+                WriteRequestDisplay(cockpit.GetSurface(0), text);
+            if (monitor != null)
+                WriteRequestDisplay(monitor, text);
+        }
+
+        private static void WriteRequestDisplay(IMyTextSurface surface, string text)
+        {
+            surface.ContentType = ContentType.TEXT_AND_IMAGE;
+            surface.Font = "Monospace";
+            surface.FontSize = 0.8f;
+            surface.Alignment = TextAlignment.LEFT;
+            surface.WriteText(text);
         }
 
         private void UpdateMinimumTasks(Dictionary<string, double> resources, bool retryBrokerRequests)
@@ -686,10 +707,15 @@ namespace SpaceEngineers.Apps.Amn
                         if (requestState == "DONE" || requestState == "CANCELLED")
                         {
                             _requestIds.Remove(resource);
+                            _requestStates.Remove(resource);
                             _lowResources.Remove(resource);
                         }
-                        else if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
-                            QueueResourceClear(resource);
+                        else
+                        {
+                            _requestStates[resource] = requestState;
+                            if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
+                                QueueResourceClear(resource);
+                        }
                     }
                     SaveMinimums();
                 }
@@ -704,12 +730,25 @@ namespace SpaceEngineers.Apps.Amn
                     if (!string.IsNullOrEmpty(resource) && _pendingResourceClears.Remove(resource))
                     {
                         _requestIds.Remove(resource);
+                        _requestStates.Remove(resource);
                         SaveMinimums();
                     }
                 }
             }
             else if (eventType == "TASK_REJECTED")
             {
+                string raw;
+                string requestId;
+                string reason;
+                if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out requestId) &&
+                    TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "reason", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out reason))
+                {
+                    var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
+                    if (resource != null)
+                        _requestStates[resource] = "Rejected: " + reason;
+                }
                 Echo("Broker rejected resource request: " + payloadJson);
             }
             else if (eventType == "MSG")
