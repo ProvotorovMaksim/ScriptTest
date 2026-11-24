@@ -178,7 +178,9 @@ namespace SpaceEngineers.Apps.Platform
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
             else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
-                StartMiningReturn();
+                StartMiningCruise(returning: true);
+            else if (string.Equals(command, "mine cruise", StringComparison.OrdinalIgnoreCase))
+                StartMiningCruise(returning: false);
             else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
                 UnloadMiningCargo();
             else if (string.Equals(command, "mine unload auto", StringComparison.OrdinalIgnoreCase))
@@ -821,15 +823,18 @@ namespace SpaceEngineers.Apps.Platform
             return true;
         }
 
-        private void StartMiningReturn()
+        private void StartMiningCruise(bool returning)
         {
             if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 || !CanStartPlatformFlight())
             {
-                Echo("Stop drilling and release flight controls before starting the mining return.");
+                Echo("Stop drilling and release flight controls before starting the mining flight.");
                 return;
             }
 
-            _routes.LoadReturnRoute(remote => StartPlatformFlight(remote, "Mining return", false));
+            if (returning)
+                _routes.LoadReturnRoute(remote => StartPlatformFlight(remote, "Mining return", false));
+            else
+                _routes.LoadMiningApproach(remote => StartPlatformFlight(remote, "Mining approach", false));
         }
 
         private void StartPlatformFlight(IMyRemoteControl remote, string leg, bool survey)

@@ -171,7 +171,10 @@ On an AMN drilling platform or a generic worker in `MiningFleet`, name the route
 and run `route approach` with a confirmed mining lease. This appends the
 approach to the configured waypoint list while autopilot is off. A previous
 AMN approach must be removed before loading a different task. Review route
-and terrain clearance before enabling autopilot.
+and terrain clearance before enabling autopilot. On a drilling platform,
+use `mine cruise` after undocking to start the reviewed One Way outbound
+route. It checks the saved endpoint against the current mining assignment
+and stops the supervised autopilot on lease loss.
 
 Use a second, empty Remote Control named `[AMN RETURN]` for the return leg.
 With both autopilots off, `route return` copies the configured outbound

@@ -62,7 +62,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
-        private void LoadMiningApproach()
+        public void LoadMiningApproach(Action<IMyRemoteControl> start = null)
         {
             string taskId;
             double x;
@@ -74,7 +74,24 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            AppendApproach(RouteControllerName, RouteWaypointPrefix + taskId, new Vector3D(x, y, z));
+            var waypoint = RouteWaypointPrefix + taskId;
+            var position = new Vector3D(x, y, z);
+            if (start == null)
+            {
+                AppendApproach(RouteControllerName, waypoint, position);
+                return;
+            }
+
+            try
+            {
+                var remote = FindPreparedCruise(RouteControllerName, waypoint, position);
+                if (remote != null)
+                    start(remote);
+            }
+            catch (Exception error)
+            {
+                _echo("Could not start mining approach: " + error.Message);
+            }
         }
 
         private void LoadStationApproach(bool startCruise)
@@ -111,29 +128,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             try
             {
-                var remote = _findBlock(controller) as IMyRemoteControl;
-                if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking ||
-                    remote.IsAutoPilotEnabled || !_canStartCruise())
+                if (!_canStartCruise())
                 {
-                    _echo("Cruise requires an undocked ship, no active pilot or autopilot, and a working " + controller + ".");
+                    _echo("Cruise requires an undocked ship and no active pilot or autopilot.");
                     return;
                 }
+                var remote = FindPreparedCruise(controller, waypoint, position);
+                if (remote == null)
+                    return;
 
-                if (remote.FlightMode != FlightMode.OneWay)
-                {
-                    _echo("Set the route controller to One Way before starting cruise.");
-                    return;
-                }
-
-                _routeWaypoints.Clear();
-                remote.GetWaypointInfo(_routeWaypoints);
-                if (_routeWaypoints.Count == 0 ||
-                    _routeWaypoints[_routeWaypoints.Count - 1].Name != waypoint ||
-                    _routeWaypoints[_routeWaypoints.Count - 1].Coords != position)
-                {
-                    _echo("Load and review the current station route before starting cruise.");
-                    return;
-                }
                 if (_worker.SupervisedCruiseRemote != 0)
                 {
                     _echo("Stop the previously supervised cruise before starting another.");
@@ -160,6 +163,28 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _echo("Could not start cruise: " + error.Message);
             }
+        }
+
+        private IMyRemoteControl FindPreparedCruise(string controller, string waypoint, Vector3D position)
+        {
+            var remote = _findBlock(controller) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking ||
+                remote.IsAutoPilotEnabled || remote.FlightMode != FlightMode.OneWay)
+            {
+                _echo("Use a working local " + controller + " in One Way mode with autopilot off.");
+                return null;
+            }
+
+            _routeWaypoints.Clear();
+            remote.GetWaypointInfo(_routeWaypoints);
+            if (_routeWaypoints.Count == 0 ||
+                _routeWaypoints[_routeWaypoints.Count - 1].Name != waypoint ||
+                _routeWaypoints[_routeWaypoints.Count - 1].Coords != position)
+            {
+                _echo("Load and review the current assignment's approach before starting cruise.");
+                return null;
+            }
+            return remote;
         }
 
         public void CheckCruiseLease()
