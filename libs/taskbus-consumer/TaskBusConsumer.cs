@@ -892,6 +892,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             SaveState();
         }
 
+        public long ConfirmedLeaseDeadlineUtc => HasActiveTask && HasRecentLeaseConfirmation ? _leaseExpiresUtc : 0;
+
         public string ConfirmedLeaseIdentity => HasActiveTask && HasRecentLeaseConfirmation
             ? _leaseConfirmationSource.ToString(CultureInfo.InvariantCulture) + ":" +
                 _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _activeTaskId

@@ -48,6 +48,10 @@ namespace SpaceEngineers.Apps.Platform
         private bool _platformMiningReturn;
         private Vector3D _miningReturnEndpoint;
         private string _pendingMiningDockLease;
+        private string _fcsDockLease;
+        private bool _cancelFcsDock;
+        private long _fcsDockDeadlineUtc;
+        private long _fcsDockGrid;
         private long _miningDockReturnController;
         private int _dockSettleUpdates;
         private string _pendingReturnLease;
@@ -226,6 +230,7 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
+                CheckLeasedMiningDock(cancel: true);
                 CheckPlatformFlight();
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
@@ -296,6 +301,7 @@ namespace SpaceEngineers.Apps.Platform
             {
                 UpdateAutomaticRetreat();
                 UpdateAutomaticMiningReturn();
+                CheckLeasedMiningDock();
                 UpdateAutomaticMiningDock();
                 UpdateUnloadAfterMiningDock();
             }
@@ -478,13 +484,27 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
-            if (fcs == null || fcs.CubeGrid != Me.CubeGrid || fcs.EntityId == Me.EntityId || !fcs.IsWorking ||
-                !fcs.TryRun("dock drone " + grid.ToString(CultureInfo.InvariantCulture)))
+            if (_fcsDockLease != null)
+            {
+                Echo("A leased docking request is already pending.");
+                return;
+            }
+            long deadline = _worker.ConfirmedLeaseDeadlineUtc;
+            if (deadline <= DateTime.UtcNow.Ticks)
+            {
+                Echo("Docking requires an active broker lease with a UTC deadline.");
+                return;
+            }
+            if (!TryRunMiningFcs("dock leased " + grid.ToString(CultureInfo.InvariantCulture) + " " +
+                deadline.ToString(CultureInfo.InvariantCulture)))
             {
                 Echo("Could not send docking to the local [AMN FCS] block.");
                 return;
             }
+            _cancelFcsDock = false;
+            _fcsDockLease = _worker.ConfirmedLeaseIdentity;
+            _fcsDockDeadlineUtc = deadline;
+            _fcsDockGrid = grid;
             if (_unloadOnDock && _miningUnloadTo != null && _miningCargoName != null)
             {
                 _pendingUnloadDockLease = _worker.ConfirmedLeaseIdentity;
@@ -492,6 +512,28 @@ namespace SpaceEngineers.Apps.Platform
                 _unloadDockUpdates = 0;
             }
             Echo("FCS docking requested at mining point grid " + grid + ". Check the FCS status.");
+        }
+
+        private bool TryRunMiningFcs(string command)
+        {
+            var fcs = GridTerminalSystem.GetBlockWithName("[AMN FCS]") as IMyProgrammableBlock;
+            return fcs != null && fcs.CubeGrid == Me.CubeGrid && fcs.EntityId != Me.EntityId &&
+                fcs.IsWorking && fcs.TryRun(command);
+        }
+
+        private void CheckLeasedMiningDock(bool cancel = false)
+        {
+            if (_fcsDockLease == null)
+                return;
+            if (DateTime.UtcNow.Ticks >= _fcsDockDeadlineUtc || IsDockedAtMiningPoint(_fcsDockGrid))
+            {
+                _fcsDockLease = null;
+                return;
+            }
+            _cancelFcsDock |= cancel || _fcsDockLease != _worker.ConfirmedLeaseIdentity;
+            if (_cancelFcsDock &&
+                TryRunMiningFcs("dock lease stop " + _fcsDockDeadlineUtc.ToString(CultureInfo.InvariantCulture)))
+                _fcsDockLease = null;
         }
 
         private void FindManagedDrills()

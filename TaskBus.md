@@ -423,7 +423,11 @@ With `MiningAutoDock=true`, the platform requests the same FCS docking
 once after it settles within 2 m of the final prepared return waypoint
 under the same lease and with flight controls idle. Place that
 waypoint inside the FCS final approach envelope. FCS runs its usual
-docking checks. `ore stop` cancels a pending request before the handoff.
+docking checks. AMN sends the current broker lease deadline to FCS,
+which stops the approach if that deadline expires. Lease loss or
+`ore stop` requests cancellation of the matching approach. Upgrade
+the platform and its local FCS together. Manual `dock drone` remains
+available on FCS.
 Set `MiningAutoUnloadOnDock=true` to arm automatic unloading when the
 platform requests FCS docking. The platform waits up to 180 scheduled
 updates for its connector to report a physical connection to the
