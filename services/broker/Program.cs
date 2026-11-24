@@ -26,6 +26,7 @@ namespace SpaceEngineers.Services.Broker
         private int _tick;
         private int _sequence;
         private bool _paused;
+        private long _resumeAfterUtc;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
         private readonly List<string> _cancelledRequestIds = new List<string>();
         private readonly List<string> _completedRequestIds = new List<string>();
@@ -88,6 +89,10 @@ namespace SpaceEngineers.Services.Broker
                 if (!_paused)
                 {
                     _paused = true;
+                    // A worker may still hold a lease that was requeued by the tick timeout.
+                    _resumeAfterUtc = _sequence == 0 ? 0 : DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
+                    foreach (var task in _tasks)
+                        _resumeAfterUtc = Math.Max(_resumeAfterUtc, task.LeaseExpiresUtc);
                     _galnetReplies.Clear();
                     ExpireConsumerLeases(force: true);
                     SaveAfterParentLeaseChange(false);
@@ -102,7 +107,14 @@ namespace SpaceEngineers.Services.Broker
                     _listener.AcceptMessage();
                 if (string.Equals(command, "broker resume", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (DateTime.UtcNow.Ticks < _resumeAfterUtc)
+                    {
+                        Echo("Broker remains paused until " +
+                            new DateTime(_resumeAfterUtc, DateTimeKind.Utc).ToString("u", CultureInfo.InvariantCulture));
+                        return;
+                    }
                     _paused = false;
+                    _resumeAfterUtc = 0;
                     SaveQueue();
                     Echo("Broker resumed.");
                 }
@@ -741,6 +753,8 @@ namespace SpaceEngineers.Services.Broker
             _surveyReports.Clear();
             _commits.Clear();
             _sequence = 0;
+            _paused = false;
+            _resumeAfterUtc = -1;
             if (string.IsNullOrWhiteSpace(Storage))
                 return;
 
@@ -750,6 +764,14 @@ namespace SpaceEngineers.Services.Broker
                 if (parts.Length == 2 && parts[0] == "PAUSED")
                 {
                     _paused = parts[1].Trim() == "1";
+                    continue;
+                }
+                if (parts.Length == 2 && parts[0] == "RESUME_AFTER_UTC")
+                {
+                    long deadline;
+                    if (long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out deadline) &&
+                        deadline >= 0 && deadline <= DateTime.MaxValue.Ticks)
+                        _resumeAfterUtc = deadline;
                     continue;
                 }
                 if (parts.Length == 2 && parts[0] == "SEQ")
@@ -845,6 +867,8 @@ namespace SpaceEngineers.Services.Broker
                     continue;
                 }
             }
+            if (_paused && _resumeAfterUtc < 0)
+                _resumeAfterUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
         }
 
         private void SaveQueue()
@@ -852,7 +876,10 @@ namespace SpaceEngineers.Services.Broker
             var storage = new StringBuilder();
             storage.AppendLine("SEQ|" + _sequence.ToString(CultureInfo.InvariantCulture));
             if (_paused)
+            {
                 storage.AppendLine("PAUSED|1");
+                storage.AppendLine("RESUME_AFTER_UTC|" + _resumeAfterUtc.ToString(CultureInfo.InvariantCulture));
+            }
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)

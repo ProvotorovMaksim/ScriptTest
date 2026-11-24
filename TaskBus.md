@@ -85,9 +85,12 @@ two panels, copy the complete text without editing it. Pause a fresh empty
 destination and run `broker import`. A successful import restores the
 queue and its deduplication history and leaves the destination paused.
 Use the broker selection procedure below to switch idle clients. Keep
-the source paused and wait at least 30 seconds after pausing it before
-resuming the destination so old assignments have time to expire. Transfer
-is operator-driven, and the backup must fit in one text panel.
+the source paused. The snapshot carries the earliest safe resume time.
+It is at least 30 seconds after pausing a broker that has issued work,
+and covers any later known lease deadlines. A legacy snapshot without
+this timestamp waits 30 seconds after import. `broker resume` reports
+the UTC deadline if invoked early. Transfer is operator-driven, and the
+backup must fit in one text panel.
 
 ### Galnet routing core
 

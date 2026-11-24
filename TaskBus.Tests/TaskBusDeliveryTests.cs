@@ -29,6 +29,9 @@ namespace TaskBus.Tests
             Assert.Empty(broker.IGC.Outbox);
 
             broker.Main("broker resume");
+            Assert.Contains("PAUSED|1", broker.Storage);
+            broker = StartBroker(AfterResumeDeadline(broker.Storage));
+            broker.Main("broker resume");
             var oldDone = TaskBusProtocol.CreateEnvelope("TASK_DONE",
                 "{\"task_id\":\"9-1\",\"lease_epoch\":1}", targetId: 1);
             Dispatch(broker, 42, oldDone);
@@ -505,6 +508,9 @@ namespace TaskBus.Tests
             Assert.Empty(destination.IGC.Outbox);
 
             destination.Main("broker resume");
+            Assert.Contains("PAUSED|1", destination.Storage);
+            destination = StartBroker(AfterResumeDeadline(destination.Storage));
+            destination.Main("broker resume");
             Dispatch(destination, 42, poll);
             Assert.Contains("9-1", TakeResponse(destination, "TASK_ASSIGN", 42).PayloadJson);
         }
@@ -521,6 +527,15 @@ namespace TaskBus.Tests
                 Text = append ? Text + text : text;
                 return true;
             }
+        }
+
+        private static string AfterResumeDeadline(string storage)
+        {
+            const string key = "RESUME_AFTER_UTC|";
+            var lines = storage.Split('\n');
+            var deadline = Assert.Single(lines.Where(line => line.StartsWith(key, System.StringComparison.Ordinal)));
+            Assert.True(long.Parse(deadline.Substring(key.Length)) > System.DateTime.UtcNow.Ticks);
+            return storage.Replace(deadline, key + "1");
         }
 
         private static Broker StartBroker(string storage)
