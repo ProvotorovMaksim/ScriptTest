@@ -34,7 +34,8 @@ namespace SpaceEngineers.Apps.Platform
         private readonly List<Vector3D> _surveyPlan = new List<Vector3D>();
         private readonly List<IMyShipController> _surveyControllers = new List<IMyShipController>();
         private readonly List<IMyShipConnector> _surveyConnectors = new List<IMyShipConnector>();
-        private string _surveyFlightLease;
+        private string _platformFlightLease;
+        private bool _platformSurveyFlight;
         private readonly List<MyWaypointInfo> _surveyWaypoints = new List<MyWaypointInfo>();
         private const string CameraName = "[AMN SCOUT]";
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
@@ -105,7 +106,7 @@ namespace SpaceEngineers.Apps.Platform
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             StopManagedDrills();
-            CheckSurveyFlight();
+            CheckPlatformFlight();
             var camera = FindCamera();
             if (camera != null) camera.EnableRaycast = true;
         }
@@ -129,7 +130,7 @@ namespace SpaceEngineers.Apps.Platform
                     _worker.ProcessIncomingMessage(message.Source, message.Data as string);
             }
 
-            CheckSurveyFlight();
+            CheckPlatformFlight();
             CheckMiningLease();
             UpdateOreSample();
             if (command.StartsWith("probe ", StringComparison.OrdinalIgnoreCase))
@@ -169,13 +170,15 @@ namespace SpaceEngineers.Apps.Platform
                 _autoSample = false;
                 _surveySweep = false;
                 _sampleDetector = null;
-                _surveyFlightLease = null;
-                CheckSurveyFlight();
+                _platformFlightLease = null;
+                CheckPlatformFlight();
             }
             else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
                 StartManagedDrills();
             else if (string.Equals(command, "mine dock", StringComparison.OrdinalIgnoreCase))
                 RequestMiningPointDock();
+            else if (string.Equals(command, "mine return", StringComparison.OrdinalIgnoreCase))
+                StartMiningReturn();
             else if (string.Equals(command, "mine unload", StringComparison.OrdinalIgnoreCase))
                 UnloadMiningCargo();
             else if (string.Equals(command, "mine unload auto", StringComparison.OrdinalIgnoreCase))
@@ -212,7 +215,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
-            CheckSurveyFlight();
+            CheckPlatformFlight();
             CheckMiningLease();
             _galnet.Flush();
             Echo(_worker.GetStatus());
@@ -380,7 +383,7 @@ namespace SpaceEngineers.Apps.Platform
             double x;
             double y;
             double z;
-            if (!_worker.TryGetMiningApproach(out taskId, out x, out y, out z))
+            if (_worker.SupervisedCruiseRemote != 0 || !_worker.TryGetMiningApproach(out taskId, out x, out y, out z))
             {
                 Echo("A confirmed mining lease with a verified approach is required.");
                 return;
@@ -778,25 +781,8 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            _surveyControllers.Clear();
-            GridTerminalSystem.GetBlocksOfType(_surveyControllers, controller => controller.CubeGrid == Me.CubeGrid);
-            foreach (var controller in _surveyControllers)
-            {
-                var otherRemote = controller as IMyRemoteControl;
-                if (controller.IsUnderControl || (otherRemote != null && otherRemote.IsAutoPilotEnabled))
-                {
-                    Echo("Release pilot control and stop other autopilots before survey flight.");
-                    return;
-                }
-            }
-            _surveyConnectors.Clear();
-            GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
-                connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
-            if (_surveyConnectors.Count != 0)
-            {
-                Echo("Undock before survey flight.");
+            if (!CanStartPlatformFlight())
                 return;
-            }
 
             _surveyWaypoints.Clear();
             remote.GetWaypointInfo(_surveyWaypoints);
@@ -807,15 +793,57 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            StartPlatformFlight(remote, "Survey leg", true);
+        }
+
+        private bool CanStartPlatformFlight()
+        {
+            _surveyControllers.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyControllers, controller => controller.CubeGrid == Me.CubeGrid);
+            foreach (var controller in _surveyControllers)
+            {
+                var otherRemote = controller as IMyRemoteControl;
+                if (controller.IsUnderControl || (otherRemote != null && otherRemote.IsAutoPilotEnabled))
+                {
+                    Echo("Release pilot control and stop other autopilots before starting autopilot.");
+                    return false;
+                }
+            }
+            _surveyConnectors.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
+                connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
+            if (_surveyConnectors.Count != 0)
+            {
+                Echo("Undock before starting autopilot.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void StartMiningReturn()
+        {
+            if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 || !CanStartPlatformFlight())
+            {
+                Echo("Stop drilling and release flight controls before starting the mining return.");
+                return;
+            }
+
+            _routes.LoadReturnRoute(remote => StartPlatformFlight(remote, "Mining return", false));
+        }
+
+        private void StartPlatformFlight(IMyRemoteControl remote, string leg, bool survey)
+        {
             _worker.SetSupervisedCruiseRemote(remote.EntityId);
-            _surveyFlightLease = _surveyLease;
+            _platformFlightLease = _worker.ConfirmedLeaseIdentity;
+            _platformSurveyFlight = survey;
             remote.SetAutoPilotEnabled(true);
             if (!remote.IsAutoPilotEnabled)
                 _worker.SetSupervisedCruiseRemote(0);
-            Echo(remote.IsAutoPilotEnabled ? "Survey leg started." : "Survey autopilot did not engage.");
+            Echo(remote.IsAutoPilotEnabled ? leg + " started." : leg + " autopilot did not engage.");
         }
 
-        private void CheckSurveyFlight()
+        private void CheckPlatformFlight()
         {
             long id = _worker.SupervisedCruiseRemote;
             if (id == 0)
@@ -827,12 +855,17 @@ namespace SpaceEngineers.Apps.Platform
                 _worker.SetSupervisedCruiseRemote(0);
                 return;
             }
-            if (_surveyFlightLease == null || _surveyFlightLease != _surveyLease || !SurveyLeaseIsCurrent())
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (_platformFlightLease == null || _platformFlightLease != _worker.ConfirmedLeaseIdentity ||
+                (_platformSurveyFlight ? !SurveyLeaseIsCurrent() : !_worker.TryGetMiningApproach(out taskId, out x, out y, out z)))
             {
                 remote.SetAutoPilotEnabled(false);
                 if (!remote.IsAutoPilotEnabled)
                     _worker.SetSupervisedCruiseRemote(0);
-                _lastProbe = "Survey leg stopped. Confirm the lease before starting it again.";
+                _lastProbe = "Platform flight stopped. Confirm the lease before starting it again.";
             }
         }
 

@@ -274,7 +274,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private void LoadReturnRoute()
+        public void LoadReturnRoute(Action<IMyRemoteControl> start = null)
         {
             string taskId;
             double x;
@@ -316,6 +316,27 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
                 _returnWaypoints.Clear();
                 inbound.GetWaypointInfo(_returnWaypoints);
+                if (start != null)
+                {
+                    if (inbound.FlightMode != FlightMode.OneWay || _returnWaypoints.Count != _routeWaypoints.Count - 1 ||
+                        Vector3D.DistanceSquared(outbound.GetPosition(), last.Coords) > 100)
+                    {
+                        _echo("Return requires a prepared One Way controller and the ship within 10 m of the ore approach.");
+                        return;
+                    }
+                    for (int i = 0; i < _returnWaypoints.Count; i++)
+                    {
+                        var expected = _routeWaypoints[_routeWaypoints.Count - 2 - i];
+                        var actual = _returnWaypoints[i];
+                        if (actual.Name != expected.Name || actual.Coords != expected.Coords)
+                        {
+                            _echo("The return route differs from the prepared outbound route.");
+                            return;
+                        }
+                    }
+                    start(inbound);
+                    return;
+                }
                 if (_returnWaypoints.Count != 0)
                 {
                     _echo("Clear " + ReturnControllerName + " waypoints before loading a return route.");
