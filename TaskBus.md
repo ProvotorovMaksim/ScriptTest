@@ -228,6 +228,12 @@ accepting `stage deliver`. Base stock confirmation is still required to close
 the parent request. Assignments picked up without a recorded measurement
 can still be confirmed manually.
 
+Set `HaulerDock=<local connector name>` and recompile to require docking
+at the assigned mining grid for pickup and the assigned base grid for
+delivery. Both station connectors must be on the grids identified by the
+assignment. A transport task published before pickup grid IDs were added
+must be reissued before it can use the pickup docking check.
+
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions
 are grid references for route planning. Configure docking approach waypoints

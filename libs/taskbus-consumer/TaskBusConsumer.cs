@@ -72,6 +72,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly Func<string> _getGridPositionJson;
         private readonly Func<string, double?> _readHaulerCargo;
         private double? _pickupCargo;
+        private readonly long _gridId;
+        private readonly Func<long> _readDockedGrid;
 
         public TaskBusConsumer(
             ConsumerSendDelegate send,
@@ -81,7 +83,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             long entityId,
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
-            Func<string, double?> readHaulerCargo = null)
+            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -97,6 +99,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _miningPlatform = miningPlatform;
             _getGridPositionJson = getGridPositionJson;
             _readHaulerCargo = readHaulerCargo;
+            _gridId = gridId;
+            _readDockedGrid = readDockedGrid;
             LoadState();
         }
 
@@ -612,6 +616,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (childStage == "deliver" && _getGridPositionJson != null)
                 payload.Append(",\"pickup_position\":").Append(_getGridPositionJson())
                     .Append(",\"pickup_name\":").Append(TaskBusIgcHelper.ToJsonString(_gridName));
+            if (childStage == "deliver" && _gridId != 0)
+                payload.Append(",\"pickup_grid_id\":").Append(_gridId.ToString(CultureInfo.InvariantCulture));
             SendMessage("TASK_PUBLISH", payload.Append('}').ToString());
         }
 
@@ -691,6 +697,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (_consumerGroup == "Haulers" && _readDockedGrid != null &&
+                (expected == "pickup" || expected == "deliver") && !CheckHaulerDock(expected == "pickup"))
+                return;
+
             if (_consumerGroup == "Haulers" &&
                 ((expected == "pickup" && _readHaulerCargo != null) || (expected == "deliver" && _pickupCargo.HasValue)) &&
                 !CheckHaulerCargo(expected == "pickup"))
@@ -737,6 +747,27 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SaveState();
                 _echo("Stage saved. Next stage: " + CurrentStage());
             }
+        }
+
+        private bool CheckHaulerDock(bool pickup)
+        {
+            string field = pickup ? "pickup_grid_id" : "base_grid_id";
+            string details;
+            string value;
+            long grid;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) ||
+                !long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out grid) || grid == 0)
+            {
+                _echo("The assignment has no " + (pickup ? "pickup" : "delivery") + " grid ID to verify.");
+                return false;
+            }
+
+            if (_readDockedGrid() == grid)
+                return true;
+
+            _echo("Dock at the assigned " + (pickup ? "mining point" : "delivery base") + " before confirming.");
+            return false;
         }
 
         private bool CheckHaulerCargo(bool pickup)

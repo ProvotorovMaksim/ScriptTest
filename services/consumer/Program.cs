@@ -17,6 +17,7 @@ namespace SpaceEngineers.Services.Consumer
         private const string MonitorName = "[AMN STATUS]";
         private int _monitorTicks;
         private readonly string _haulerCargo;
+        private readonly string _haulerDock;
         private readonly List<MyInventoryItem> _cargoItems = new List<MyInventoryItem>();
 
         private readonly GalnetWorkerBridge _galnet;
@@ -33,14 +34,8 @@ namespace SpaceEngineers.Services.Consumer
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
                 (envelope, _) => IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
                 message => Echo(message));
-            const string cargoSetting = "HaulerCargo=";
-            foreach (var line in Me.CustomData.Split('\n'))
-            {
-                if (!line.StartsWith(cargoSetting, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                _haulerCargo = line.Substring(cargoSetting.Length).Trim();
-                break;
-            }
+            _haulerCargo = ReadSetting("HaulerCargo=");
+            _haulerDock = ReadSetting("HaulerDock=");
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
                 getStorage: () => Storage,
@@ -50,7 +45,9 @@ namespace SpaceEngineers.Services.Consumer
                 gridName: Me.CubeGrid.CustomName,
                 pollIntervalTicks: PollIntervalTicks,
                 getGridPositionJson: ReadGridPositionJson,
-                readHaulerCargo: _haulerCargo == null ? null : (Func<string, double?>)ReadHaulerCargo);
+                readHaulerCargo: _haulerCargo == null ? null : (Func<string, double?>)ReadHaulerCargo,
+                gridId: Me.CubeGrid.EntityId,
+                readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid);
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
@@ -87,6 +84,27 @@ namespace SpaceEngineers.Services.Consumer
                 _monitorTicks = 0;
                 UpdateMonitor(status);
             }
+        }
+
+        private string ReadSetting(string key)
+        {
+            foreach (var line in Me.CustomData.Split('\n'))
+            {
+                if (line.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                    return line.Substring(key.Length).Trim();
+            }
+            return null;
+        }
+
+        private long ReadDockedGrid()
+        {
+            if (string.IsNullOrEmpty(_haulerDock))
+                return 0;
+            var connector = GridTerminalSystem.GetBlockWithName(_haulerDock) as IMyShipConnector;
+            if (connector == null || connector.CubeGrid != Me.CubeGrid || connector.Status != MyShipConnectorStatus.Connected)
+                return 0;
+            var partner = connector.OtherConnector;
+            return partner == null ? 0 : partner.CubeGrid.EntityId;
         }
 
         private double? ReadHaulerCargo(string resource)

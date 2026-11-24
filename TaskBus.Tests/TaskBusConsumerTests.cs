@@ -12,7 +12,7 @@ namespace TaskBus.Tests
         {
             var sent = new List<string>();
             var point = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { }, _ => { },
-                42, "Mining point", 1, getGridPositionJson: () => "{\"x\":10,\"y\":20,\"z\":30}");
+                42, "Mining point", 1, getGridPositionJson: () => "{\"x\":10,\"y\":20,\"z\":30}", gridId: 500);
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
             var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
@@ -23,6 +23,7 @@ namespace TaskBus.Tests
 
             Assert.Contains("\"group_id\":\"Haulers\"", sent[sent.Count - 1]);
             Assert.Contains("\"steps\":[\"pickup\",\"deliver\"]", sent[sent.Count - 1]);
+            Assert.Contains("\"pickup_grid_id\":500", sent[sent.Count - 1]);
             Assert.Contains("\"pickup_name\":\"Mining point\"", sent[sent.Count - 1]);
             Assert.Contains("\"pickup_position\":{\"x\":10,\"y\":20,\"z\":30}", sent[sent.Count - 1]);
             Assert.Contains("\"base_position\":{\"x\":40,\"y\":50,\"z\":60}", sent[sent.Count - 1]);
@@ -33,36 +34,48 @@ namespace TaskBus.Tests
         {
             string storage = "";
             double? cargo = null;
+            long dockedGrid = 0;
             var sent = new List<string>();
             TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
-                () => storage, value => storage = value, _ => { }, 42, "Hauler", 1, readHaulerCargo: resource => resource == "Ore/Iron" ? cargo : null);
+                () => storage, value => storage = value, _ => { }, 42, "Hauler", 1, readHaulerCargo: resource => resource == "Ore/Iron" ? cargo : null,
+                readDockedGrid: () => dockedGrid);
             var hauler = Start();
             hauler.ProcessCommand("group Haulers");
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
-                "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50,\"steps\":[\"pickup\",\"deliver\"]}}", targetId: 42);
+                "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50,\"pickup_grid_id\":500,\"base_grid_id\":600,\"steps\":[\"pickup\",\"deliver\"]}}", targetId: 42);
             hauler.ProcessIncomingMessage(1, assignment);
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
 
             hauler.ProcessCommand("stage pickup");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
+            dockedGrid = 500;
             cargo = 49;
             hauler.ProcessCommand("stage pickup");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
             cargo = 75;
+            dockedGrid = 600;
+            hauler.ProcessCommand("stage pickup");
+            Assert.Contains("Stage: pickup", hauler.GetStatus());
+            dockedGrid = 500;
             hauler.ProcessCommand("stage pickup");
             hauler = Start();
             Assert.Contains("Stage: deliver", hauler.GetStatus());
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
             hauler.ProcessIncomingMessage(1, assignment);
+            dockedGrid = 600;
             cargo = null;
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
             cargo = 26;
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
+            dockedGrid = 500;
             cargo = 25;
+            hauler.ProcessCommand("stage deliver");
+            Assert.Contains("Pending completion: none", hauler.GetStatus());
+            dockedGrid = 600;
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: haul", hauler.GetStatus());
             Assert.Contains("TASK_DONE", sent[sent.Count - 1]);
