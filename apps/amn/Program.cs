@@ -712,7 +712,16 @@ namespace SpaceEngineers.Apps.Amn
                         }
                         else
                         {
-                            _requestStates[resource] = requestState;
+                            string raw;
+                            string phase;
+                            string childState;
+                            if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "phase", out raw) &&
+                                TaskBusIgcHelper.TryReadJsonString(raw, out phase) &&
+                                TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "child_state", out raw) &&
+                                TaskBusIgcHelper.TryReadJsonString(raw, out childState))
+                                _requestStates[resource] = requestState + " / " + phase + " " + childState;
+                            else
+                                _requestStates[resource] = requestState;
                             if (requestState == "UNKNOWN" && _dispatchToPoint && !_lowResources.Contains(resource))
                                 QueueResourceClear(resource);
                         }

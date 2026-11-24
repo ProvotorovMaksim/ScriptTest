@@ -370,7 +370,8 @@ namespace SpaceEngineers.Services.Broker
             if (existing != null)
             {
                 SendRequestStatus(requesterId, requestId,
-                    existing.State == "CLEARED" ? "CANCELLED" : existing.State, existing.Id);
+                    existing.State == "CLEARED" ? "CANCELLED" : existing.State, existing.Id,
+                    miningParent: existing.GroupId == "MiningPoints" ? existing : null);
                 return true;
             }
             var scopedId = GetScopedRequestId(requesterId, requestId);
@@ -384,30 +385,67 @@ namespace SpaceEngineers.Services.Broker
             return true;
         }
 
-        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null, string surveyReport = null)
+        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null,
+            string surveyReport = null, TaskRecord miningParent = null)
         {
             var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId);
             if (taskId != null)
                 payload += ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId);
             if (surveyReport != null)
                 payload += ",\"survey_report\":" + TaskBusIgcHelper.ToJsonString(surveyReport);
+            if (miningParent != null && miningParent.WorkerId != 0 &&
+                (miningParent.State == "LEASED" || miningParent.State == "ACTIVE"))
+                payload += ReadMiningChildStatus(miningParent);
             payload += ",\"state\":" + TaskBusIgcHelper.ToJsonString(state) + "}";
             SendMessage("TASK_PUBLISHED_ACK", payload, requesterId, "ack:" + requestId);
         }
 
-        private bool HasParentLease(long requesterId, string requestJson)
+        private string ReadMiningChildStatus(TaskRecord parent)
         {
+            TaskRecord selected = null;
+            int highestPhase = 0;
+            foreach (var child in _tasks)
+            {
+                if (!child.HasParent || child.RequesterId != parent.WorkerId ||
+                    (child.State != "QUEUED" && child.State != "LEASED" && child.State != "ACTIVE"))
+                    continue;
+                int phase = child.GroupId == "Haulers" ? 3 :
+                    child.GroupId == "MiningFleet" ? 2 : child.GroupId == "Scouts" ? 1 : 0;
+                string parentId;
+                int epoch;
+                if (phase <= highestPhase || !TryReadParentReference(child.RequestJson, out parentId, out epoch) ||
+                    parentId != parent.Id || epoch != parent.LeaseEpoch)
+                    continue;
+                highestPhase = phase;
+                selected = child;
+            }
+
+            if (selected == null)
+                return "";
+            var name = highestPhase == 3 ? "transport" : highestPhase == 2 ? "mine" : "survey";
+            return ",\"phase\":" + TaskBusIgcHelper.ToJsonString(name) +
+                ",\"child_state\":" + TaskBusIgcHelper.ToJsonString(selected.State);
+        }
+
+        private static bool TryReadParentReference(string requestJson, out string parentId, out int epoch)
+        {
+            parentId = null;
+            epoch = 0;
             string parentIdJson;
             string epochJson;
-            bool hasParentId = TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out parentIdJson);
-            bool hasEpoch = TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out epochJson);
-            if (!hasParentId && !hasEpoch)
-                return true;
+            return TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out parentIdJson) &&
+                TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out epochJson) &&
+                TaskBusIgcHelper.TryReadJsonString(parentIdJson, out parentId) &&
+                int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch);
+        }
 
+        private bool HasParentLease(long requesterId, string requestJson)
+        {
+            if (!ReferencesParent(requestJson))
+                return true;
             string parentId;
             int epoch;
-            if (!hasParentId || !hasEpoch || !TaskBusIgcHelper.TryReadJsonString(parentIdJson, out parentId) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch))
+            if (!TryReadParentReference(requestJson, out parentId, out epoch))
                 return false;
 
             return _tasks.Any(task => task.Id == parentId && task.GroupId == "MiningPoints" && !task.HasParent &&

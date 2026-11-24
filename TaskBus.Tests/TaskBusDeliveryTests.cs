@@ -226,6 +226,14 @@ namespace TaskBus.Tests
             Assert.Contains("PARENT_LEASE_INVALID", TakeResponse(broker, "TASK_REJECTED", 42).PayloadJson);
             Dispatch(broker, 42, Child("survey", 1));
             Assert.Contains("\"state\":\"QUEUED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 42).PayloadJson);
+
+            var query = TaskBusProtocol.CreateEnvelope("TASK_QUERY", "{\"request_id\":\"parent\"}", targetId: 1);
+            Dispatch(broker, 9, query);
+            var status = TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson;
+            Assert.Contains("\"phase\":\"survey\"", status);
+            Assert.Contains("\"child_state\":\"QUEUED\"", status);
+            Dispatch(broker, 43, query);
+            Assert.DoesNotContain("\"phase\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 43).PayloadJson);
         }
 
         [Fact]

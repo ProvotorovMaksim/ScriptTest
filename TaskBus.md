@@ -282,7 +282,9 @@ is retired through the existing cancellation exchange.
 
 On AMN.Base the cockpit and an optional local `[AMN STATUS]` panel
 show stock targets and each open resource request's last broker state,
-rejection reason or pending cancellation. After a restart or broker
+rejection reason or pending cancellation. For a mining-point request
+with an outstanding child, the broker also reports survey, mine or
+transport and the child queue state. After a restart or broker
 switch, open requests display Awaiting broker until the next reply.
 
 Name a text panel on the point consumer's grid exactly `[AMN STATUS]`
