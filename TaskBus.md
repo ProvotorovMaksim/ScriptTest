@@ -442,8 +442,14 @@ external acceleration on that axis. In-game trials should compare the
 estimate with measured stopping distance at several loads and orientations.
 
 For a fixed berth, name the ship's connector `[FCS DOCK]`. While connected
-in the desired orientation, run `dock record` to save its world pose. Run
-`dock guide` on the next approach to show the position correction along the
+in the desired orientation, run `dock record` to save its world pose.
+
+FCS saves up to eight recorded station grids, with one berth per grid.
+Use `dock list` to find their grid IDs and `dock select <grid ID>` before
+approaching a previously recorded station. Finish any active docking or
+charge and departure sequence before switching.
+
+Run `dock guide` on the next approach to show the position correction along the
 recorded connector's right, up and forward axes, plus forward and up
 alignment errors. Use `dock off` to hide the guide. The guide provides
 readouts during FCS flight. The pilot flies the approach and connects using

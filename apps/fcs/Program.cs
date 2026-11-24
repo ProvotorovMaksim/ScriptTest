@@ -23,6 +23,14 @@ namespace SpaceEngineers.Apps.FlightControl
         private Vector3D? dockPosition;
         private MatrixD dockFrame;
         private long dockPortId;
+        private const int MaxBerths = 8;
+        private readonly Dictionary<long, Berth> berths = new Dictionary<long, Berth>();
+
+        private sealed class Berth
+        {
+            public MatrixD Frame;
+            public long PortId;
+        }
         private int dockTicks;
         private bool dockCharging;
         private bool departureRequested;
@@ -53,13 +61,30 @@ namespace SpaceEngineers.Apps.FlightControl
             int charge;
             if (limits.Length == 2 && TryReadDepartureCharge(limits[1], out charge))
                 departureCharge = charge;
+            for (int i = 5; i < settings.Length; i++)
+            {
+                if (berths.Count >= MaxBerths || !settings[i].StartsWith("berth|", StringComparison.Ordinal))
+                    continue;
+                var fields = settings[i].Split('|');
+                long grid;
+                long port;
+                Vector3D berthPosition;
+                Vector3D berthForward;
+                Vector3D berthUp;
+                if (fields.Length == 6 && long.TryParse(fields[1], out grid) && grid != 0 &&
+                    long.TryParse(fields[2], out port) && port != 0 &&
+                    TryReadDockVector(fields[3], out berthPosition) && TryReadDockVector(fields[4], out berthForward) &&
+                    TryReadDockVector(fields[5], out berthUp) && IsDockOrientation(berthForward, berthUp))
+                {
+                    berths[grid] = new Berth { PortId = port, Frame = MatrixD.CreateWorld(berthPosition, berthForward, berthUp) };
+                }
+            }
             Vector3D position;
             Vector3D forward;
             Vector3D up;
             if (settings.Length >= 4 && TryReadDockVector(settings[1], out position) &&
                 TryReadDockVector(settings[2], out forward) && TryReadDockVector(settings[3], out up) &&
-                Math.Abs(forward.LengthSquared() - 1) < 0.001 && Math.Abs(up.LengthSquared() - 1) < 0.001 &&
-                Math.Abs(Vector3D.Dot(forward, up)) < 0.001)
+                IsDockOrientation(forward, up))
             {
                 dockPosition = position;
                 dockFrame = MatrixD.CreateWorld(position, forward, up);
@@ -74,10 +99,19 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
+        private static bool IsDockOrientation(Vector3D forward, Vector3D up)
+        {
+            return Math.Abs(forward.LengthSquared() - 1) < 0.001 && Math.Abs(up.LengthSquared() - 1) < 0.001 &&
+                Math.Abs(Vector3D.Dot(forward, up)) < 0.001;
+        }
+
         public void Main(string argument, UpdateType source)
         {
             var previousMode = mode;
             var command = (argument ?? "").Trim().ToLowerInvariant();
+            if (command.StartsWith("dock select ", StringComparison.Ordinal))
+                SelectBerth(command.Substring(12).Trim());
+
             switch (command)
             {
                 case "normal": Activate(Mode.Normal); break;
@@ -89,6 +123,11 @@ namespace SpaceEngineers.Apps.FlightControl
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
                     return;
                 case "dock record": RecordDockPose(); break;
+                case "dock list":
+                    foreach (var entry in berths)
+                        Echo("Grid " + entry.Key + " | Port " + entry.Value.PortId +
+                            (entry.Value.PortId == dockPortId ? " | selected" : ""));
+                    break;
                 case "dock approach": BeginDockApproach(false); break;
                 case "dock drone": BeginDockApproach(true); break;
                 case "dock depart": DepartBerth(true); break;
@@ -203,11 +242,46 @@ namespace SpaceEngineers.Apps.FlightControl
             }
 
             var port = dockConnector.OtherConnector;
+            if (mode == Mode.Dock || (dockCharging && (port == null || port.EntityId != dockPortId)))
+            {
+                Echo("Finish current docking or departure before changing berth.");
+                return;
+            }
             dockPosition = dockConnector.GetPosition();
             dockFrame = dockConnector.WorldMatrix;
             dockPortId = port == null ? 0 : port.EntityId;
+            if (port != null && (berths.Count < MaxBerths || berths.ContainsKey(port.CubeGrid.EntityId)))
+            {
+                berths[port.CubeGrid.EntityId] = new Berth { Frame = dockFrame, PortId = dockPortId };
+                SaveSettings();
+                Echo("Recorded berth on grid " + port.CubeGrid.EntityId + ".");
+            }
+            else
+            {
+                SaveSettings();
+                Echo("Recorded current berth. No grid entry added to the berth list.");
+            }
+        }
+
+        private void SelectBerth(string argument)
+        {
+            long grid;
+            Berth berth;
+            if (!long.TryParse(argument, out grid) || !berths.TryGetValue(grid, out berth))
+            {
+                Echo("Use dock list to find a recorded grid ID.");
+                return;
+            }
+            if (mode == Mode.Dock || dockCharging || departureRequested || disconnectPending)
+            {
+                Echo("Finish docking and departure before selecting another berth.");
+                return;
+            }
+            dockFrame = berth.Frame;
+            dockPosition = dockFrame.Translation;
+            dockPortId = berth.PortId;
             SaveSettings();
-            Echo("Recorded the connected ship pose for this berth.");
+            Echo("Selected berth on grid " + grid + ".");
         }
 
         private void BeginDockApproach(bool uncrewed)
@@ -345,6 +419,13 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\n" + dockPortId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 (disconnectPending ? "\ndisconnecting" : departureRequested ? "\ndeparting" :
                         dockCharging ? "\ncharging" : "");
+            foreach (var entry in berths)
+            {
+                var berth = entry.Value;
+                Storage += "\nberth|" + entry.Key + "|" + berth.PortId + "|" +
+                    FormatDockVector(berth.Frame.Translation) + "|" + FormatDockVector(berth.Frame.Forward) +
+                    "|" + FormatDockVector(berth.Frame.Up);
+            }
         }
 
         private static string FormatDockVector(Vector3D vector) =>
