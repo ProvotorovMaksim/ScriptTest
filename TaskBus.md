@@ -246,8 +246,10 @@ the loaded ship and current obstacles before launching. Final docking
 is handled separately by FCS. On a drilling platform, turn the drills off,
 return to within 10 m of the ore approach, and use `mine return` to start
 the reviewed One Way route. The platform compares it with the outbound
-route before launch and stops its autopilot if the lease is lost. Use
-`ore stop` to cancel the supervised flight.
+route before launch and stops its autopilot if the lease is lost. The
+platform also stops supervised survey, approach and return legs when
+the controller has moved less than 0.5 m in 60 scheduled updates.
+Use `ore stop` to cancel the supervised flight.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This

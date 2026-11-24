@@ -62,9 +62,10 @@ namespace SpaceEngineers.Apps.Platform
         private int _retreatSettleUpdates;
         private const string MiningRetreatRemoteName = "[AMN MINE RETREAT]";
         private const string MiningRetreatWaypointName = "AMN assigned retreat";
-        private const int MiningProgressCheckUpdates = 60;
-        private const double MinimumMiningProgress = 0.5;
-        private int _miningProgressTicks;
+        private const int FlightProgressCheckUpdates = 60;
+        private const double MinimumFlightProgress = 0.5;
+        private int _flightProgressTicks;
+        private Vector3D _flightProgressPosition;
         private Vector3D _miningPassEndpoint;
         private double _miningPassDistance;
         private const string MiningPassRemoteName = "[AMN MINE PASS]";
@@ -180,7 +181,7 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             if ((updateSource & UpdateType.Update10) != 0)
-                CheckMiningPassProgress();
+                CheckPlatformFlightProgress();
             CheckPlatformFlight();
             CheckMiningLease();
             UpdateOreSample();
@@ -1303,7 +1304,6 @@ namespace SpaceEngineers.Apps.Platform
             _platformMiningPass = true;
             _miningPassEndpoint = _surveyWaypoints[0].Coords;
             _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
-            _miningProgressTicks = 0;
             try
             {
                 if (StartManagedDrills())
@@ -1418,34 +1418,44 @@ namespace SpaceEngineers.Apps.Platform
             _platformMiningRetreat = true;
             _miningPassEndpoint = _surveyWaypoints[0].Coords;
             _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
-            _miningProgressTicks = 0;
             StartPlatformFlight(remote, "Mining retreat", false);
             if (_worker.SupervisedCruiseRemote == 0)
                 _platformMiningRetreat = false;
         }
 
-        private void CheckMiningPassProgress()
+        private void CheckPlatformFlightProgress()
         {
-            if ((!_platformMiningPass && !_platformMiningRetreat) || ++_miningProgressTicks < MiningProgressCheckUpdates)
+            if (_worker.SupervisedCruiseRemote == 0 || _platformFlightLease == null ||
+                ++_flightProgressTicks < FlightProgressCheckUpdates)
                 return;
 
-            _miningProgressTicks = 0;
+            _flightProgressTicks = 0;
             var remote = GridTerminalSystem.GetBlockWithId(_worker.SupervisedCruiseRemote) as IMyRemoteControl;
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
                 return;
 
-            double distance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
-            if (_miningPassDistance - distance >= MinimumMiningProgress)
+            var position = remote.GetPosition();
+            if (_platformMiningPass || _platformMiningRetreat)
             {
-                _miningPassDistance = distance;
+                double distance = Vector3D.Distance(position, _miningPassEndpoint);
+                if (_miningPassDistance - distance >= MinimumFlightProgress)
+                {
+                    _miningPassDistance = distance;
+                    return;
+                }
+            }
+            else if (Vector3D.DistanceSquared(position, _flightProgressPosition) >=
+                MinimumFlightProgress * MinimumFlightProgress)
+            {
+                // Multi-waypoint routes may temporarily move away from their final destination.
+                _flightProgressPosition = position;
                 return;
             }
 
-            if (_platformMiningRetreat)
-                _platformFlightLease = null;
-            else
+            _platformFlightLease = null;
+            if (_platformMiningPass)
                 StopManagedDrills();
-            _lastProbe = "Mining movement halted: no progress toward the endpoint.";
+            _lastProbe = "Platform movement halted: no progress on the supervised leg.";
         }
 
         private void FinishMiningPass()
@@ -1462,6 +1472,8 @@ namespace SpaceEngineers.Apps.Platform
             _platformFlightLease = _worker.ConfirmedLeaseIdentity;
             _platformSurveyFlight = survey;
             _platformMiningReturn = false;
+            _flightProgressTicks = 0;
+            _flightProgressPosition = remote.GetPosition();
             remote.SetAutoPilotEnabled(true);
             if (!remote.IsAutoPilotEnabled)
                 _worker.SetSupervisedCruiseRemote(0);
@@ -1477,7 +1489,7 @@ namespace SpaceEngineers.Apps.Platform
             var remote = GridTerminalSystem.GetBlockWithId(id) as IMyRemoteControl;
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsAutoPilotEnabled)
             {
-                if (_autoMiningRetreat && _platformMiningPass && remote != null &&
+                if (_autoMiningRetreat && _platformMiningPass && _platformFlightLease != null && remote != null &&
                     remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
                     _drillingLease != null && _drillingLease == _worker.ConfirmedLeaseIdentity &&
                     Vector3D.DistanceSquared(remote.GetPosition(), _miningPassEndpoint) <= 4)
@@ -1526,7 +1538,7 @@ namespace SpaceEngineers.Apps.Platform
                 FinishMiningPass();
                 _platformMiningRetreat = false;
                 _platformMiningReturn = false;
-                if (!_lastProbe.StartsWith("Mining movement halted", StringComparison.Ordinal))
+                if (!_lastProbe.StartsWith("Platform movement halted", StringComparison.Ordinal))
                     _lastProbe = "Platform flight stopped. Check the lease and flight conditions.";
             }
         }
