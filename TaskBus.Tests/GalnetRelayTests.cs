@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
+using SpaceEngineers.Libs.TaskBusConsumer;
 using System.Linq;
 using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Libs.IgcCore;
 using Xunit;
+using Broker = SpaceEngineers.Services.Broker.Program;
 using Relay = SpaceEngineers.Services.Galnet.Program;
 
 namespace TaskBus.Tests
@@ -130,6 +133,97 @@ namespace TaskBus.Tests
                 LastCommand = command;
                 return Accept;
             }
+        }
+
+        [Fact]
+        public void WorkerLeasesAndCommitsTaskThroughGalnet()
+        {
+            var workerRelay = Start(21, "0\n22");
+            var brokerRelay = Start(22, "0\n21");
+            MyGridProgram.StorageAtStartup = "";
+            Broker broker;
+            try { broker = new Broker(); }
+            finally { MyGridProgram.StorageAtStartup = null; }
+
+            var workerBlock = new ApplicationBlock(42, _ => true);
+            var localRelay = new ApplicationBlock(21, command =>
+            {
+                workerRelay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+            var bridge = new GalnetWorkerBridge(workerBlock, "GalnetBrokerRelay=22",
+                () => localRelay, (_, __) => throw new InvalidOperationException("Direct IGC disabled"), _ => { });
+            string storage = "";
+            var worker = new TaskBusConsumer(bridge.Send, () => storage, value => storage = value,
+                _ => { }, 42, "Platform", 30, miningPlatform: true);
+            worker.ProcessCommand("broker 1");
+
+            workerRelay.GridTerminalSystem.Application = new ApplicationBlock(42,
+                command => bridge.TryReceive(command, worker));
+            brokerRelay.GridTerminalSystem.Application = new ApplicationBlock(1, command =>
+            {
+                broker.Main(command);
+                return true;
+            });
+            broker.GridTerminalSystem.Relay = new ApplicationBlock(22, command =>
+            {
+                brokerRelay.Main(command, UpdateType.Terminal);
+                return true;
+            });
+
+            broker.IGC.Inbox.Enqueue((9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\",\"group_id\":\"MiningFleet\",\"steps\":[\"mine\"]}", targetId: 1)));
+            broker.Main("");
+            Assert.Single(broker.IGC.Outbox);
+            broker.IGC.Outbox.Clear();
+
+            void Transfer()
+            {
+                foreach (var packet in workerRelay.IGC.UnicastOutbox)
+                    brokerRelay.IGC.UnicastListener.Inbox.Enqueue((21, packet.Tag, packet.Data));
+                workerRelay.IGC.UnicastOutbox.Clear();
+                foreach (var packet in brokerRelay.IGC.UnicastOutbox)
+                    workerRelay.IGC.UnicastListener.Inbox.Enqueue((22, packet.Tag, packet.Data));
+                brokerRelay.IGC.UnicastOutbox.Clear();
+            }
+
+            void Tick()
+            {
+                worker.Tick();
+                bridge.Flush();
+                broker.Main("");
+                workerRelay.Main("", UpdateType.Update10);
+                brokerRelay.Main("", UpdateType.Update10);
+                Transfer();
+            }
+
+            for (int tick = 0; tick < 150 && !worker.HasActiveTask; tick++)
+                Tick();
+            Assert.True(worker.HasActiveTask);
+            Assert.Contains("Stage: mine", worker.GetStatus());
+            worker.ProcessCommand("stage mine");
+            Assert.Contains("Pending completion: 9-1", worker.GetStatus());
+            for (int tick = 0; tick < 150 && !worker.GetStatus().Contains("Pending completion: none"); tick++)
+                Tick();
+            Assert.Contains("Pending completion: none", worker.GetStatus());
+            Assert.DoesNotContain("TASK|", broker.Storage);
+            Assert.Empty(broker.IGC.Outbox);
+        }
+
+        private sealed class ApplicationBlock : IMyProgrammableBlock
+        {
+            private readonly Func<string, bool> _run;
+            public long EntityId { get; }
+            public long CubeGrid => 1;
+            public bool IsWorking => true;
+
+            public ApplicationBlock(long entityId, Func<string, bool> run)
+            {
+                EntityId = entityId;
+                _run = run;
+            }
+
+            public bool TryRun(string command) => _run(command);
         }
 
         private static Relay Start(long id, string storage)
