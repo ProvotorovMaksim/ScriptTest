@@ -35,7 +35,7 @@ namespace SpaceEngineers.Apps.FlightControl
             {
                 try
                 {
-                    if (!cockpit.IsWorking || !cockpit.IsUnderControl)
+                    if (cockpit.CubeGrid != Me.CubeGrid || !cockpit.IsWorking || !cockpit.IsUnderControl)
                         Release("FCS off: cockpit unavailable or pilot absent.");
                     else if (RemoteAutopilotEnabled())
                         Release("FCS off: remote autopilot took control.");
@@ -90,6 +90,8 @@ namespace SpaceEngineers.Apps.FlightControl
             var gyros = new List<IMyGyro>();
             GridTerminalSystem.GetBlocksOfType(thrusters, block => block.CubeGrid == selected.CubeGrid);
             GridTerminalSystem.GetBlocksOfType(gyros, block => block.CubeGrid == selected.CubeGrid);
+            previousThrusterControl = selected.ControlThrusters;
+            previousDampeners = selected.DampenersOverride;
             if (!flight.Acquire(thrusters, gyros, selected.WorldMatrix))
             {
                 cockpit = null;
@@ -98,12 +100,17 @@ namespace SpaceEngineers.Apps.FlightControl
             }
 
             cockpit = selected;
-            previousThrusterControl = cockpit.ControlThrusters;
-            previousDampeners = cockpit.DampenersOverride;
-            cockpit.ControlThrusters = false;
-            cockpit.DampenersOverride = false;
             mode = requested;
-            Runtime.UpdateFrequency = UpdateFrequency.Update1;
+            try
+            {
+                cockpit.ControlThrusters = false;
+                cockpit.DampenersOverride = false;
+                Runtime.UpdateFrequency = UpdateFrequency.Update1;
+            }
+            catch (Exception error)
+            {
+                Release("FCS off: engagement failed. " + error.Message);
+            }
         }
 
         private bool RemoteAutopilotEnabled()
@@ -116,16 +123,23 @@ namespace SpaceEngineers.Apps.FlightControl
 
         private void Release(string reason)
         {
-            if (mode != Mode.Off)
-            {
-                flight.Release();
-                cockpit.ControlThrusters = previousThrusterControl;
-                cockpit.DampenersOverride = previousDampeners;
-                cockpit = null;
-                mode = Mode.Off;
-                Runtime.UpdateFrequency = UpdateFrequency.None;
-            }
             status = reason;
+            if (mode == Mode.Off)
+                return;
+
+            var previousCockpit = cockpit;
+            cockpit = null;
+            mode = Mode.Off;
+            Runtime.UpdateFrequency = UpdateFrequency.None;
+
+            int failures = flight.Release();
+            try { previousCockpit.ControlThrusters = previousThrusterControl; }
+            catch (Exception) { failures++; }
+            try { previousCockpit.DampenersOverride = previousDampeners; }
+            catch (Exception) { failures++; }
+
+            if (failures > 0)
+                status += "\nCould not restore " + failures + " actuator or cockpit settings.";
         }
 
         private enum Mode { Off, Normal, Manual }
@@ -390,16 +404,22 @@ namespace SpaceEngineers.Apps.FlightControl
                 return true;
             }
 
-            public void Release()
+            public int Release()
             {
-                thrust.Release();
+                int failures = thrust.Release();
                 foreach (var gyro in gyros)
                 {
-                    gyro.GyroOverride = false;
-                    gyro.Pitch = gyro.Yaw = gyro.Roll = 0;
+                    try
+                    {
+                        gyro.GyroOverride = false;
+                        gyro.Pitch = gyro.Yaw = gyro.Roll = 0;
+                    }
+                    catch (Exception) { failures++; }
                 }
                 gyros.Clear();
                 hasSample = false;
+                disturbance = Vector3D.Zero;
+                return failures;
             }
 
             private static double Rotation(double input, double angularVelocity)
@@ -523,11 +543,18 @@ namespace SpaceEngineers.Apps.FlightControl
                             ? (float)Clamp(engine.Force / engine.Available, 0, 1) : 0;
             }
 
-            public void Release()
+            public int Release()
             {
+                int failures = 0;
                 foreach (var group in groups)
+                {
                     foreach (var engine in group)
-                        engine.Block.ThrustOverridePercentage = 0;
+                    {
+                        try { engine.Block.ThrustOverridePercentage = 0; }
+                        catch (Exception) { failures++; }
+                    }
+                }
+                return failures;
             }
         }
 

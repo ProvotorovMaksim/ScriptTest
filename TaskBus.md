@@ -125,7 +125,9 @@ engaging. The controller starts off after compilation or reload.
   current equipment and load distribution, with no allowance for rock contact
   or future cargo shifts.
 - `off` releases the actuators and restores cockpit thruster and dampener
-  settings. Leaving the cockpit also releases control while the PB is running.
+  settings. Leaving the cockpit or enabling a remote autopilot also releases
+  control while the PB is running. If an actuator is unavailable during
+  release, FCS attempts the remaining settings and reports a warning.
 
 Thrust allocation uses effective thrust and each engine's moment arm from the
 ship's measured center of mass. The PB reports the modeled residual moment.
