@@ -51,6 +51,8 @@ namespace SpaceEngineers.Apps.Platform
         private string _fcsDockLease;
         private bool _cancelFcsDock;
         private long _fcsDockDeadlineUtc;
+        private long _fcsDockRequestId;
+        private long _fcsDockLimitUtc;
         private long _fcsDockGrid;
         private long _miningDockReturnController;
         private int _dockSettleUpdates;
@@ -504,6 +506,8 @@ namespace SpaceEngineers.Apps.Platform
             _cancelFcsDock = false;
             _fcsDockLease = _worker.ConfirmedLeaseIdentity;
             _fcsDockDeadlineUtc = deadline;
+            _fcsDockRequestId = deadline;
+            _fcsDockLimitUtc = DateTime.UtcNow.Ticks + TimeSpan.FromSeconds(30).Ticks;
             _fcsDockGrid = grid;
             if (_unloadOnDock && _miningUnloadTo != null && _miningCargoName != null)
             {
@@ -531,9 +535,18 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
             _cancelFcsDock |= cancel || _fcsDockLease != _worker.ConfirmedLeaseIdentity;
-            if (_cancelFcsDock &&
-                TryRunMiningFcs("dock lease stop " + _fcsDockDeadlineUtc.ToString(CultureInfo.InvariantCulture)))
-                _fcsDockLease = null;
+            string requestId = _fcsDockRequestId.ToString(CultureInfo.InvariantCulture);
+            if (_cancelFcsDock)
+            {
+                if (TryRunMiningFcs("dock lease stop " + requestId))
+                    _fcsDockLease = null;
+                return;
+            }
+
+            long deadline = Math.Min(_fcsDockLimitUtc, _worker.ConfirmedLeaseDeadlineUtc);
+            if (deadline > _fcsDockDeadlineUtc &&
+                TryRunMiningFcs("dock lease refresh " + requestId + " " + deadline.ToString(CultureInfo.InvariantCulture)))
+                _fcsDockDeadlineUtc = deadline;
         }
 
         private void FindManagedDrills()

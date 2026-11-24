@@ -18,6 +18,8 @@ namespace SpaceEngineers.Apps.FlightControl
         private const string DroneControllerName = "[FCS DRONE]";
         private bool droneDock;
         private long dockLeaseDeadlineUtc;
+        private long dockLeaseRequestId;
+        private long dockLeaseLimitUtc;
         private readonly List<IMyRemoteControl> remotes = new List<IMyRemoteControl>();
         private const string DockConnectorName = "[FCS DOCK]";
         private IMyShipConnector dockConnector;
@@ -158,11 +160,13 @@ namespace SpaceEngineers.Apps.FlightControl
                         SelectBerth(command.Substring(12).Trim());
                     else if (command.StartsWith("dock leased ", StringComparison.Ordinal))
                         BeginLeasedDock(command.Substring(12));
+                    else if (command.StartsWith("dock lease refresh ", StringComparison.Ordinal))
+                        RefreshDockLease(command.Substring("dock lease refresh ".Length));
                     else if (command.StartsWith("dock lease stop ", StringComparison.Ordinal))
                     {
-                        long deadline;
-                        if (dockLeaseDeadlineUtc != 0 && long.TryParse(command.Substring(16), out deadline) &&
-                            deadline == dockLeaseDeadlineUtc)
+                        long requestId;
+                        if (dockLeaseRequestId != 0 && long.TryParse(command.Substring(16), out requestId) &&
+                            requestId == dockLeaseRequestId)
                             Release("FCS off: docking lease cancelled by AMN.");
                     }
                     else if (command.StartsWith("dock drone ", StringComparison.Ordinal))
@@ -317,7 +321,25 @@ namespace SpaceEngineers.Apps.FlightControl
                 return;
             BeginDockApproach(true);
             if (mode == Mode.Dock)
+            {
                 dockLeaseDeadlineUtc = deadline;
+                dockLeaseRequestId = deadline;
+                dockLeaseLimitUtc = now + TimeSpan.FromSeconds(30).Ticks;
+            }
+        }
+
+        private void RefreshDockLease(string arguments)
+        {
+            long now = DateTime.UtcNow.Ticks;
+            if (dockLeaseRequestId == 0 || now >= dockLeaseDeadlineUtc)
+                return;
+            var fields = arguments.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            long requestId;
+            long deadline;
+            if (fields.Length == 2 && long.TryParse(fields[0], out requestId) && requestId == dockLeaseRequestId &&
+                long.TryParse(fields[1], out deadline) && deadline > dockLeaseDeadlineUtc &&
+                deadline <= now + TimeSpan.FromSeconds(30).Ticks)
+                dockLeaseDeadlineUtc = Math.Min(deadline, dockLeaseLimitUtc);
         }
 
         private void BeginDockApproach(bool uncrewed)
@@ -623,6 +645,8 @@ namespace SpaceEngineers.Apps.FlightControl
             mode = Mode.Off;
             droneDock = false;
             dockLeaseDeadlineUtc = 0;
+            dockLeaseRequestId = 0;
+            dockLeaseLimitUtc = 0;
             Runtime.UpdateFrequency = dockCharging ? UpdateFrequency.Update10 : UpdateFrequency.None;
 
             int failures = flight.Release();

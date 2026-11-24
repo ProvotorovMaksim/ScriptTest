@@ -20,6 +20,8 @@ namespace SpaceEngineers.Services.Consumer
         private bool _autoDepart;
         private string _fcsDockLease;
         private long _fcsDockDeadlineUtc;
+        private long _fcsDockRequestId;
+        private long _fcsDockLimitUtc;
         private long _fcsDockGrid;
         private bool _cancelFcsDock;
         private readonly string _haulerCargo;
@@ -170,6 +172,8 @@ namespace SpaceEngineers.Services.Consumer
 
             _fcsDockLease = _consumer.ConfirmedLeaseIdentity;
             _fcsDockDeadlineUtc = deadline;
+            _fcsDockRequestId = deadline;
+            _fcsDockLimitUtc = DateTime.UtcNow.Ticks + TimeSpan.FromSeconds(30).Ticks;
             _fcsDockGrid = grid;
             _cancelFcsDock = false;
             Echo("FCS final approach requested for station grid " + grid + ". Check the FCS status.");
@@ -185,9 +189,18 @@ namespace SpaceEngineers.Services.Consumer
                 return;
             }
             _cancelFcsDock |= _fcsDockLease != _consumer.ConfirmedLeaseIdentity;
-            if (_cancelFcsDock &&
-                RequestFcs("dock lease stop " + _fcsDockDeadlineUtc.ToString(CultureInfo.InvariantCulture)))
-                _fcsDockLease = null;
+            string requestId = _fcsDockRequestId.ToString(CultureInfo.InvariantCulture);
+            if (_cancelFcsDock)
+            {
+                if (RequestFcs("dock lease stop " + requestId))
+                    _fcsDockLease = null;
+                return;
+            }
+
+            long deadline = Math.Min(_fcsDockLimitUtc, _consumer.ConfirmedLeaseDeadlineUtc);
+            if (deadline > _fcsDockDeadlineUtc &&
+                RequestFcs("dock lease refresh " + requestId + " " + deadline.ToString(CultureInfo.InvariantCulture)))
+                _fcsDockDeadlineUtc = deadline;
         }
 
         private void DepartHaulerPickup()

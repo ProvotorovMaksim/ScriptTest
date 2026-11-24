@@ -426,7 +426,9 @@ once after it settles within 2 m of the final prepared return waypoint
 under the same lease and with flight controls idle. Place that
 waypoint inside the FCS final approach envelope. FCS runs its usual
 docking checks. AMN sends the current broker lease deadline to FCS,
-which stops the approach if that deadline expires. Lease loss or
+which stops the approach if that deadline expires. AMN forwards later
+confirmations for the same lease before expiry. FCS caps the approach at
+30 seconds of wall time, even with refreshed confirmations. Lease loss or
 `ore stop` requests cancellation of the matching approach. Upgrade
 the platform and its local FCS together. Manual `dock drone` remains
 available on FCS.
