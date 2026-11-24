@@ -571,8 +571,13 @@ forward axes. The first asteroid surface hit beyond stand-off seeds a
 grid in the camera plane. The existing sweep checks each leg before
 flight, and stops if camera clearance or sampling fails. Fit the cameras
 to cover the survey directions. A configured `SurveyAutoSweep` center
-takes precedence. Set `SurveyAutoBracketGap=100` for either automatic
-mode to fly one extra sweep of up to nine new midpoints between detector
+takes precedence. In space, `SurveyAutoCandidate=40 25` instead uses
+a matching ore candidate from the assignment when present. The numbers
+are stand-off and spacing in metres. The platform waits for an asteroid
+surface hit within 150 m of that GPS before starting the sweep. With
+both camera settings enabled, the generic asteroid search runs only
+when no matching candidate is available. Set `SurveyAutoBracketGap=100`
+for any automatic mode to fly one extra sweep of up to nine new midpoints between detector
 readings with and without the requested ore. The value limits the
 distance between the paired readings in metres. Clearance, lease and
 sampling checks apply to the extra route. A stalled sweep holds the

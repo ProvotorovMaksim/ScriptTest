@@ -114,6 +114,8 @@ namespace SpaceEngineers.Apps.Platform
         private readonly double _automaticBracketGap;
         private readonly double _automaticSurveySpacing;
         private readonly Vector3D _automaticSurveyCenter;
+        private readonly double _candidateStandOff;
+        private readonly double _candidateSpacing;
         private readonly double _asteroidScanRange;
         private readonly double _asteroidStandOff;
         private readonly double _asteroidSurveySpacing;
@@ -152,6 +154,10 @@ namespace SpaceEngineers.Apps.Platform
                 else
                     Echo("SurveyClearanceRadius must be between 0 and 100 m.");
             }
+            var candidateSurvey = ReadSetting("SurveyAutoCandidate=");
+            if (candidateSurvey != null &&
+                !TryReadCandidatePlan(candidateSurvey, out _candidateStandOff, out _candidateSpacing))
+                Echo("Use SurveyAutoCandidate=<stand-off metres> <spacing metres>.");
             var asteroidSurvey = ReadSetting("SurveyAutoAsteroid=");
             if (asteroidSurvey != null &&
                 !TryReadAsteroidSurvey(asteroidSurvey, out _asteroidScanRange, out _asteroidStandOff, out _asteroidSurveySpacing))
@@ -964,7 +970,8 @@ namespace SpaceEngineers.Apps.Platform
         {
             string lease;
             string ore;
-            if ((_automaticSurveySpacing == 0 && _asteroidScanRange == 0) || _surveySweep || _sampleDetector != null ||
+            if ((_automaticSurveySpacing == 0 && _asteroidScanRange == 0 && _candidateSpacing == 0) ||
+                _surveySweep || _sampleDetector != null ||
                 _worker.SupervisedCruiseRemote != 0 || !_worker.TryGetSurveyLease(out lease, out ore) ||
                 lease == _surveyLease || lease == _suppressedAutomaticSurveyLease)
                 return;
@@ -994,7 +1001,26 @@ namespace SpaceEngineers.Apps.Platform
                 if (++_asteroidScanTicks < 6)
                     return;
                 _asteroidScanTicks = 0;
-                if (!PlanAsteroidSurvey(ore, lease))
+                double x;
+                double y;
+                double z;
+                if (_candidateSpacing > 0 && _worker.TryGetSurveyCandidate(out x, out y, out z))
+                {
+                    Vector3D center;
+                    Vector3D right;
+                    Vector3D up;
+                    if (!TryFindCandidateGrid(new Vector3D(x, y, z), _candidateStandOff, out center, out right, out up))
+                        return;
+                    BeginOreSurvey(ore, lease);
+                    SaveSurveyGrid(_candidateSpacing, center, right, up);
+                    _lastProbe = "Automatic survey started near the assigned ore candidate.";
+                }
+                else if (_asteroidScanRange == 0)
+                {
+                    _lastProbe = "Automatic survey waiting for an assignment with a matching ore candidate.";
+                    return;
+                }
+                else if (!PlanAsteroidSurvey(ore, lease))
                     return;
             }
             BeginSurveySweep(reportOnCompletion: true, bracketOnCompletion: _automaticBracketGap > 0);
@@ -1057,15 +1083,28 @@ namespace SpaceEngineers.Apps.Platform
             return false;
         }
 
+        private static bool TryReadCandidatePlan(string argument, out double standOff, out double spacing)
+        {
+            standOff = spacing = 0;
+            var parts = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            double parsedStandOff;
+            double parsedSpacing;
+            if (parts.Length != 2 ||
+                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedStandOff) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedSpacing) ||
+                !(parsedStandOff >= 10 && parsedStandOff <= 500 && parsedSpacing >= MinimumViewSeparation &&
+                    parsedSpacing <= 500))
+                return false;
+            standOff = parsedStandOff;
+            spacing = parsedSpacing;
+            return true;
+        }
+
         private void PlanSurveyCandidate(string argument)
         {
-            var parts = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             double standOff;
             double spacing;
-            if (parts.Length != 2 ||
-                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out standOff) ||
-                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out spacing) ||
-                !(standOff >= 10 && standOff <= 500 && spacing >= MinimumViewSeparation && spacing <= 500))
+            if (!TryReadCandidatePlan(argument, out standOff, out spacing))
             {
                 Echo("Use ore candidate <stand-off> <spacing>, both in metres from 10 to 500.");
                 return;
@@ -1083,7 +1122,17 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            var candidate = new Vector3D(x, y, z);
+            Vector3D center;
+            Vector3D right;
+            Vector3D up;
+            if (TryFindCandidateGrid(new Vector3D(x, y, z), standOff, out center, out right, out up))
+                SaveSurveyGrid(spacing, center, right, up);
+        }
+
+        private bool TryFindCandidateGrid(Vector3D candidate, double standOff, out Vector3D center,
+            out Vector3D right, out Vector3D up)
+        {
+            center = right = up = Vector3D.Zero;
             _surveyCameras.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyCameras, camera =>
                 camera.CubeGrid == Me.CubeGrid && camera.IsWorking &&
@@ -1105,12 +1154,14 @@ namespace SpaceEngineers.Apps.Platform
                 var direction = Vector3D.Normalize(offset);
                 var reference = Math.Abs(Vector3D.Dot(direction, Vector3D.Up)) < 0.9
                     ? Vector3D.Up : Vector3D.Right;
-                var right = Vector3D.Normalize(Vector3D.Cross(direction, reference));
-                var up = Vector3D.Cross(right, direction);
-                SaveSurveyGrid(spacing, hit.HitPosition.Value - direction * standOff, right, up);
-                return;
+                right = Vector3D.Normalize(Vector3D.Cross(direction, reference));
+                up = Vector3D.Cross(right, direction);
+                center = hit.HitPosition.Value - direction * standOff;
+                return true;
             }
-            Echo("No camera confirmed a nearby asteroid surface along the candidate ray. Check alignment and raycast charge.");
+            _lastProbe = "Waiting for a camera to confirm a nearby asteroid surface along the candidate ray.";
+            Echo(_lastProbe);
+            return false;
         }
 
         private void SaveSurveyGrid(double spacing, Vector3D center, Vector3D right, Vector3D across)
