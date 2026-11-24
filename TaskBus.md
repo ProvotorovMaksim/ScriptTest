@@ -333,6 +333,11 @@ PB restart. Use `ore stop` to cancel the leg and automatic sampling.
 A completed sample within 2 m of the point, measured at the remote, advances
 the saved plan. Repeat `ore route` for the next point.
 
+After reviewing all legs for clearance, run `ore sweep` to fly and sample
+the remaining points in order. It advances only after a completed sample
+at the planned waypoint. Lease loss, stopping outside the waypoint tolerance
+or a sample failure stops the sweep. It stays stopped after a restart.
+
 Use `ore auto on` during a task survey to start samples automatically
 once the platform is moving at 0.25 m/s or less and is at least 10 m from
 previous sample locations. Hold position for the detector refresh. Use

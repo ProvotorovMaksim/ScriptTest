@@ -49,6 +49,10 @@ namespace SpaceEngineers.Apps.Platform
         private double _sampleWait;
         private int _positiveViews;
         private bool _autoSample;
+        private bool _surveySweep;
+        private bool _sweepLegStarted;
+        private bool _sweepSampleStarted;
+        private int _sweepSettleTicks;
         private int _autoSampleTicks;
         private const string DetectorName = "[AMN ORE]";
 
@@ -133,9 +137,12 @@ namespace SpaceEngineers.Apps.Platform
                 LoadNextSurveyWaypoint();
             else if (string.Equals(command, "ore fly", StringComparison.OrdinalIgnoreCase))
                 StartSurveyFlight();
+            else if (string.Equals(command, "ore sweep", StringComparison.OrdinalIgnoreCase))
+                BeginSurveySweep();
             else if (string.Equals(command, "ore stop", StringComparison.OrdinalIgnoreCase))
             {
                 _autoSample = false;
+                _surveySweep = false;
                 _sampleDetector = null;
                 _surveyFlightLease = null;
                 CheckSurveyFlight();
@@ -145,6 +152,7 @@ namespace SpaceEngineers.Apps.Platform
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
+            UpdateSurveySweep();
             UpdateAutomaticSampling();
             CheckSurveyFlight();
             _galnet.Flush();
@@ -155,6 +163,8 @@ namespace SpaceEngineers.Apps.Platform
             if (_surveyOre != null)
                 Echo("Ore survey " + _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
                     " views reported ore, " + _oreHits.Count + " distinct positions.");
+            if (_surveySweep)
+                Echo("Survey sweep active. Remaining points: " + _surveyPlan.Count + ".");
             if (_autoSample)
                 Echo("Automatic sampling active.");
             if (_sampleDetector != null)
@@ -196,6 +206,7 @@ namespace SpaceEngineers.Apps.Platform
             _surveyOre = ore;
             _surveyLease = lease;
             _autoSample = false;
+            _surveySweep = false;
             _surveyViews.Clear();
             _surveyPlan.Clear();
             _oreHits.Clear();
@@ -299,6 +310,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             _worker.CompleteSurvey(report);
             _autoSample = false;
+            _surveySweep = false;
         }
 
         private void PlanSurvey(string argument)
@@ -317,7 +329,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            if (_worker.SupervisedCruiseRemote != 0 || _surveyLease == null || !SurveyLeaseIsCurrent())
+            if (_surveySweep || _worker.SupervisedCruiseRemote != 0 || _surveyLease == null || !SurveyLeaseIsCurrent())
             {
                 Echo("Stop the current flight and start a confirmed task survey before planning.");
                 return;
@@ -465,6 +477,78 @@ namespace SpaceEngineers.Apps.Platform
             }
         }
 
+        private void BeginSurveySweep()
+        {
+            if (_surveySweep || _surveyLease == null || !SurveyLeaseIsCurrent() ||
+                _surveyPlan.Count == 0 || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null)
+            {
+                Echo("A confirmed, reviewed survey plan and an idle platform are required.");
+                return;
+            }
+
+            _autoSample = false;
+            _sweepLegStarted = false;
+            _sweepSampleStarted = false;
+            _sweepSettleTicks = 0;
+            _surveySweep = true;
+        }
+
+        private void UpdateSurveySweep()
+        {
+            if (!_surveySweep)
+                return;
+            if (!SurveyLeaseIsCurrent() || _surveyPlan.Count == 0)
+            {
+                _surveySweep = false;
+                return;
+            }
+            if (_worker.SupervisedCruiseRemote != 0 || _sampleDetector != null)
+                return;
+            if (_sweepSampleStarted)
+            {
+                _surveySweep = false;
+                Echo("Survey sweep halted after an incomplete sample.");
+                return;
+            }
+
+            var remote = FindSurveyRemote();
+            if (remote == null || remote.IsAutoPilotEnabled)
+            {
+                _surveySweep = false;
+                Echo("Survey sweep halted: the survey controller is unavailable or already flying.");
+                return;
+            }
+            if (Vector3D.DistanceSquared(remote.GetPosition(), _surveyPlan[0]) <= 4)
+            {
+                if (remote.GetShipSpeed() > 0.25)
+                {
+                    if (++_sweepSettleTicks >= 30)
+                    {
+                        _surveySweep = false;
+                        Echo("Survey sweep halted: platform did not settle at the waypoint.");
+                    }
+                    return;
+                }
+
+                ScheduleOreSample();
+                _sweepSampleStarted = true;
+                return;
+            }
+
+            if (_sweepLegStarted)
+            {
+                _surveySweep = false;
+                Echo("Survey sweep halted outside the waypoint tolerance.");
+                return;
+            }
+
+            LoadNextSurveyWaypoint();
+            StartSurveyFlight();
+            _sweepLegStarted = true;
+            if (_worker.SupervisedCruiseRemote == 0)
+                _surveySweep = false;
+        }
+
         private void CompletePlannedSurveyPosition()
         {
             if (_surveyPlan.Count == 0)
@@ -472,7 +556,12 @@ namespace SpaceEngineers.Apps.Platform
             var remote = FindSurveyRemote();
             if (remote != null && !remote.IsAutoPilotEnabled &&
                 Vector3D.DistanceSquared(remote.GetPosition(), _surveyPlan[0]) <= 4)
+            {
                 _surveyPlan.RemoveAt(0);
+                _sweepLegStarted = false;
+                _sweepSampleStarted = false;
+                _sweepSettleTicks = 0;
+            }
         }
 
         private bool IsNewSurveyPosition(Vector3D position)
@@ -518,7 +607,7 @@ namespace SpaceEngineers.Apps.Platform
 
         private void UpdateAutomaticSampling()
         {
-            if (!_autoSample || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
+            if (_surveySweep || !_autoSample || _worker.SupervisedCruiseRemote != 0 || _sampleDetector != null || _surveyViews.Count >= MaxSurveyViews ||
                 !SurveyLeaseIsCurrent() || ++_autoSampleTicks < 6)
                 return;
 
