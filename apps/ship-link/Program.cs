@@ -295,7 +295,14 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (existing == null)
                 {
                     if (_contacts.Count >= MaxContacts)
-                        return;
+                    {
+                        var oldestContact = assistance
+                            ? _contacts.Where(contact => !contact.Assistance).OrderBy(contact => contact.Expires).FirstOrDefault()
+                            : null;
+                        if (oldestContact == null)
+                            return;
+                        _contacts.Remove(oldestContact);
+                    }
                     existing = new FleetContact { Source = source, Name = name, Assistance = assistance };
                     _contacts.Add(existing);
                 }
@@ -530,14 +537,17 @@ namespace SpaceEngineers.Apps.ShipLink
                         (status.Piloted ? "piloted" : "unoccupied"));
                 }
             }
-            _contacts.RemoveAll(contact => contact.Expires <= DateTime.UtcNow.Ticks);
+            long now = DateTime.UtcNow.Ticks;
+            _contacts.RemoveAll(contact => contact.Expires <= now);
             if (_contacts.Count > 0)
             {
                 display.AppendLine("=== GALNET FLEET MARKS ===");
                 foreach (var contact in _contacts.OrderByDescending(entry => entry.Assistance).ThenByDescending(entry => entry.Expires).Take(8))
                 {
                     var point = contact.Position;
-                    display.AppendLine((contact.Assistance ? "[ASSIST] " : "") + contact.Name + " | relay " + contact.Source);
+                    long ageSeconds = Math.Max(0L, (now - (contact.Expires - ContactLifetime)) / TimeSpan.TicksPerSecond);
+                    display.AppendLine((contact.Assistance ? "[ASSIST] " : "") + contact.Name +
+                        " | relay " + contact.Source + " | " + ageSeconds + " s old");
                     display.AppendLine("X/Y/Z: " + Math.Round(point.X, 1) + " / " +
                         Math.Round(point.Y, 1) + " / " + Math.Round(point.Z, 1));
                 }
