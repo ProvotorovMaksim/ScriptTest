@@ -185,7 +185,7 @@ namespace SpaceEngineers.Services.Broker
             var existing = _tasks.FirstOrDefault(task => task.RequesterId == requesterId && task.RequestId == requestId);
             if (existing != null)
             {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(existing.Id) + ",\"state\":" + TaskBusIgcHelper.ToJsonString(existing.State) + "}", requesterId, "ack:" + requestId);
+                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(existing.Id) + ",\"state\":" + TaskBusIgcHelper.ToJsonString(existing.State == "CLEARED" ? "CANCELLED" : existing.State) + "}", requesterId, "ack:" + requestId);
                 return;
             }
             if (_completedRequestIds.Contains(scopedRequestId))

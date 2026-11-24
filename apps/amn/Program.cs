@@ -131,7 +131,7 @@ namespace SpaceEngineers.Apps.Amn
                     if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) && TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
                     {
                         var resource = _requestIds.FirstOrDefault(entry => entry.Value == requestId).Key;
-                        if (!string.IsNullOrEmpty(resource) && !_lowResources.Contains(resource) && _pendingResourceClears.Remove(resource))
+                        if (!string.IsNullOrEmpty(resource) && _pendingResourceClears.Remove(resource))
                         {
                             _requestIds.Remove(resource);
                             SaveMinimums();
@@ -374,48 +374,39 @@ namespace SpaceEngineers.Apps.Amn
                 {
                     var createdRequest = false;
                     currentLowResources.Add(minimum.Key);
-                    if (_pendingResourceClears.Remove(minimum.Key))
-                        stateChanged = true;
                     if (!_lowResources.Contains(minimum.Key))
                         stateChanged = true;
+                    // Cancellation is retried until acknowledged, even if demand returns.
+                    if (_pendingResourceClears.Contains(minimum.Key))
+                        continue;
                     string requestId;
                     if (!_requestIds.TryGetValue(minimum.Key, out requestId))
                     {
                         requestId = Me.EntityId.ToString(CultureInfo.InvariantCulture) + "-" + (++_requestSequence).ToString(CultureInfo.InvariantCulture);
                         _requestIds[minimum.Key] = requestId;
                         createdRequest = true;
-                        stateChanged = true;
+                        SaveMinimums();
                     }
 
-                    if (createdRequest || _tickCount % 60 == 1 || _tickCount == 1)
+                    if (createdRequest || _tickCount % 60 == 1)
                         SendResourceRequest(minimum.Key, current, minimum.Value, requestId);
                 }
-                else if (_lowResources.Contains(minimum.Key))
+                else if (_requestIds.ContainsKey(minimum.Key) && _pendingResourceClears.Add(minimum.Key))
                 {
-                    if (!_pendingResourceClears.Contains(minimum.Key))
-                    {
-                        _pendingResourceClears.Add(minimum.Key);
-                        QueueResourceClear(minimum.Key);
-                        newClears.Add(minimum.Key);
-                        stateChanged = true;
-                    }
+                    newClears.Add(minimum.Key);
+                    stateChanged = true;
                 }
             }
-
-            if (_tickCount % 60 == 1 || _tickCount == 1)
-            {
-                foreach (var resource in _pendingResourceClears)
-                    SendResourceClear(resource);
-            }
-            else
-                foreach (var resource in newClears)
-                    SendResourceClear(resource);
 
             _lowResources.Clear();
             foreach (var resource in currentLowResources)
                 _lowResources.Add(resource);
             if (stateChanged)
                 SaveMinimums();
+
+            var clearsToSend = _tickCount % 60 == 1 ? _pendingResourceClears : newClears;
+            foreach (var resource in clearsToSend)
+                SendResourceClear(resource);
         }
 
         private void SendResourceRequest(string resource, double current, double minimum, string requestId)
