@@ -29,6 +29,7 @@ namespace SpaceEngineers.Apps.Amn
         private int _tickCount = 0;
         private int _requestSequence;
         private long _brokerId;
+        private bool _dispatchToPoint;
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private readonly List<IMyCargoContainer> _containers = new List<IMyCargoContainer>();
         private readonly List<IMyAssembler> _assemblers = new List<IMyAssembler>();
@@ -78,6 +79,18 @@ namespace SpaceEngineers.Apps.Amn
             }
             if (command.StartsWith("survey send ", StringComparison.OrdinalIgnoreCase))
                 QueueSurveyTransfer(command.Substring(12));
+            if (string.Equals(command, "dispatch point", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(command, "dispatch fleet", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_requestIds.Count != 0)
+                    Echo("Resolve open requests before changing the dispatch group.");
+                else
+                {
+                    _dispatchToPoint = string.Equals(command, "dispatch point", StringComparison.OrdinalIgnoreCase);
+                    SaveMinimums();
+                    Echo("Dispatch group: " + DispatchGroup);
+                }
+            }
             if (command.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
             {
                 long brokerId;
@@ -436,6 +449,11 @@ namespace SpaceEngineers.Apps.Amn
                     catch (FormatException) { }
                     continue;
                 }
+                if (line.StartsWith("DISPATCH|", StringComparison.Ordinal))
+                {
+                    _dispatchToPoint = line.Substring(9).Trim() == "point";
+                    continue;
+                }
                 if (line.StartsWith("BROKER|", StringComparison.Ordinal))
                 {
                     long.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
@@ -487,6 +505,7 @@ namespace SpaceEngineers.Apps.Amn
         private void SaveMinimums()
         {
             var storage = new StringBuilder();
+            storage.AppendLine("DISPATCH|" + (_dispatchToPoint ? "point" : "fleet"));
             storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
             storage.AppendLine("REQSEQ|" + _requestSequence.ToString(CultureInfo.InvariantCulture));
             foreach (var minimum in _minimums.OrderBy(entry => entry.Key))
@@ -535,6 +554,7 @@ namespace SpaceEngineers.Apps.Amn
             var display = new StringBuilder();
             display.AppendLine(_gridName);
             display.AppendLine("RESOURCE MINIMUMS");
+            display.AppendLine("Dispatch: " + DispatchGroup);
             display.AppendLine("-----------------");
             if (_minimums.Count == 0)
             {
@@ -606,16 +626,20 @@ namespace SpaceEngineers.Apps.Amn
                 SendResourceClear(resource);
         }
 
+        private string DispatchGroup => _dispatchToPoint ? "MiningPoints" : "MiningFleet";
+
         private void SendResourceRequest(string resource, double current, double minimum, string requestId)
         {
             var position = Me.CubeGrid.GetPosition();
             var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) +
-                ",\"group_id\":\"MiningFleet\",\"resource\":" + TaskBusIgcHelper.ToJsonString(resource) +
+                ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(DispatchGroup) +
+                ",\"resource\":" + TaskBusIgcHelper.ToJsonString(resource) +
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(resource) +
                 ",\"current\":" + current.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"minimum\":" + minimum.ToString("R", CultureInfo.InvariantCulture) +
                 ",\"amount\":" + (minimum - current).ToString("R", CultureInfo.InvariantCulture) +
-                ",\"steps\":[\"survey\",\"mine\",\"intermediate\",\"deliver\"]" +
+                (_dispatchToPoint ? ",\"steps\":[\"survey\",\"mine\",\"transport\"]" :
+                    ",\"steps\":[\"survey\",\"mine\",\"intermediate\",\"deliver\"]") +
                 ",\"base_grid_id\":" + Me.CubeGrid.EntityId.ToString(CultureInfo.InvariantCulture) +
                 ",\"base_grid_name\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
                 ",\"base_position\":{\"x\":" + position.X.ToString("R", CultureInfo.InvariantCulture) +

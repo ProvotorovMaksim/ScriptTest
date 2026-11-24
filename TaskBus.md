@@ -72,6 +72,16 @@ its TaskBus traffic to that broker ID. `broker 0` restores broadcast mode.
 Resolve existing tasks, reports and cancellations before switching brokers.
 Messages travel over IGC broadcast, with the recipient ID in the envelope.
 
+### Mining-point dispatch
+
+Before creating deficits, run `dispatch point` on the requesting base AMN
+and `group MiningPoints` on the TaskConsumer block at the mining point.
+The point leases the parent request and sees `survey`, `mine` and
+`transport` as its workflow stages. For now the operator acknowledges
+those stages on the point's consumer. `dispatch fleet` restores the direct
+fleet workflow. AMN saves the dispatch setting and refuses to change it
+while requests or cancellations are outstanding.
+
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.
