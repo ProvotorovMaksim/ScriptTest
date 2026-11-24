@@ -1,8 +1,13 @@
 <Project>
   <PropertyGroup>
     <SpaceEngineers Condition="'$(SpaceEngineers)' == ''">$(SPACE_ENGINEERS_BIN64)</SpaceEngineers>
-    <SpaceEngineers Condition="'$(SpaceEngineers)' == ''">/Users/twist_sz/Library/Application Support/SpaceEngineersDedicatedServer/SE-Libraries/DedicatedServer64</SpaceEngineers>
   </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <Reference>
+      <Private>false</Private>
+    </Reference>
+  </ItemDefinitionGroup>
 
   <ItemGroup>
     <Reference Include="Sandbox.Common">
@@ -32,7 +37,7 @@
   </ItemGroup>
 
   <Target Name="ValidateSpaceEngineersAssemblies" BeforeTargets="PrepareForBuild">
-    <Error Condition="!Exists('$(SpaceEngineers)/Sandbox.Common.dll') Or !Exists('$(SpaceEngineers)/Sandbox.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.ObjectBuilders.dll') Or !Exists('$(SpaceEngineers)/VRage.dll') Or !Exists('$(SpaceEngineers)/VRage.Game.dll') Or !Exists('$(SpaceEngineers)/VRage.Library.dll') Or !Exists('$(SpaceEngineers)/VRage.Math.dll')"
+    <Error Condition="'$(SpaceEngineers)' == '' Or !Exists('$(SpaceEngineers)/Sandbox.Common.dll') Or !Exists('$(SpaceEngineers)/Sandbox.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.Game.dll') Or !Exists('$(SpaceEngineers)/SpaceEngineers.ObjectBuilders.dll') Or !Exists('$(SpaceEngineers)/VRage.dll') Or !Exists('$(SpaceEngineers)/VRage.Game.dll') Or !Exists('$(SpaceEngineers)/VRage.Library.dll') Or !Exists('$(SpaceEngineers)/VRage.Math.dll')"
            Text="Required Space Engineers assemblies were not found in '$(SpaceEngineers)'. Set SPACE_ENGINEERS_BIN64 to the DedicatedServer64 directory." />
   </Target>
 </Project>

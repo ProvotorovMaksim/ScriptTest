@@ -22,7 +22,7 @@ namespace SpaceEngineers.Services.Consumer
             _consumer = new TaskBusConsumer(
                 communicationTag: CommunicationTag,
                 send: (envelope, targetId) =>
-                    IGC.SendBroadcastMessage(CommunicationTag, envelope, targetId, TransmissionDistance.TransmissionDistanceMax),
+                    IGC.SendBroadcastMessage(CommunicationTag, envelope, TransmissionDistance.TransmissionDistanceMax),
                 getStorage: () => Storage,
                 setStorage: value => Storage = value,
                 echo: message => Echo(message),

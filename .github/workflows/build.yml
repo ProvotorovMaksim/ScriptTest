@@ -1,0 +1,78 @@
+name: Build TaskBus
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install Space Engineers Dedicated Server
+        shell: pwsh
+        run: |
+          $steam = Join-Path $env:RUNNER_TEMP steamcmd
+          $server = Join-Path $env:RUNNER_TEMP se-server
+          $zip = Join-Path $env:RUNNER_TEMP steamcmd.zip
+          New-Item -ItemType Directory -Force build/logs | Out-Null
+          Invoke-WebRequest https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip -OutFile $zip
+          Expand-Archive $zip -DestinationPath $steam
+          & (Join-Path $steam steamcmd.exe) +force_install_dir $server +login anonymous +app_update 298740 validate +quit |
+            Tee-Object -FilePath build/logs/steamcmd.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $bin = Join-Path $server DedicatedServer64
+          $libraries = @(
+            'Sandbox.Common', 'Sandbox.Game', 'SpaceEngineers.Game',
+            'SpaceEngineers.ObjectBuilders', 'VRage', 'VRage.Game',
+            'VRage.Library', 'VRage.Math'
+          )
+          foreach ($library in $libraries) {
+            $dll = Join-Path $bin "$library.dll"
+            if (!(Test-Path -LiteralPath $dll -PathType Leaf)) {
+              throw "Required game assembly is missing: $dll"
+            }
+            $file = Get-Item -LiteralPath $dll
+            "$library assembly=$([Reflection.AssemblyName]::GetAssemblyName($dll).Version) file=$($file.VersionInfo.FileVersion)" |
+              Tee-Object -FilePath build/logs/game-versions.log -Append
+          }
+          "SPACE_ENGINEERS_BIN64=$bin" >> $env:GITHUB_ENV
+
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet --info | tee build/logs/dotnet.log
+          bash build.sh 2>&1 | tee build/logs/build.log
+
+      - name: Upload build logs and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbus-build
+          path: |
+            build/logs/
+            build/test-results/*.trx
+            build/output/libs/igc-core/igc-core/TaskBus.IgcCore.dll
+            build/output/libs/taskbus-consumer/taskbus-consumer/TaskBus.Consumer.dll
+            build/output/libs/taskbus-producer/taskbus-producer/TaskBus.Producer.dll
+            build/output/services/broker/broker/TaskBroker.dll
+            build/output/services/consumer/consumer/TaskConsumer.dll
+            build/output/services/producer/producer/TaskProducer.dll
+            build/output/apps/amn/amn/AMN.Base.dll
+            build/output/apps/sample/sample/SampleMain.dll
+            build/output/apps/ship-link/ship-link/ShipLink.dll
+            build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll
