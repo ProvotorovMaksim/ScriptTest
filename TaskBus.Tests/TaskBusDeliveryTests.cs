@@ -61,6 +61,37 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void ReceiptDoesNotExtendLeaseWithoutATaskAssignment()
+        {
+            var broker = StartBroker("");
+            Dispatch(broker, 9, TaskBusProtocol.CreateEnvelope("TASK_PUBLISH",
+                "{\"request_id\":\"ore\"}", targetId: 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 9);
+
+            var poll = TaskBusProtocol.CreateEnvelope("TASK_POLL", "{\"group_id\":\"default\"}", targetId: 1);
+            Dispatch(broker, 42, poll);
+            var assignment = TakeResponse(broker, "TASK_ASSIGN", 42);
+            Assert.True(TaskBusIgcHelper.TryGetJsonProperty(assignment.PayloadJson, "lease_expires_utc_ticks", out var deadline));
+            var received = TaskBusProtocol.CreateEnvelope("TASK_RECEIVED",
+                "{\"task_id\":\"9-1\",\"lease_epoch\":1}", targetId: 1);
+
+            Dispatch(broker, 42, received);
+            Assert.Contains("|ACTIVE|", broker.Storage);
+            Assert.Contains("|" + deadline + "|", broker.Storage);
+            var committedReceipt = broker.Storage;
+
+            broker = StartBroker(committedReceipt);
+            Dispatch(broker, 42, received);
+            Assert.Equal(committedReceipt, broker.Storage);
+
+            Dispatch(broker, 42, poll);
+            var renewal = TakeResponse(broker, "TASK_ASSIGN", 42);
+            Assert.True(TaskBusIgcHelper.TryGetJsonProperty(renewal.PayloadJson, "lease_expires_utc_ticks", out var updatedDeadline));
+            Assert.True(long.Parse(updatedDeadline) > long.Parse(deadline));
+            Assert.Contains("|" + updatedDeadline + "|", broker.Storage);
+        }
+
+        [Fact]
         public void LostPublishAndCompletionAcksRecoverAcrossRestarts()
         {
             var broker = StartBroker("");

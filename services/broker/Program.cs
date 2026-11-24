@@ -307,11 +307,11 @@ namespace SpaceEngineers.Services.Broker
 
             var task = _tasks.FirstOrDefault(entry => entry.Id == taskId &&
                 entry.WorkerId == sourceId && entry.LeaseEpoch == leaseEpoch);
-            if (task == null || (task.State != "LEASED" && task.State != "ACTIVE"))
+            if (task == null || task.State != "LEASED")
                 return;
 
+            // Only renew through TASK_ASSIGN, which tells the worker its new deadline.
             task.State = "ACTIVE";
-            RenewLease(task);
             SaveQueue();
             Echo("Consumer " + sourceId + " persisted task " + task.Id);
         }
@@ -584,7 +584,6 @@ namespace SpaceEngineers.Services.Broker
             {
                 RenewLease(assigned);
                 DispatchTask(assigned, payloadJson);
-                SaveQueue();
                 return;
             }
 
@@ -599,9 +598,7 @@ namespace SpaceEngineers.Services.Broker
             next.LeaseEpoch++;
             next.State = "LEASED";
             RenewLease(next);
-            SaveQueue();
             DispatchTask(next, payloadJson);
-            SaveQueue();
         }
 
         private void RenewLease(TaskRecord task)
@@ -775,8 +772,9 @@ namespace SpaceEngineers.Services.Broker
                 ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
                 (candidate == null ? "" : ",\"shared_ore_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
                 ",\"details\":" + task.RequestJson + "}";
-            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             task.Attempts++;
+            SaveQueue();
+            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             Echo("Sent " + task.Id + " to PB " + task.WorkerId + " (attempt " + task.Attempts + ")");
         }
 

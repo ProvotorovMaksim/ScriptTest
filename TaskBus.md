@@ -66,7 +66,9 @@ The broker uses the UTC deadline of each newly issued or renewed lease.
 Loading Storage after downtime requeues expired leases and fences their
 old epochs. Legacy records without a UTC deadline keep the simulation
 tick check until renewed. A child lease cannot extend past its mining
-point's current parent lease.
+point's current parent lease. A receipt confirms persistence at the worker.
+The broker records deadline extensions only when it issues an assignment,
+including the response to a worker poll.
 Assignments carry this deadline so workers stop acting on expired leases
 even before receiving a revocation. A delayed older refresh cannot replace
 a newer deadline for the same broker, task and lease epoch. Workers save
