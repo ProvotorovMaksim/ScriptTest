@@ -303,7 +303,14 @@ controller `[AMN PLATFORM]` and a forward camera `[AMN SCOUT]`.
 `probe <metres>` samples the camera ray and reports whether the ship is
 in natural gravity, the detected entity type and the hit position.
 Camera hits identify geometry. Ore observations come from the ore
-detector adapter. The platform does not start flight or drills yet.
+detector adapter.
+
+Name the drills managed by AMN with the `[AMN DRILL]` prefix. With the
+platform undocked and holding a confirmed mining assignment with an
+approach waypoint, use `mine drills on` to enable those drills while
+piloting the pass. Use `mine drills off` to stop them. The platform also
+disables its named drills on restart or if the mining lease or stage
+changes.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
 With a confirmed ore survey assignment, run `ore task` to use its ore

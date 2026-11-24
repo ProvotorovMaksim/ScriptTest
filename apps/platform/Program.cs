@@ -15,6 +15,9 @@ namespace SpaceEngineers.Apps.Platform
         #endregion
         private const string Channel = "SE1-SHIP-LINK";
         private readonly GalnetWorkerBridge _galnet;
+        private const string DrillPrefix = "[AMN DRILL]";
+        private readonly List<IMyShipDrill> _managedDrills = new List<IMyShipDrill>();
+        private string _drillingLease;
         private const string ControllerName = "[AMN PLATFORM]";
         private const string SurveyRemoteName = "[AMN SURVEY ROUTE]";
         private const string SurveyWaypointName = "AMN survey sample";
@@ -83,6 +86,7 @@ namespace SpaceEngineers.Apps.Platform
                 }, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
+            StopManagedDrills();
             CheckSurveyFlight();
             var camera = FindCamera();
             if (camera != null) camera.EnableRaycast = true;
@@ -108,6 +112,7 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             CheckSurveyFlight();
+            CheckMiningLease();
             UpdateOreSample();
             if (command.StartsWith("probe ", StringComparison.OrdinalIgnoreCase))
                 Probe(command.Substring(6));
@@ -149,6 +154,10 @@ namespace SpaceEngineers.Apps.Platform
                 _surveyFlightLease = null;
                 CheckSurveyFlight();
             }
+            else if (string.Equals(command, "mine drills on", StringComparison.OrdinalIgnoreCase))
+                StartManagedDrills();
+            else if (string.Equals(command, "mine drills off", StringComparison.OrdinalIgnoreCase))
+                StopManagedDrills();
             else if (string.Equals(command, "ore bounds", StringComparison.OrdinalIgnoreCase))
                 ShowOreBounds();
             else if (!_routes.TryHandle(command))
@@ -157,11 +166,14 @@ namespace SpaceEngineers.Apps.Platform
             UpdateSurveySweep();
             UpdateAutomaticSampling();
             CheckSurveyFlight();
+            CheckMiningLease();
             _galnet.Flush();
             Echo(_worker.GetStatus());
             Echo(viaGalnet ? (online ? "Local Galnet relay available." : "Galnet relay unavailable or misconfigured.") :
                 online ? "Radio available." : "Radio unavailable.");
             Echo(_lastProbe);
+            if (_drillingLease != null)
+                Echo("Managed drills enabled for the current mining lease.");
             if (_surveyOre != null)
                 Echo("Ore survey " + _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
                     " views reported ore, " + _oreHits.Count + " distinct positions.");
@@ -171,6 +183,68 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Automatic sampling active.");
             if (_sampleDetector != null)
                 Echo("Waiting for ore detector refresh.");
+        }
+
+        private void FindManagedDrills()
+        {
+            _managedDrills.Clear();
+            GridTerminalSystem.GetBlocksOfType(_managedDrills, drill =>
+                drill.CubeGrid == Me.CubeGrid && drill.CustomName.StartsWith(DrillPrefix, StringComparison.Ordinal));
+        }
+
+        private void StartManagedDrills()
+        {
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (!_worker.TryGetMiningApproach(out taskId, out x, out y, out z))
+            {
+                Echo("A confirmed mining lease with a verified approach is required.");
+                return;
+            }
+            _surveyConnectors.Clear();
+            GridTerminalSystem.GetBlocksOfType(_surveyConnectors,
+                connector => connector.CubeGrid == Me.CubeGrid && connector.Status == MyShipConnectorStatus.Connected);
+            if (_surveyConnectors.Count != 0)
+            {
+                Echo("Undock before enabling the managed drills.");
+                return;
+            }
+
+            FindManagedDrills();
+            if (_managedDrills.Count == 0)
+            {
+                Echo("Name the managed local drills with the " + DrillPrefix + " prefix.");
+                return;
+            }
+            _drillingLease = _worker.ConfirmedLeaseIdentity;
+            foreach (var drill in _managedDrills)
+                drill.Enabled = true;
+        }
+
+        private void CheckMiningLease()
+        {
+            if (_drillingLease == null)
+                return;
+            string taskId;
+            double x;
+            double y;
+            double z;
+            if (_drillingLease != _worker.ConfirmedLeaseIdentity ||
+                !_worker.TryGetMiningApproach(out taskId, out x, out y, out z))
+            {
+                StopManagedDrills();
+                _lastProbe = "Managed drills stopped: the mining lease or stage changed.";
+            }
+        }
+
+        private void StopManagedDrills()
+        {
+            FindManagedDrills();
+            foreach (var drill in _managedDrills)
+                drill.Enabled = false;
+            _drillingLease = null;
         }
 
         private void BeginTaskSurvey()
