@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using SpaceEngineers.Libs.IgcCore;
 using SpaceEngineers.Libs.TaskBusConsumer;
 using Xunit;
@@ -477,12 +478,13 @@ namespace TaskBus.Tests
         }
 
         [Fact]
-        public void ImportedKnownSiteSkipsSurveyAfterRestartOnlyWithTwoDistinctWaypoints()
+        public void PointChoosesClosestStoredEntryAfterRestartAndSkipsSurvey()
         {
             string storage = "";
             var sent = new List<string>();
             TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
-                () => storage, value => storage = value, _ => { }, 42, "Point", 1, gridId: 500);
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1,
+                getGridPositionJson: () => "{\"x\":0,\"y\":0,\"z\":0}", gridId: 500);
             var point = Start();
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
@@ -491,7 +493,10 @@ namespace TaskBus.Tests
             point.ProcessCommand("site add GPS:Iron:10:20:30:");
             Assert.DoesNotContain("KNOWN_SITE|", storage);
             point.ProcessCommand("site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:");
-            Assert.Contains("KNOWN_SITE|", storage);
+            point.ProcessCommand("site add GPS:Iron:10:20:80: | GPS:Entry:10:20:100:");
+            point.ProcessCommand("site add GPS:Iron:1:1:1: | GPS:Entry:2:2:2:");
+            point.ProcessCommand("site forget GPS:Iron:1:1:1:");
+            Assert.Equal(2, storage.Split('\n').Count(line => line.StartsWith("KNOWN_SITE|")));
 
             point = Start();
             var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",

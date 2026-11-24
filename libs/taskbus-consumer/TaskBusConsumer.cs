@@ -50,8 +50,15 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private string _childState;
         private string _oreSite;
         private string _oreApproach;
-        private readonly Dictionary<string, string> _knownSites =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private const int MaxKnownSites = 32;
+        private readonly List<KnownSite> _knownSites = new List<KnownSite>();
+
+        private sealed class KnownSite
+        {
+            public string Resource;
+            public string Ore;
+            public string Approach;
+        }
         private bool _baseStockConfirmed;
         private readonly bool _miningPlatform;
         private string _consumerGroup = "default";
@@ -232,8 +239,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
             if (cmd.StartsWith("site forget ", StringComparison.OrdinalIgnoreCase))
             {
-                if (_knownSites.Remove(cmd.Substring(12).Trim()))
-                    SaveState();
+                ForgetKnownSite(cmd.Substring(12).Trim());
                 return;
             }
             if (cmd.StartsWith("site ", StringComparison.OrdinalIgnoreCase) ||
@@ -396,7 +402,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string position;
             return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
                 TaskBusIgcHelper.TryGetJsonProperty(details, field, out position) &&
-                TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TryReadPosition(position, out x, out y, out z);
+        }
+
+        private static bool TryReadPosition(string position, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
                 TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
                 TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z);
         }
@@ -584,15 +596,48 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void SaveKnownSite(string resource, string site, string approach)
         {
-            if (_knownSites.Count >= 32 && !_knownSites.ContainsKey(resource))
+            if (!AddOrUpdateKnownSite(resource, site, approach))
             {
                 _echo("Known-site catalog is full.");
                 return;
             }
-
-            _knownSites[resource] = site + ";" + approach;
             SaveState();
             _echo("Remembered site for " + resource + ".");
+        }
+
+        private bool AddOrUpdateKnownSite(string resource, string site, string approach)
+        {
+            foreach (var known in _knownSites)
+            {
+                if (string.Equals(resource, known.Resource, StringComparison.OrdinalIgnoreCase) && site == known.Ore)
+                {
+                    known.Approach = approach;
+                    return true;
+                }
+            }
+            if (_knownSites.Count >= MaxKnownSites)
+                return false;
+            _knownSites.Add(new KnownSite { Resource = resource, Ore = site, Approach = approach });
+            return true;
+        }
+
+        private void ForgetKnownSite(string argument)
+        {
+            string ore = null;
+            var resource = argument;
+            if (argument.StartsWith("GPS:", StringComparison.Ordinal))
+            {
+                string name;
+                if (!TryReadSurveyWaypoint(argument, out name, out ore))
+                {
+                    _echo("Use site forget Ore/Iron or site forget GPS:Iron:X:Y:Z:.");
+                    return;
+                }
+                resource = "Ore/" + name;
+            }
+            if (_knownSites.RemoveAll(site => string.Equals(site.Resource, resource, StringComparison.OrdinalIgnoreCase) &&
+                (ore == null || site.Ore == ore)) != 0)
+                SaveState();
         }
 
         private void ReuseKnownSite()
@@ -600,13 +645,39 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (!IsAutomaticPoint || _stages.Count < 2 || _stages[0] != "survey" || _stages[1] != "mine")
                 return;
             var resource = GetRequestedResource();
-            string saved;
-            if (resource == null || !_knownSites.TryGetValue(resource, out saved))
+            if (resource == null)
                 return;
 
-            var points = saved.Split(';');
-            _oreSite = points[0];
-            _oreApproach = points[1];
+            double pointX;
+            double pointY;
+            double pointZ;
+            var position = _getGridPositionJson == null ? null : _getGridPositionJson();
+            bool hasPosition = TryReadPosition(position, out pointX, out pointY, out pointZ);
+            KnownSite selected = null;
+            double bestDistance = double.PositiveInfinity;
+            foreach (var site in _knownSites)
+            {
+                if (!string.Equals(resource, site.Resource, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                double x;
+                double y;
+                double z;
+                if (!TryReadPosition(site.Approach, out x, out y, out z))
+                    continue;
+                double dx = pointX - x;
+                double dy = pointY - y;
+                double dz = pointZ - z;
+                double distance = hasPosition ? dx * dx + dy * dy + dz * dz : 0;
+                if (selected != null && distance >= bestDistance)
+                    continue;
+                selected = site;
+                bestDistance = distance;
+            }
+            if (selected == null)
+                return;
+            _oreSite = selected.Ore;
+            _oreApproach = selected.Approach;
             _stageIndex = 1;
             _echo("Using known site for " + resource + ".");
         }
@@ -1271,12 +1342,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     else if (key == "KNOWN_SITE")
                     {
                         var fields = value.Split('|');
-                        if (fields.Length == 2 && _knownSites.Count < 32)
+                        if (fields.Length == 2)
                         {
                             var resource = TaskBusIgcHelper.DecodeStorage(fields[0]);
-                            var points = TaskBusIgcHelper.DecodeStorage(fields[1]);
-                            if (points.Split(';').Length == 2)
-                                _knownSites[resource] = points;
+                            var points = TaskBusIgcHelper.DecodeStorage(fields[1]).Split(';');
+                            if (points.Length == 2)
+                                AddOrUpdateKnownSite(resource, points[0], points[1]);
                         }
                     }
                     else if (key == "PICKUP_CARGO")
@@ -1365,8 +1436,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 }
             }
             foreach (var site in _knownSites)
-                storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Key) +
-                    "|" + TaskBusIgcHelper.EncodeStorage(site.Value));
+                storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Resource) +
+                    "|" + TaskBusIgcHelper.EncodeStorage(site.Ore + ";" + site.Approach));
             if (_miningDepositLease != null)
                 storage.AppendLine("MINING_DEPOSIT|" + TaskBusIgcHelper.EncodeStorage(_miningDepositLease) +
                     "|" + _miningDeposited.ToString("R", CultureInfo.InvariantCulture));
