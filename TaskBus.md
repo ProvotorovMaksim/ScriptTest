@@ -219,6 +219,11 @@ and retried after charging. `dock off` cancels the pending departure while
 leaving the drone docked. The mining workflow should request departure after
 unloading. An undock outside FCS bypasses the charge threshold.
 
+An optional timer block named `[FCS DEPART OK]` on the drone grid starts
+after a requested departure is confirmed and the batteries are in Auto.
+Use its action to start the outbound route. This signal is reserved for
+FCS-requested departures, including requests that waited for charging.
+
 To investigate an automatic approach that stalls near the port, record a
 successful connected pose and compare the guide readings at the stall with
 the same ship, berth and cargo load in a copy of the world without the
