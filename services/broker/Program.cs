@@ -47,6 +47,7 @@ namespace SpaceEngineers.Services.Broker
             public string RequestJson;
             public bool HasParent;
             public bool BaseStockConfirmed;
+            public int CompletedMiningPhase;
             public string State;
             public int Attempts;
             public int LastDispatchTick;
@@ -409,8 +410,7 @@ namespace SpaceEngineers.Services.Broker
                 if (!child.HasParent || child.RequesterId != parent.WorkerId ||
                     (child.State != "QUEUED" && child.State != "LEASED" && child.State != "ACTIVE"))
                     continue;
-                int phase = child.GroupId == "Haulers" ? 3 :
-                    child.GroupId == "MiningFleet" ? 2 : child.GroupId == "Scouts" ? 1 : 0;
+                int phase = MiningPhaseForGroup(child.GroupId);
                 string parentId;
                 int epoch;
                 if (phase <= highestPhase || !TryReadParentReference(child.RequestJson, out parentId, out epoch) ||
@@ -420,11 +420,18 @@ namespace SpaceEngineers.Services.Broker
                 selected = child;
             }
 
-            if (selected == null)
+            var childState = selected == null ? null : selected.State;
+            if (parent.CompletedMiningPhase > highestPhase)
+            {
+                highestPhase = parent.CompletedMiningPhase;
+                childState = "DONE";
+            }
+            if (highestPhase == 0)
                 return "";
+
             var name = highestPhase == 3 ? "transport" : highestPhase == 2 ? "mine" : "survey";
             return ",\"phase\":" + TaskBusIgcHelper.ToJsonString(name) +
-                ",\"child_state\":" + TaskBusIgcHelper.ToJsonString(selected.State);
+                ",\"child_state\":" + TaskBusIgcHelper.ToJsonString(childState);
         }
 
         private static bool TryReadParentReference(string requestJson, out string parentId, out int epoch)
@@ -439,16 +446,20 @@ namespace SpaceEngineers.Services.Broker
                 int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch);
         }
 
-        private bool HasParentLease(long requesterId, string requestJson)
+        private static int MiningPhaseForGroup(string group) =>
+            group == "Haulers" ? 3 : group == "MiningFleet" ? 2 : group == "Scouts" ? 1 : 0;
+
+        private bool HasParentLease(long requesterId, string requestJson) =>
+            !ReferencesParent(requestJson) || FindParentLease(requesterId, requestJson) != null;
+
+        private TaskRecord FindParentLease(long requesterId, string requestJson)
         {
-            if (!ReferencesParent(requestJson))
-                return true;
             string parentId;
             int epoch;
             if (!TryReadParentReference(requestJson, out parentId, out epoch))
-                return false;
+                return null;
 
-            return _tasks.Any(task => task.Id == parentId && task.GroupId == "MiningPoints" && !task.HasParent &&
+            return _tasks.FirstOrDefault(task => task.Id == parentId && task.GroupId == "MiningPoints" && !task.HasParent &&
                 task.WorkerId == requesterId && task.LeaseEpoch == epoch &&
                 (task.State == "LEASED" || task.State == "ACTIVE"));
         }
@@ -596,6 +607,7 @@ namespace SpaceEngineers.Services.Broker
                 task.LeaseExpiresUtc = 0;
                 task.State = "QUEUED";
                 task.LeaseEpoch++;
+                task.CompletedMiningPhase = 0;
                 changed = true;
                 parentChanged |= task.GroupId == "MiningPoints";
                 Echo("Lease expired; requeued " + task.Id);
@@ -631,6 +643,12 @@ namespace SpaceEngineers.Services.Broker
                 return;
             }
 
+            if (task.HasParent)
+            {
+                var parent = FindParentLease(task.RequesterId, task.RequestJson);
+                if (parent != null)
+                    parent.CompletedMiningPhase = Math.Max(parent.CompletedMiningPhase, MiningPhaseForGroup(task.GroupId));
+            }
             AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId),
                 task.HasParent && task.GroupId == "Scouts" ? surveyReport : null);
             AddTaskCommit(taskId, consumerId, leaseEpoch);
@@ -863,7 +881,8 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13 && parts.Length != 14))
+                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13 &&
+                    parts.Length != 14 && parts.Length != 15))
                     continue;
 
                 try
@@ -901,8 +920,13 @@ namespace SpaceEngineers.Services.Broker
                         state = parts[6];
                     }
                     long leaseExpiry = 0;
-                    if (parts.Length == 14)
+                    if (parts.Length >= 14)
                         long.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseExpiry);
+                    int completedPhase = 0;
+                    if (parts.Length == 15 &&
+                        (!int.TryParse(parts[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out completedPhase) ||
+                            completedPhase < 0 || completedPhase > 3))
+                        completedPhase = 0;
                     _tasks.Add(new TaskRecord
                     {
                         Id = id,
@@ -918,7 +942,8 @@ namespace SpaceEngineers.Services.Broker
                         LastDispatchTick = 0,
                         LeaseEpoch = leaseEpoch,
                         LeaseExpiresUtc = leaseExpiry,
-                        BaseStockConfirmed = parts.Length >= 13 && parts[parts.Length - 1].Trim() == "1"
+                        BaseStockConfirmed = parts.Length >= 13 && parts[Math.Min(13, parts.Length - 1)].Trim() == "1",
+                        CompletedMiningPhase = completedPhase
                     });
                 }
                 catch (FormatException)
@@ -968,7 +993,10 @@ namespace SpaceEngineers.Services.Broker
                     .Append(task.LastDispatchTick.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .AppendLine(task.BaseStockConfirmed ? "1" : "0");
+                    .Append(task.BaseStockConfirmed ? "1" : "0");
+                if (task.CompletedMiningPhase != 0)
+                    storage.Append('|').Append(task.CompletedMiningPhase.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine();
             }
             Storage = storage.ToString();
         }

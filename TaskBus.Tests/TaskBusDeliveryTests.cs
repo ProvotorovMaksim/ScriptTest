@@ -234,6 +234,23 @@ namespace TaskBus.Tests
             Assert.Contains("\"child_state\":\"QUEUED\"", status);
             Dispatch(broker, 43, query);
             Assert.DoesNotContain("\"phase\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 43).PayloadJson);
+
+            Dispatch(broker, 44, TaskBusProtocol.CreateEnvelope("TASK_POLL",
+                "{\"group_id\":\"Scouts\"}", targetId: 1));
+            TakeResponse(broker, "TASK_ASSIGN", 44);
+            Dispatch(broker, 44, TaskBusProtocol.CreateEnvelope("TASK_DONE",
+                "{\"task_id\":\"42-2\",\"lease_epoch\":1}", targetId: 1));
+            TakeResponse(broker, "TASK_DONE_ACK", 44);
+            broker = StartBroker(broker.Storage);
+            Dispatch(broker, 9, query);
+            var completed = TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson;
+            Assert.Contains("\"phase\":\"survey\"", completed);
+            Assert.Contains("\"child_state\":\"DONE\"", completed);
+
+            Dispatch(broker, 42, Child("survey-retry", 1));
+            TakeResponse(broker, "TASK_PUBLISHED_ACK", 42);
+            Dispatch(broker, 9, query);
+            Assert.Contains("\"child_state\":\"QUEUED\"", TakeResponse(broker, "TASK_PUBLISHED_ACK", 9).PayloadJson);
         }
 
         [Fact]
