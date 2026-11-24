@@ -20,6 +20,7 @@ namespace SpaceEngineers.Services.Galnet
         private long _generation;
         private long _sequence;
         private long _tick;
+        private static readonly long MessageLifetime = TimeSpan.FromMinutes(5).Ticks;
         private const int MaxPending = 16;
         private const int MaxReceived = 64;
         private readonly List<string> _outbox = new List<string>();
@@ -36,7 +37,11 @@ namespace SpaceEngineers.Services.Galnet
                 var line = settings[i].TrimEnd('\r');
                 long peer;
                 if (line.StartsWith("SEND:", StringComparison.Ordinal) && _outbox.Count < MaxPending)
-                    _outbox.Add(line.Substring(5));
+                {
+                    var packet = line.Substring(5);
+                    if (IsCurrentPacket(packet, DateTime.UtcNow.Ticks))
+                        _outbox.Add(packet);
+                }
                 else if (line.StartsWith("SEEN:", StringComparison.Ordinal) && _received.Count < MaxReceived)
                     _received.Enqueue(line.Substring(5));
                 else if (line.StartsWith("LAST:", StringComparison.Ordinal))
@@ -69,8 +74,17 @@ namespace SpaceEngineers.Services.Galnet
                 _peers.Values.Any(seen => _tick - seen == LinkLifetime)))
                 Advertise();
             if (periodic && _tick % AdvertiseEvery == 1)
+            {
+                long now = DateTime.UtcNow.Ticks;
+                int expired = _outbox.RemoveAll(packet => !IsCurrentPacket(packet, now));
+                if (expired > 0)
+                {
+                    SaveConfiguration();
+                    Echo("Expired queued messages: " + expired);
+                }
                 foreach (var pending in _outbox)
                     ForwardMessage(pending, 0);
+            }
 
             var command = (argument ?? "").Trim();
             if (command.StartsWith("peer ", StringComparison.OrdinalIgnoreCase))
@@ -175,6 +189,7 @@ namespace SpaceEngineers.Services.Galnet
 
             var id = _generation + ":" + (++_sequence);
             var packet = "DATA|" + Me.EntityId + "|" + destination + "|" + id + "|" + MaxHops + "|" +
+                (DateTime.UtcNow.Ticks + MessageLifetime) + "|" +
                 TaskBusIgcHelper.EncodeStorage(argument.Substring(split + 1));
             _outbox.Add(packet);
             SaveConfiguration();
@@ -187,7 +202,9 @@ namespace SpaceEngineers.Services.Galnet
             long origin;
             long destination;
             int hops;
-            if (fields.Length != 6 || (fields[0] != "DATA" && fields[0] != "ACK") ||
+            long expires;
+            if (fields.Length != 7 || (fields[0] != "DATA" && fields[0] != "ACK") ||
+                !long.TryParse(fields[5], out expires) || expires <= DateTime.UtcNow.Ticks ||
                 !long.TryParse(fields[1], out origin) || origin == 0 ||
                 !long.TryParse(fields[2], out destination) || destination == 0 ||
                 !int.TryParse(fields[4], out hops) || hops < 1 || hops > MaxHops ||
@@ -198,7 +215,7 @@ namespace SpaceEngineers.Services.Galnet
             if (destination == Me.EntityId)
             {
                 if (fields[0] == "DATA")
-                    AcceptData(origin, fields[3], fields[5]);
+                    AcceptData(origin, fields[3], expires, fields[6]);
                 else
                 {
                     var prefix = "DATA|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
@@ -221,7 +238,15 @@ namespace SpaceEngineers.Services.Galnet
             IGC.SendUnicastMessage(nextHop, Channel, packet);
         }
 
-        private void AcceptData(long origin, string id, string encoded)
+        private static bool IsCurrentPacket(string packet, long now)
+        {
+            var fields = packet.Split('|');
+            long expires;
+            return fields.Length == 7 && fields[0] == "DATA" && long.TryParse(fields[5], out expires) &&
+                expires > now;
+        }
+
+        private void AcceptData(long origin, string id, long expires, string encoded)
         {
             var key = origin + ":" + id;
             if (!_received.Contains(key))
@@ -237,7 +262,7 @@ namespace SpaceEngineers.Services.Galnet
                 _lastDelivery = "From " + origin + ": " + message;
                 SaveConfiguration();
             }
-            ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|", 0);
+            ForwardMessage("ACK|" + Me.EntityId + "|" + origin + "|" + id + "|" + MaxHops + "|" + expires + "|", 0);
         }
 
         private void Flood(long owner, long generation, long sequence, int remaining,

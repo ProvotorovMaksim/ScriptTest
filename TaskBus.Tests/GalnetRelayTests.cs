@@ -75,6 +75,19 @@ namespace TaskBus.Tests
             Assert.Contains("LAST:" + TaskBusIgcHelper.EncodeStorage("From 1: payload"), nodes[4].Storage);
         }
 
+        [Fact]
+        public void RelayDropsExpiredOutboxAndDoesNotAcknowledgeExpiredArrival()
+        {
+            var relay = Start(4, "0\n1\nSEND:DATA|4|1|1:4|8|1|YQ==");
+            Assert.DoesNotContain("SEND:", relay.Storage);
+
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "DATA|1|4|1:1|8|1|YQ=="));
+            relay.Main("", UpdateType.Update10);
+            Assert.DoesNotContain(relay.IGC.UnicastOutbox, packet => packet.Data.StartsWith("ACK|"));
+            Assert.DoesNotContain("SEEN:", relay.Storage);
+        }
+
         private static Relay Start(long id, string storage)
         {
             MyGridProgram.EntityIdAtStartup = id;

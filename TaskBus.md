@@ -74,7 +74,9 @@ per node. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends wi
 shows the current next hop. Relay neighbors are logical unicast peers.
 Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
 up to 16 pending messages in Storage and retries them via the current
-route until the destination acknowledges. The last 64 delivery IDs are
+route until the destination acknowledges or the five-minute UTC deadline
+expires. Upgrade all relays together. Older diagnostic packets without
+a deadline are discarded. The last 64 delivery IDs are
 retained for duplicate suppression across receiver restarts. Text delivery
 is a diagnostic. TaskBus integration and explicit laser link control are
 separate work.
