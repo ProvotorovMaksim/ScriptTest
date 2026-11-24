@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace Sandbox.ModAPI.Ingame
 {
+    public enum UpdateType { Update10 = 1, Terminal = 2 }
     public enum UpdateFrequency { Update10 }
     public enum TransmissionDistance { TransmissionDistanceMax }
 
@@ -23,12 +24,28 @@ namespace Sandbox.ModAPI.Ingame
         public readonly Queue<(long Source, object Data)> Inbox = new();
         public readonly List<string> Outbox = new();
 
+        public readonly List<(long Target, string Tag, string Data)> UnicastOutbox = new();
+        public TestUnicastListener UnicastListener { get; } = new();
+
+        public bool SendUnicastMessage(long target, string tag, string data)
+        {
+            UnicastOutbox.Add((target, tag, data));
+            return true;
+        }
+
         public bool HasPendingMessage => Inbox.Count != 0;
         public (long Source, object Data) AcceptMessage() => Inbox.Dequeue();
         public IMyBroadcastListener RegisterBroadcastListener(string tag) => this;
 
         public void SendBroadcastMessage(string tag, string data, TransmissionDistance distance) =>
             Outbox.Add(data);
+    }
+
+    public sealed class TestUnicastListener
+    {
+        public readonly Queue<(long Source, string Tag, object Data)> Inbox = new();
+        public bool HasPendingMessage => Inbox.Count != 0;
+        public (long Source, string Tag, object Data) AcceptMessage() => Inbox.Dequeue();
     }
 
     public sealed class TestTerminal
@@ -50,13 +67,16 @@ namespace Sandbox.ModAPI.Ingame
     {
         [ThreadStatic]
         public static string StorageAtStartup;
+        [ThreadStatic]
+        public static long EntityIdAtStartup;
 
         public TestRadio IGC { get; } = new();
         public TestTerminal GridTerminalSystem { get; } = new();
-        public (long EntityId, string Name) Me { get; } = (1, "Broker");
+        public (long EntityId, string Name) Me { get; } = (EntityIdAtStartup == 0 ? 1 : EntityIdAtStartup, "Test node");
         public TestRuntime Runtime { get; } = new();
         public string Storage { get; set; } = StorageAtStartup;
-        public void Echo(string message) { }
+        public List<string> Output { get; } = new();
+        public void Echo(string message) => Output.Add(message);
 
         public sealed class TestRuntime
         {

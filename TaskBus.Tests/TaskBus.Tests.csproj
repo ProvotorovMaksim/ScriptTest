@@ -17,6 +17,8 @@
     <Compile Include="../services/broker/Program.cs" />
     <Compile Include="../libs/igc-core/GalnetTopology.cs" />
     <Compile Include="GalnetTopologyTests.cs" />
+    <Compile Include="../services/galnet/Program.cs" />
+    <Compile Include="GalnetRelayTests.cs" />
     <Compile Include="BrokerGameApiStub.cs" />
     <Compile Include="TaskBusDeliveryTests.cs" />
     <Compile Include="TaskBusProtocolTests.cs" />
