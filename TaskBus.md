@@ -518,6 +518,13 @@ a working local camera whose name starts with `[AMN SCOUT]` and can scan
 the next waypoint. Include cameras covering the sweep directions. The
 sweep waits briefly for a usable scan and halts on a hit. A clear ray
 checks one line and the operator still reviews clearance for the hull.
+Set `SurveyClearanceRadius=5` to scan the waypoint and four targets
+offset by 5 m in the plane across the flight direction. The platform
+holds before flight until all five rays are clear and starts the scans
+again if it drifts by more than 0.5 m. Set the radius to match the hull
+and provide cameras with enough field of view and charge. These rays
+sample the corridor and leave gaps between them. The default radius is
+zero, which keeps the single-ray check.
 It advances only after a completed sample
 at the planned waypoint. Lease loss, stopping outside the waypoint tolerance
 or a sample failure stops the sweep. It stays stopped after a restart.

@@ -121,6 +121,11 @@ namespace SpaceEngineers.Apps.Platform
         private bool _sweepSampleStarted;
         private int _sweepSettleTicks;
         private int _sweepScanTicks;
+        private readonly double _surveyClearanceRadius;
+        private int _sweepClearanceIndex;
+        private Vector3D _sweepClearanceOrigin;
+        private Vector3D _sweepClearanceRight;
+        private Vector3D _sweepClearanceUp;
         private readonly List<IMyCameraBlock> _surveyCameras = new List<IMyCameraBlock>();
         private int _autoSampleTicks;
         private const string DetectorName = "[AMN ORE]";
@@ -132,6 +137,16 @@ namespace SpaceEngineers.Apps.Platform
             if (automaticSurvey != null &&
                 !TryReadSurveyPlan(automaticSurvey, out _automaticSurveySpacing, out _automaticSurveyCenter))
                 Echo("Use SurveyAutoSweep=<10 to 500 metres> GPS:Center:X:Y:Z:.");
+            var clearanceSetting = ReadSetting("SurveyClearanceRadius=");
+            if (clearanceSetting != null)
+            {
+                double radius;
+                if (double.TryParse(clearanceSetting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius) &&
+                    radius >= 0 && radius <= 100)
+                    _surveyClearanceRadius = radius;
+                else
+                    Echo("SurveyClearanceRadius must be between 0 and 100 m.");
+            }
             var asteroidSurvey = ReadSetting("SurveyAutoAsteroid=");
             if (asteroidSurvey != null &&
                 !TryReadAsteroidSurvey(asteroidSurvey, out _asteroidScanRange, out _asteroidStandOff, out _asteroidSurveySpacing))
@@ -1772,6 +1787,7 @@ namespace SpaceEngineers.Apps.Platform
             _sweepSampleStarted = false;
             _sweepSettleTicks = 0;
             _sweepScanTicks = 0;
+            _sweepClearanceIndex = 0;
             _reportOnSweepCompletion = reportOnCompletion;
             _surveySweep = true;
         }
@@ -1835,7 +1851,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
-            if (!CheckSurveyLegClearance(_surveyPlan[0]))
+            if (!CheckSurveyLegClearance(remote, _surveyPlan[0]))
                 return;
 
             LoadNextSurveyWaypoint();
@@ -1845,8 +1861,41 @@ namespace SpaceEngineers.Apps.Platform
                 _surveySweep = false;
         }
 
-        private bool CheckSurveyLegClearance(Vector3D target)
+        private bool CheckSurveyLegClearance(IMyRemoteControl remote, Vector3D target)
         {
+            if (_surveyClearanceRadius > 0 && remote.GetShipSpeed() > 0.25)
+            {
+                _sweepClearanceIndex = 0;
+                if (++_sweepScanTicks >= 60)
+                {
+                    _surveySweep = false;
+                    _lastProbe = "Survey sweep halted: platform did not settle for corridor scans.";
+                }
+                return false;
+            }
+
+            var origin = remote.GetPosition();
+            if (_sweepClearanceIndex == 0 || Vector3D.DistanceSquared(origin, _sweepClearanceOrigin) > 0.25)
+            {
+                _sweepClearanceIndex = 0;
+                _sweepClearanceOrigin = origin;
+                var direction = Vector3D.Normalize(target - origin);
+                var reference = Math.Abs(Vector3D.Dot(direction, Vector3D.Up)) < 0.9
+                    ? Vector3D.Up : Vector3D.Right;
+                _sweepClearanceRight = Vector3D.Normalize(Vector3D.Cross(direction, reference)) * _surveyClearanceRadius;
+                _sweepClearanceUp = Vector3D.Cross(_sweepClearanceRight, direction);
+            }
+
+            int requiredScans = _surveyClearanceRadius > 0 ? 5 : 1;
+            var scanTarget = target;
+            switch (_sweepClearanceIndex)
+            {
+                case 1: scanTarget += _sweepClearanceRight; break;
+                case 2: scanTarget -= _sweepClearanceRight; break;
+                case 3: scanTarget += _sweepClearanceUp; break;
+                case 4: scanTarget -= _sweepClearanceUp; break;
+            }
+
             _surveyCameras.Clear();
             GridTerminalSystem.GetBlocksOfType(_surveyCameras, camera =>
                 camera.CubeGrid == Me.CubeGrid && camera.IsWorking &&
@@ -1855,12 +1904,16 @@ namespace SpaceEngineers.Apps.Platform
             foreach (var camera in _surveyCameras)
             {
                 camera.EnableRaycast = true;
-                if (!camera.CanScan(target))
+                if (!camera.CanScan(scanTarget))
                     continue;
 
-                var hit = camera.Raycast(target);
+                var hit = camera.Raycast(scanTarget);
                 if (hit.IsEmpty())
-                    return true;
+                {
+                    if (++_sweepClearanceIndex == requiredScans)
+                        return true;
+                    break;
+                }
 
                 _surveySweep = false;
                 _lastProbe = "Survey sweep halted: camera detected " + hit.Type + " before the next waypoint.";
@@ -1873,7 +1926,8 @@ namespace SpaceEngineers.Apps.Platform
                 _lastProbe = "Survey sweep halted: no survey camera could scan the next waypoint.";
             }
             else
-                _lastProbe = "Waiting for camera range and alignment to the next survey waypoint.";
+                _lastProbe = "Survey clearance scans " + _sweepClearanceIndex + "/" + requiredScans +
+                    ". Waiting for camera range and alignment.";
             return false;
         }
 
@@ -1890,6 +1944,7 @@ namespace SpaceEngineers.Apps.Platform
                 _sweepSampleStarted = false;
                 _sweepSettleTicks = 0;
                 _sweepScanTicks = 0;
+                _sweepClearanceIndex = 0;
             }
         }
 
