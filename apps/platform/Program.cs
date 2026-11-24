@@ -34,6 +34,7 @@ namespace SpaceEngineers.Apps.Platform
         private readonly HashSet<Vector3D> _oreHits = new HashSet<Vector3D>();
         private IMyOreDetector _sampleDetector;
         private string _surveyOre;
+        private string _surveyLease;
         private Vector3D _samplePosition;
         private double _sampleWait;
         private int _positiveViews;
@@ -90,6 +91,8 @@ namespace SpaceEngineers.Apps.Platform
             UpdateOreSample();
             if (command.StartsWith("probe ", StringComparison.OrdinalIgnoreCase))
                 Probe(command.Substring(6));
+            else if (string.Equals(command, "ore task", StringComparison.OrdinalIgnoreCase))
+                BeginTaskSurvey();
             else if (command.StartsWith("ore survey ", StringComparison.OrdinalIgnoreCase))
                 BeginOreSurvey(command.Substring(11).Trim());
             else if (string.Equals(command, "ore sample", StringComparison.OrdinalIgnoreCase))
@@ -111,7 +114,32 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Waiting for ore detector refresh.");
         }
 
-        private void BeginOreSurvey(string ore)
+        private void BeginTaskSurvey()
+        {
+            string lease;
+            string ore;
+            if (!_worker.TryGetSurveyLease(out lease, out ore))
+            {
+                _lastProbe = "A confirmed survey lease for ore is required.";
+                return;
+            }
+            if (_surveyLease == lease && string.Equals(_surveyOre, ore, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastProbe = "Survey already active for this lease. Move to a new sampling position.";
+                return;
+            }
+            BeginOreSurvey(ore, lease);
+        }
+
+        private bool SurveyLeaseIsCurrent()
+        {
+            string lease;
+            string ore;
+            return _surveyLease == null || (_worker.TryGetSurveyLease(out lease, out ore) &&
+                lease == _surveyLease && string.Equals(ore, _surveyOre, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void BeginOreSurvey(string ore, string lease = null)
         {
             if (string.IsNullOrWhiteSpace(ore) || ore.Length > 64)
             {
@@ -119,6 +147,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
             _surveyOre = ore;
+            _surveyLease = lease;
             _surveyViews.Clear();
             _oreHits.Clear();
             _positiveViews = 0;
@@ -141,6 +170,12 @@ namespace SpaceEngineers.Apps.Platform
 
             for (int i = 2; i < rows.Length; i++)
             {
+                if (rows[i].StartsWith("lease|", StringComparison.Ordinal))
+                {
+                    try { _surveyLease = TaskBusIgcHelper.DecodeStorage(rows[i].Substring(6)); }
+                    catch (FormatException) { _surveyLease = ""; }
+                    continue;
+                }
                 string kind;
                 double x;
                 double y;
@@ -163,6 +198,8 @@ namespace SpaceEngineers.Apps.Platform
             var saved = new StringBuilder(SurveyStorageMarker);
             saved.AppendLine(TaskBusIgcHelper.EncodeStorage(_surveyOre));
             saved.AppendLine(_positiveViews.ToString(CultureInfo.InvariantCulture));
+            if (_surveyLease != null)
+                saved.AppendLine("lease|" + TaskBusIgcHelper.EncodeStorage(_surveyLease));
             foreach (var view in _surveyViews)
                 saved.AppendLine(FormatSurveyGps("view", view));
             foreach (var hit in _oreHits)
@@ -210,6 +247,12 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            if (!SurveyLeaseIsCurrent())
+            {
+                _lastProbe = "Wait for the survey lease to be confirmed or start the current task with ore task.";
+                return;
+            }
+
             var detector = GridTerminalSystem.GetBlockWithName(DetectorName) as IMyOreDetector;
             if (detector == null || detector.CubeGrid != Me.CubeGrid || !detector.IsWorking)
             {
@@ -235,6 +278,12 @@ namespace SpaceEngineers.Apps.Platform
         {
             if (_sampleDetector == null)
                 return;
+            if (!SurveyLeaseIsCurrent())
+            {
+                _sampleDetector = null;
+                _lastProbe = "Sample cancelled: survey lease is no longer confirmed.";
+                return;
+            }
             try
             {
                 if (!_sampleDetector.IsWorking || _sampleDetector.CubeGrid != Me.CubeGrid ||

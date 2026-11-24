@@ -251,6 +251,24 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// </summary>
         public bool HasActiveTask => !string.IsNullOrEmpty(_activeTaskId);
 
+        public bool TryGetSurveyLease(out string lease, out string ore)
+        {
+            lease = null;
+            ore = null;
+            if (!_miningPlatform || !HasActiveTask || CurrentStage() != "survey" || !HasRecentLeaseConfirmation)
+                return false;
+
+            var resource = GetRequestedResource();
+            if (string.IsNullOrEmpty(resource) || !resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(resource.Substring(4)) || resource.Length > 68)
+                return false;
+
+            ore = resource.Substring(4);
+            lease = _brokerId.ToString(CultureInfo.InvariantCulture) + ":" +
+                _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _activeTaskId;
+            return true;
+        }
+
         public bool TryGetMiningApproach(out string taskId, out double x, out double y, out double z)
         {
             taskId = null;

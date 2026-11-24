@@ -210,7 +210,10 @@ Camera hits identify geometry. Ore observations come from the ore
 detector adapter. The platform does not start flight or drills yet.
 
 For manual survey sampling, name the mod-enabled detector `[AMN ORE]`.
-Run `ore survey Iron`, move to the first observation position, and run
+With a confirmed ore survey assignment, run `ore task` to use its ore
+type. Repeating it for the same lease keeps completed samples. Sampling
+pauses when that lease is no longer confirmed. For standalone surveys
+use `ore survey Iron`. Move to the first observation position and run
 `ore sample`. Hold position for four seconds. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits
 in persistent PB storage. A recompile restores completed samples and the
