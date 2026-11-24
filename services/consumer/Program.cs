@@ -71,7 +71,8 @@ namespace SpaceEngineers.Services.Consumer
                 loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
                     ? null : (Action<long, string, double>)LoadHaulerCargo,
                 readMiningBuffer: _miningBuffer == null ? null : (Func<string, double?>)ReadMiningBuffer,
-                knownSiteRadius: ReadKnownSiteRadius());
+                knownSiteRadius: ReadKnownSiteRadius(),
+                autoAcceptSurvey: string.Equals(ReadSetting("PointAutoSurveyAccept="), "true", StringComparison.OrdinalIgnoreCase));
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
                 gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),

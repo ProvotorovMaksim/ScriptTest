@@ -494,7 +494,13 @@ point with the child status. After reviewing the report, use `site report`
 on the mining point to select the reported ore GPS. New reports can also
 include the platform position from the same positive sample. Use
 `approach report` to select that position after reviewing route clearance,
-or record a separate approach waypoint manually.
+or record a separate approach waypoint manually. On an automatic mining
+point, `PointAutoSurveyAccept=true` advances to mining when a completed
+survey report contains the requested ore GPS and a distinct Observation
+GPS. An observation gives the platform's sampling position. Assess the
+flight corridor and the drilling lane separately. If either coordinate
+is missing, the ore differs, or a waypoint was already set manually,
+the point waits for operator review.
 If the completed survey needs another flight, run `survey retry` on the
 mining point. It clears the current site and approach selections and
 issues a new survey child under the same parent lease.

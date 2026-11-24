@@ -478,6 +478,36 @@ namespace TaskBus.Tests
         }
 
         [Theory]
+        [InlineData(true, "GPS:Iron:10:20:30: | GPS:Observation:10:20:60:", true)]
+        [InlineData(false, "GPS:Iron:10:20:30: | GPS:Observation:10:20:60:", false)]
+        [InlineData(true, "GPS:Gold:10:20:30: | GPS:Observation:10:20:60:", false)]
+        [InlineData(true, "GPS:Iron:10:20:30: | GPS:Observation:10:20:30:", false)]
+        [InlineData(true, "GPS:Iron:10:20:30:", false)]
+        public void AutomaticPointRequiresACompleteMatchingSurveyReport(bool enabled, string gps, bool advance)
+        {
+            string storage = "";
+            var sent = new List<string>();
+            var point = new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1,
+                gridId: 500, autoAcceptSurvey: enabled);
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":7,\"details\":{\"site_required\":true," +
+                "\"resource\":\"Ore/Iron\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42));
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\",\"survey_report\":" +
+                TaskBusIgcHelper.ToJsonString("1 positive sample. " + gps) + "}", targetId: 42));
+            point.Tick();
+            Assert.Contains(advance ? "Stage: mine" : "Stage: survey", point.GetStatus());
+            if (advance)
+            {
+                point.Tick();
+                Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":60}", sent[sent.Count - 1]);
+            }
+        }
+
+        [Theory]
         [InlineData(65, true)]
         [InlineData(64, false)]
         [InlineData(0, false)]

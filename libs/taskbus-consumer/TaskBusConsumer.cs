@@ -79,6 +79,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private readonly Func<string> _getGridPositionJson;
         private readonly double _knownSiteRadiusSquared;
+        private readonly bool _autoAcceptSurvey;
         private readonly Func<string, double?> _readHaulerCargo;
         private double? _pickupCargo;
         private readonly long _gridId;
@@ -98,7 +99,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
             Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
             Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
-            Func<string, double?> readMiningBuffer = null, double? knownSiteRadius = null)
+            Func<string, double?> readMiningBuffer = null, double? knownSiteRadius = null, bool autoAcceptSurvey = false)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -113,6 +114,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
             _miningPlatform = miningPlatform;
             _getGridPositionJson = getGridPositionJson;
+            _autoAcceptSurvey = autoAcceptSurvey;
             _knownSiteRadiusSquared = knownSiteRadius.HasValue
                 ? knownSiteRadius.Value * knownSiteRadius.Value : double.PositiveInfinity;
             _readHaulerCargo = readHaulerCargo;
@@ -273,7 +275,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 PollBroker();
             if (_tick % _pollIntervalTicks == 0 && IsAutomaticPoint && HasRecentLeaseConfirmation)
             {
-                if (CurrentStage() == "transport" && _completedChildRequest == CurrentChildRequestId() &&
+                if (_autoAcceptSurvey && CurrentStage() == "survey" && _completedChildRequest == CurrentChildRequestId() &&
+                    TryAcceptSurveyCoordinates())
+                    AdvanceStage("survey", automatic: true);
+                else if (CurrentStage() == "transport" && _completedChildRequest == CurrentChildRequestId() &&
                     _baseStockConfirmed && AssignmentRequires("receipt_required"))
                     AdvanceStage("transport");
                 else if (CurrentStage() == "mine" && _readMiningBuffer != null &&
@@ -687,6 +692,40 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _echo("Using known site for " + resource + ".");
         }
 
+        private bool TryAcceptSurveyCoordinates()
+        {
+            if (_oreSite != null || _oreApproach != null)
+                return false;
+
+            string siteGps;
+            string entryGps;
+            GetSurveyReportCoordinates(out siteGps, out entryGps);
+            string name;
+            string entryName;
+            string site;
+            string entry;
+            if (!TryReadSurveyWaypoint(siteGps, out name, out site) ||
+                !TryReadSurveyWaypoint(entryGps, out entryName, out entry) ||
+                !string.Equals(entryName, "Observation", StringComparison.Ordinal) ||
+                site == entry || !string.Equals("Ore/" + name, GetRequestedResource(), StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            _oreSite = site;
+            _oreApproach = entry;
+            _echo("Accepted ore and observation coordinates from the completed survey.");
+            return true;
+        }
+
+        private void GetSurveyReportCoordinates(out string site, out string entry)
+        {
+            var report = _childSurveyReport ?? "";
+            int separator = report.IndexOf(" | GPS:Observation:", StringComparison.Ordinal);
+            entry = separator < 0 ? null : report.Substring(separator + 3);
+            var oreReport = separator < 0 ? report : report.Substring(0, separator);
+            int marker = oreReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
+            site = marker < 0 ? null : oreReport.Substring(marker + 1);
+        }
+
         private void SetWaypointFromSurveyReport(bool approach)
         {
             if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
@@ -696,26 +735,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            var report = _childSurveyReport ?? "";
-            int separator = report.IndexOf(" | GPS:Observation:", StringComparison.Ordinal);
-            if (approach)
-            {
-                if (separator >= 0)
-                    SetSurveyWaypoint("approach " + report.Substring(separator + 3));
-                else
-                    _echo("The survey report has no observation position.");
-                return;
-            }
-
-            var oreReport = separator < 0 ? report : report.Substring(0, separator);
-            int marker = oreReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
-            if (marker < 0)
-            {
-                _echo("The survey report has no ore GPS.");
-                return;
-            }
-
-            SetSurveyWaypoint("site " + oreReport.Substring(marker + 1));
+            string site;
+            string entry;
+            GetSurveyReportCoordinates(out site, out entry);
+            var waypoint = approach ? entry : site;
+            if (waypoint == null)
+                _echo(approach ? "The survey report has no observation position." : "The survey report has no ore GPS.");
+            else
+                SetSurveyWaypoint((approach ? "approach " : "site ") + waypoint);
         }
 
         private static bool TryReadSurveyWaypoint(string gps, out string name, out string position)
