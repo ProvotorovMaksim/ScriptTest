@@ -548,8 +548,10 @@ namespace TaskBus.Tests
             Assert.Empty(broker.IGC.Outbox);
         }
 
-        [Fact]
-        public void MiningPointClosesSurveyMineAndTransportThroughGalnetWithBaseReceipt()
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void MiningPointClosesSurveyMineAndTransportThroughGalnetWithBaseReceipt(bool interruptDelivery)
         {
             Relay workerRelay;
             MyGridProgram.CustomDataAtStartup = "App=9\nApp=40\nApp=42\nApp=43";
@@ -603,33 +605,41 @@ namespace TaskBus.Tests
             var haulerBridge = Connect(43, (source, envelope) => hauler.ProcessIncomingMessage(source, envelope));
             long dock = 500;
             double cargo = 50;
-            hauler = new TaskBusConsumer(haulerBridge.Send, () => "", _ => { }, _ => { }, 43, "Hauler",
+            string haulerStorage = "";
+            TaskBusConsumer StartHauler() => new TaskBusConsumer(haulerBridge.Send, () => haulerStorage,
+                value => haulerStorage = value, _ => { }, 43, "Hauler",
                 readHaulerCargo: _ => cargo, readDockedGrid: () => dock, autoHauler: true);
+            hauler = StartHauler();
             hauler.ProcessCommand("group Haulers");
             foreach (var worker in new[] { point, platform, hauler })
                 worker.ProcessCommand("broker 1");
 
+            bool linkOnline = true;
             void Move(Relay from, long source, Relay to, long target)
             {
-                foreach (var packet in from.IGC.UnicastOutbox.Where(packet => packet.Target == target))
-                    to.IGC.UnicastListener.Inbox.Enqueue((source, packet.Tag, packet.Data));
+                if (linkOnline)
+                    foreach (var packet in from.IGC.UnicastOutbox.Where(packet => packet.Target == target))
+                        to.IGC.UnicastListener.Inbox.Enqueue((source, packet.Tag, packet.Data));
                 from.IGC.UnicastOutbox.Clear();
+            }
+
+            void Tick()
+            {
+                foreach (var worker in new[] { point, platform, hauler })
+                    worker.Tick();
+                foreach (var bridge in bridges)
+                    bridge.Flush();
+                broker.Main("");
+                workerRelay.Main("", UpdateType.Update10);
+                brokerRelay.Main("", UpdateType.Update10);
+                Move(workerRelay, 21, brokerRelay, 22);
+                Move(brokerRelay, 22, workerRelay, 21);
             }
 
             void Until(Func<bool> done)
             {
                 for (int tick = 0; tick < 600 && !done(); tick++)
-                {
-                    foreach (var worker in new[] { point, platform, hauler })
-                        worker.Tick();
-                    foreach (var bridge in bridges)
-                        bridge.Flush();
-                    broker.Main("");
-                    workerRelay.Main("", UpdateType.Update10);
-                    brokerRelay.Main("", UpdateType.Update10);
-                    Move(workerRelay, 21, brokerRelay, 22);
-                    Move(brokerRelay, 22, workerRelay, 21);
-                }
+                    Tick();
                 Assert.True(done(), point.GetStatus() + "\n" + platform.GetStatus() + "\n" + hauler.GetStatus());
             }
 
@@ -647,9 +657,24 @@ namespace TaskBus.Tests
 
             buffer = 50;
             Until(() => hauler.GetStatus().Contains("Stage: deliver"));
+            linkOnline = !interruptDelivery;
             dock = 600;
             cargo = 0;
+            if (interruptDelivery)
+            {
+                Until(() => hauler.GetStatus().Contains("Pending completion: 40-4"));
+                hauler = StartHauler();
+                Assert.Contains("Pending completion: 40-4", hauler.GetStatus());
+                for (int tick = 0; tick < 54; tick++)
+                    Tick();
+                Assert.Contains("TASK|40-4|", broker.Storage);
+                Assert.Contains("Pending completion: 40-4", hauler.GetStatus());
+                Assert.DoesNotContain("Hauler task complete.", point.GetStatus());
+                linkOnline = true;
+            }
             Until(() => point.GetStatus().Contains("Hauler task complete."));
+            Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("COMMIT|") &&
+                line.Contains(TaskBusIgcHelper.EncodeStorage("40-4"))));
             Assert.True(point.HasActiveTask);
             Assert.Contains("Waiting for base stock confirmation", point.GetStatus());
 
