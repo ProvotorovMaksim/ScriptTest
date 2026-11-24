@@ -477,6 +477,34 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void ImportedKnownSiteSkipsSurveyAfterRestartOnlyWithTwoDistinctWaypoints()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value, _ => { }, 42, "Point", 1, gridId: 500);
+            var point = Start();
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            point.ProcessCommand("site add GPS:Iron:10:20:30: | GPS:Entry:10:20:30:");
+            Assert.DoesNotContain("KNOWN_SITE|", storage);
+            point.ProcessCommand("site add GPS:Iron:10:20:30:");
+            Assert.DoesNotContain("KNOWN_SITE|", storage);
+            point.ProcessCommand("site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:");
+            Assert.Contains("KNOWN_SITE|", storage);
+
+            point = Start();
+            var parent = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"imported\",\"lease_epoch\":7,\"details\":{\"site_required\":true," +
+                "\"resource\":\"Ore/Iron\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
+            Assert.True(point.ProcessIncomingMessage(1, parent));
+            Assert.Contains("Stage: mine", point.GetStatus());
+            point.Tick();
+            Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
+            Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":60}", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void WorkerPollsAndAcceptsAssignmentsOnlyFromStoredBroker()
         {
             string storage = "";

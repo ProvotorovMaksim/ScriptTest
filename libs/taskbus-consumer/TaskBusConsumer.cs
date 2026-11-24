@@ -225,6 +225,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 RememberSurveySite();
                 return;
             }
+            if (cmd.StartsWith("site add ", StringComparison.OrdinalIgnoreCase))
+            {
+                AddKnownSite(cmd.Substring(9));
+                return;
+            }
             if (cmd.StartsWith("site forget ", StringComparison.OrdinalIgnoreCase))
             {
                 if (_knownSites.Remove(cmd.Substring(12).Trim()))
@@ -508,7 +513,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
         }
 
-        private bool IsAutomaticPoint => !_miningPlatform && _autoPoint && _consumerGroup == "MiningPoints" && HasActiveTask;
+        private bool IsAutomaticPoint => IsConfiguredAutomaticPoint && HasActiveTask;
+
+        private bool IsConfiguredAutomaticPoint => !_miningPlatform && _autoPoint && _consumerGroup == "MiningPoints";
 
         private string CurrentChildRequestId() => _activeTaskId + ":" +
             _leaseEpoch.ToString(CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(CultureInfo.InvariantCulture) +
@@ -555,13 +562,35 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _echo("A completed survey and two selected waypoints are required.");
                 return;
             }
+            SaveKnownSite(resource, _oreSite, _oreApproach);
+        }
+
+        private void AddKnownSite(string argument)
+        {
+            var fields = argument.Split('|');
+            string oreName;
+            string ignored;
+            string site;
+            string approach;
+            if (!IsConfiguredAutomaticPoint || fields.Length != 2 ||
+                !TryReadSurveyWaypoint(fields[0], out oreName, out site) ||
+                !TryReadSurveyWaypoint(fields[1], out ignored, out approach) || site == approach)
+            {
+                _echo("On an automatic mining point, use site add GPS:Ore:X:Y:Z: | GPS:Entry:X:Y:Z: with distinct waypoints.");
+                return;
+            }
+            SaveKnownSite("Ore/" + oreName, site, approach);
+        }
+
+        private void SaveKnownSite(string resource, string site, string approach)
+        {
             if (_knownSites.Count >= 32 && !_knownSites.ContainsKey(resource))
             {
                 _echo("Known-site catalog is full.");
                 return;
             }
 
-            _knownSites[resource] = _oreSite + ";" + _oreApproach;
+            _knownSites[resource] = site + ";" + approach;
             SaveState();
             _echo("Remembered site for " + resource + ".");
         }
@@ -613,6 +642,21 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             SetSurveyWaypoint("site " + oreReport.Substring(marker + 1));
         }
 
+        private static bool TryReadSurveyWaypoint(string gps, out string name, out string position)
+        {
+            position = null;
+            double x;
+            double y;
+            double z;
+            if (!TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) || name.Length > 64)
+                return false;
+
+            position = "{\"x\":" + x.ToString("R", CultureInfo.InvariantCulture) +
+                ",\"y\":" + y.ToString("R", CultureInfo.InvariantCulture) +
+                ",\"z\":" + z.ToString("R", CultureInfo.InvariantCulture) + "}";
+            return true;
+        }
+
         private void SetSurveyWaypoint(string command)
         {
             if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation)
@@ -624,18 +668,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             int separator = command.IndexOf(' ');
             var gps = command.Substring(separator + 1).Trim();
             string name;
-            double x;
-            double y;
-            double z;
-            if (!TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) || name.Length > 64)
+            string position;
+            if (!TryReadSurveyWaypoint(gps, out name, out position))
             {
                 _echo("Use site GPS:Ore:X:Y:Z: or approach GPS:Name:X:Y:Z:.");
                 return;
             }
 
-            var position = "{\"x\":" + x.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"y\":" + y.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"z\":" + z.ToString("R", CultureInfo.InvariantCulture) + "}";
             bool isSite = separator == 4;
             if (isSite)
             {

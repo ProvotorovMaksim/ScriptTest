@@ -246,6 +246,10 @@ registers an operator-approved, reusable site for the requested ore at
 that point. Future leases for that ore start at mining and reuse the
 recorded pair. Use `site forget Ore/Iron` when the site is depleted or its
 approach is no longer usable. The saved catalog is local to the point.
+To seed it from an already verified deposit, run
+`site add GPS:Iron:10:20:30: | GPS:Entry:10:20:60:` on the automatic
+mining point. Supply both the ore and its distinct, reviewed entry
+position. The command applies to future leases.
 
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new
