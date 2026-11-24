@@ -50,6 +50,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public Vector3D Position;
         }
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
+        private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
 
         private string _fleetName;
@@ -122,6 +123,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 _galnetPeers.Clear();
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
+                _withdrawnMarks.Clear();
                 _trackedContact = null;
             }
 
@@ -164,6 +166,10 @@ namespace SpaceEngineers.Apps.ShipLink
 
             else if (command.StartsWith("assist send ", StringComparison.OrdinalIgnoreCase))
                 SendAssistance(command.Substring(12).Trim());
+            else if (command.StartsWith("assist clear ", StringComparison.OrdinalIgnoreCase))
+                SendFleetWithdrawal(command.Substring(13).Trim(), assistance: true);
+            else if (command.StartsWith("contact clear ", StringComparison.OrdinalIgnoreCase))
+                SendFleetWithdrawal(command.Substring(14).Trim(), assistance: false);
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
             else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
@@ -347,6 +353,49 @@ namespace SpaceEngineers.Apps.ShipLink
             SendFleetMark(target, "assist", gps);
         }
 
+        private void SendFleetWithdrawal(string argument, bool assistance)
+        {
+            int split = argument.IndexOf(' ');
+            string id = split < 0 ? argument : argument.Substring(0, split);
+            string name = assistance || split < 0 ? "" : argument.Substring(split + 1).Trim();
+            long target;
+            if (string.IsNullOrEmpty(_fleetName) || !long.TryParse(id, out target) || target == 0 ||
+                (assistance ? split >= 0 : name.Length == 0 || name.Length > 64))
+            {
+                Echo(assistance ? "Use assist clear <relay ID>." : "Use contact clear <relay ID> <mark name>.");
+                return;
+            }
+            SendFleetMark(target, assistance ? "assist-clear" : "contact-clear", assistance ? "assist" : name);
+        }
+
+        private static string MarkKey(long source, bool assistance, string name) =>
+            source.ToString(CultureInfo.InvariantCulture) + (assistance ? ":assist" : ":contact:" + name);
+
+        private void WithdrawFleetMark(long source, bool assistance, string name, long expires, long now)
+        {
+            if (name.Length == 0 || name.Length > 64)
+                return;
+
+            foreach (var key in _withdrawnMarks.Where(mark => mark.Value <= now).Select(mark => mark.Key).ToArray())
+                _withdrawnMarks.Remove(key);
+            var id = MarkKey(source, assistance, name);
+            long previous;
+            if (_withdrawnMarks.TryGetValue(id, out previous) && previous >= expires)
+                return;
+
+            if (_withdrawnMarks.Count >= 32 && !_withdrawnMarks.ContainsKey(id))
+                _withdrawnMarks.Remove(_withdrawnMarks.OrderBy(mark => mark.Value).First().Key);
+            _withdrawnMarks[id] = expires;
+            _contacts.RemoveAll(mark => mark.Source == source && mark.Assistance == assistance && !mark.Hazard &&
+                (assistance || mark.Name == name) && mark.Expires <= expires);
+            if (_trackedContact != null && _trackedContact.Source == source &&
+                _trackedContact.Assistance == assistance && !_trackedContact.Hazard &&
+                (assistance || _trackedContact.Name == name) && _trackedContact.Expires <= expires)
+                _trackedContact = null;
+
+            _displayTick = DisplayUpdateIntervalTicks;
+        }
+
         private void SendFleetMark(long target, string kind, string gps)
         {
             var relay = FindGalnetRelay();
@@ -388,6 +437,12 @@ namespace SpaceEngineers.Apps.ShipLink
                         ReceiveFleetStatus(source, TaskBusIgcHelper.DecodeStorage(fields[3]), expiry);
                     return;
                 }
+                if (fields[0] == "contact-clear" || fields[0] == "assist-clear")
+                {
+                    WithdrawFleetMark(source, fields[0] == "assist-clear",
+                        TaskBusIgcHelper.DecodeStorage(fields[3]), expiry, now);
+                    return;
+                }
                 bool hazard = fields[0] == "hazard";
                 if (hazard ? !_heartbeatRelays.Contains(source) : fields[0] != "contact" && fields[0] != "assist")
                     return;
@@ -401,6 +456,11 @@ namespace SpaceEngineers.Apps.ShipLink
                     return;
 
                 bool assistance = fields[0] == "assist";
+                long withdrawnUntil;
+                if (!hazard && _withdrawnMarks.TryGetValue(MarkKey(source, assistance, name), out withdrawnUntil) &&
+                    withdrawnUntil >= expiry)
+                    return;
+
                 _contacts.RemoveAll(contact => contact.Expires <= now);
                 var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
                     contact.Assistance == assistance && contact.Hazard == hazard && (assistance || contact.Name == name));

@@ -732,6 +732,12 @@ on the sending ShipLink. The recipient display shows the sender relay and
 coordinates for up to 30 seconds from the send time. Fleet names filter the
 display and do not authenticate the sender.
 
+Use `contact clear <relay ID> <mark name>` to withdraw a mark sent to
+that relay. Use `assist clear <relay ID>` to withdraw the assistance GPS
+sent to it. The receiver removes matching reports from the submitting
+relay and suppresses delayed older copies until the withdrawal expires.
+A newer report can mark the same contact again.
+
 Use `contact track <relay ID> <mark name>` to keep an active fleet mark
 in the cockpit display. ShipLink shows its age, range and coordinates
 relative to the cockpit axes. An expired selection remains visible as
