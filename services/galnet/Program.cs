@@ -407,7 +407,14 @@ namespace SpaceEngineers.Services.Galnet
                 fields[4] = availableHops.ToString();
                 packet = string.Join("|", fields);
             }
-            IGC.SendUnicastMessage(nextHop, Channel, packet);
+            if (IGC.SendUnicastMessage(nextHop, Channel, packet))
+                return;
+
+            // A failed send can precede expiry of the direct peer heartbeat.
+            long reserveHop;
+            if (_topology.TryGetNextHop(Me.EntityId, destination, _tick, out reserveHop, previousHop,
+                peer => peer != nextHop && IsLive(peer), availableHops))
+                IGC.SendUnicastMessage(reserveHop, Channel, packet);
         }
 
         private static bool IsCurrentPacket(string packet, long now)

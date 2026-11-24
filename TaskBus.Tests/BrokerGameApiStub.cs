@@ -36,9 +36,12 @@ namespace Sandbox.ModAPI.Ingame
 
         public readonly List<(long Target, string Tag, string Data)> UnicastOutbox = new();
         public TestUnicastListener UnicastListener { get; } = new();
+        public Func<long, bool> AllowUnicast = _ => true;
 
         public bool SendUnicastMessage(long target, string tag, string data)
         {
+            if (!AllowUnicast(target))
+                return false;
             UnicastOutbox.Add((target, tag, data));
             return true;
         }

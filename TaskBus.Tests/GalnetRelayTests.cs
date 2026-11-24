@@ -177,6 +177,36 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void RejectedSendTriesReserveBeforePrimaryHeartbeatExpires()
+        {
+            var relay = Start(1, "0\n2\n3");
+            const string channel = "SE1-GALNET-V1";
+            relay.IGC.UnicastListener.Inbox.Enqueue((2, channel, "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((3, channel, "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((2, channel, "LINK|2|1|1|8|1,4"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((3, channel, "LINK|3|1|1|8|1,4"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((2, channel, "LINK|4|1|1|7|2,3"));
+            relay.Main("", UpdateType.Update10);
+            relay.Main("route 4", UpdateType.Terminal);
+            Assert.Contains("Next hop: 2", relay.Output);
+
+            relay.IGC.UnicastOutbox.Clear();
+            var attempts = new List<long>();
+            relay.IGC.AllowUnicast = target =>
+            {
+                attempts.Add(target);
+                return target == 3;
+            };
+            relay.Main("send 4 payload", UpdateType.Terminal);
+
+            Assert.Equal(new long[] { 2, 3 }, attempts);
+            var sent = Assert.Single(relay.IGC.UnicastOutbox);
+            Assert.Equal(3L, sent.Target);
+            Assert.StartsWith("DATA|1|4|", sent.Data);
+            Assert.Contains("SEND:", relay.Storage);
+        }
+
+        [Fact]
         public void RelayDropsExpiredOutboxAndDoesNotAcknowledgeExpiredArrival()
         {
             var relay = Start(4, "0\n1\nSEND:DATA|4|1|1:4|8|1|YQ==");
