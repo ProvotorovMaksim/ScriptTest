@@ -62,6 +62,16 @@ catalog leaves unaccepted records pending on the sender. Use `survey cancel` to
 stop a transfer. A survey hit is a catalog observation. Route planning should use a
 separate approach point outside the voxel.
 
+### Galnet routing core
+
+`GalnetTopology` computes next hops from current, reciprocal neighbor
+advertisements. The shortest path wins, with node ID as the tie-breaker.
+A node's generation and sequence reject repeated or reordered updates.
+Expiry values are in the receiving node's time domain. The core retains
+up to 128 node versions for its lifetime and accepts up to 32 neighbors
+per node. A relay Programmable Block and the on-wire protocol are still
+needed to provide advertisements and forward traffic.
+
 ### Select a broker
 
 Update all brokers sharing the channel before using broker selection. In a
