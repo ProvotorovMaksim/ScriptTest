@@ -27,6 +27,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public string Speed;
             public bool Piloted;
             public bool NeedsAssistance;
+            public Vector3D? AssistancePosition;
             public int SeenTick;
             public long Expires;
         }
@@ -163,6 +164,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 else
                 {
                     _needsAssistance = string.Equals(command, "assist on", StringComparison.OrdinalIgnoreCase);
+                    _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                     _displayTick = DisplayUpdateIntervalTicks;
                 }
             }
@@ -349,11 +351,15 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
+            SendFleetMark(target, "assist", GetAssistanceGps());
+        }
+
+        private string GetAssistanceGps()
+        {
             var position = Me.CubeGrid.GetPosition();
             var culture = CultureInfo.InvariantCulture;
-            var gps = "GPS:Assistance:" + position.X.ToString("R", culture) + ":" +
+            return "GPS:Assistance:" + position.X.ToString("R", culture) + ":" +
                 position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
-            SendFleetMark(target, "assist", gps);
         }
 
         private void SendFleetWithdrawal(string argument, bool assistance)
@@ -510,17 +516,21 @@ namespace SpaceEngineers.Apps.ShipLink
                 ",\"name\":" + TaskBusIgcHelper.ToJsonString(_shipName.Substring(0, Math.Min(_shipName.Length, 64))) +
                 ",\"speed\":" + TaskBusIgcHelper.ToJsonString(speed) +
                 ",\"piloted\":" + (cockpit != null && cockpit.IsUnderControl ? "true" : "false") +
-                ",\"needs_assistance\":" + (_needsAssistance ? "true" : "false") + "}";
+                ",\"needs_assistance\":" + (_needsAssistance ? "true" : "false");
             if (_antennas.Count > 0)
-                IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload),
+                IGC.SendBroadcastMessage(FleetTag, TaskBusProtocol.CreateEnvelope("FLEET_STATUS", payload + "}"),
                     TransmissionDistance.TransmissionDistanceMax);
             if (heartbeatDue)
             {
                 _lastHeartbeatTick = _tick;
                 var relay = FindGalnetRelay();
                 if (relay != null)
+                {
+                    var heartbeat = payload + (_needsAssistance
+                        ? ",\"assistance_gps\":" + TaskBusIgcHelper.ToJsonString(GetAssistanceGps()) : "") + "}";
                     foreach (long peer in _heartbeatRelays)
-                        SendFleetPacket(relay, peer, "heartbeat", payload, HeartbeatLifetime);
+                        SendFleetPacket(relay, peer, "heartbeat", heartbeat, HeartbeatLifetime);
+                }
             }
         }
 
@@ -560,6 +570,17 @@ namespace SpaceEngineers.Apps.ShipLink
             status.Piloted = value == "true";
             status.NeedsAssistance = TaskBusIgcHelper.TryGetJsonProperty(payload, "needs_assistance", out value) &&
                 value == "true";
+            status.AssistancePosition = null;
+            string gps;
+            string label;
+            double x;
+            double y;
+            double z;
+            if (expiry != 0 && status.NeedsAssistance &&
+                TaskBusIgcHelper.TryGetJsonProperty(payload, "assistance_gps", out value) &&
+                TaskBusIgcHelper.TryReadJsonString(value, out gps) &&
+                TaskBusIgcHelper.TryReadOreGps(gps, out label, out x, out y, out z) && label == "Assistance")
+                status.AssistancePosition = new Vector3D(x, y, z);
             status.SeenTick = _tick;
         }
 
@@ -773,8 +794,8 @@ namespace SpaceEngineers.Apps.ShipLink
             {
                 display.AppendLine("=== FLEET " + _fleetName + " ===");
                 if (_needsAssistance)
-                    display.AppendLine(_antennas.Count > 0 ? "ASSISTANCE REQUEST ACTIVE" :
-                        "ASSISTANCE REQUEST WAITING FOR ANTENNA");
+                    display.AppendLine(_antennas.Count > 0 || (_heartbeatRelays.Count > 0 && FindGalnetRelay() != null)
+                        ? "ASSISTANCE REQUEST ACTIVE" : "ASSISTANCE REQUEST WAITING FOR LINK");
                 if (_fleetPeers.Count == 0 && _galnetPeers.Count == 0)
                     display.AppendLine("No recent wingmate reports.");
                 foreach (var peer in _fleetPeers.OrderByDescending(entry => entry.Value.NeedsAssistance)
@@ -798,6 +819,12 @@ namespace SpaceEngineers.Apps.ShipLink
                     display.AppendLine((live && status.NeedsAssistance ? "[ASSIST] " : "") + status.Name +
                         " | relay " + peer.Key + " | " + (live ? "online" : "stale") + " | " + age + " s old");
                     display.AppendLine(status.Speed + " m/s | " + (status.Piloted ? "piloted" : "unoccupied"));
+                    if (live && status.AssistancePosition.HasValue)
+                    {
+                        var position = status.AssistancePosition.Value;
+                        display.AppendLine("Assistance X/Y/Z: " + Math.Round(position.X, 1) + " / " +
+                            Math.Round(position.Y, 1) + " / " + Math.Round(position.Z, 1));
+                    }
                 }
             }
             _contacts.RemoveAll(contact => contact.Expires <= now);

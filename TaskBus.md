@@ -717,7 +717,11 @@ stop transmitting status. The setting persists in block Storage.
 Assign `assist on` and `assist off` to ShipLink toolbar actions to send or
 clear a manual assistance request. Wingmates see reporting ships marked
 `[ASSIST]` at the top of the roster until the request is cleared or reports
-expire. Changing fleets or restarting ShipLink clears the local request.
+expire. With configured Galnet fleet peers, an active request also
+includes the current ship position in each heartbeat. Recipients display
+it while the heartbeat is fresh. `assist off` schedules a fresh heartbeat
+without the position. Radio status carries only the assistance flag.
+Changing fleets or restarting ShipLink clears the local request.
 
 Fleet names are display filters on the fleet IGC broadcast. Other listeners
 in range can receive the reports. For an in-game check, compare the displays
