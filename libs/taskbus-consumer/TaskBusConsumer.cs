@@ -78,6 +78,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
 
         private readonly Func<string> _getGridPositionJson;
+        private readonly double _knownSiteRadiusSquared;
         private readonly Func<string, double?> _readHaulerCargo;
         private double? _pickupCargo;
         private readonly long _gridId;
@@ -97,7 +98,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
             Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
             Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
-            Func<string, double?> readMiningBuffer = null)
+            Func<string, double?> readMiningBuffer = null, double? knownSiteRadius = null)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
             _send = send;
@@ -112,6 +113,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
             _miningPlatform = miningPlatform;
             _getGridPositionJson = getGridPositionJson;
+            _knownSiteRadiusSquared = knownSiteRadius.HasValue
+                ? knownSiteRadius.Value * knownSiteRadius.Value : double.PositiveInfinity;
             _readHaulerCargo = readHaulerCargo;
             _gridId = gridId;
             _readDockedGrid = readDockedGrid;
@@ -653,6 +656,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             double pointZ;
             var position = _getGridPositionJson == null ? null : _getGridPositionJson();
             bool hasPosition = TryReadPosition(position, out pointX, out pointY, out pointZ);
+            if (!hasPosition && !double.IsPositiveInfinity(_knownSiteRadiusSquared))
+                return;
             KnownSite selected = null;
             double bestDistance = double.PositiveInfinity;
             foreach (var site in _knownSites)
@@ -669,7 +674,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 double dy = pointY - y;
                 double dz = pointZ - z;
                 double distance = hasPosition ? dx * dx + dy * dy + dz * dz : 0;
-                if (selected != null && distance >= bestDistance)
+                if (distance > _knownSiteRadiusSquared || (selected != null && distance >= bestDistance))
                     continue;
                 selected = site;
                 bestDistance = distance;

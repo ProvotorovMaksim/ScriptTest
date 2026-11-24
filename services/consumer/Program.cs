@@ -70,7 +70,8 @@ namespace SpaceEngineers.Services.Consumer
                     ? null : (Action<long, string, double>)UnloadHaulerCargo,
                 loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
                     ? null : (Action<long, string, double>)LoadHaulerCargo,
-                readMiningBuffer: _miningBuffer == null ? null : (Func<string, double?>)ReadMiningBuffer);
+                readMiningBuffer: _miningBuffer == null ? null : (Func<string, double?>)ReadMiningBuffer,
+                knownSiteRadius: ReadKnownSiteRadius());
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
                 gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
@@ -224,6 +225,20 @@ namespace SpaceEngineers.Services.Consumer
 
             Echo("Could not send the request to a working local [AMN FCS] block.");
             return false;
+        }
+
+        private double ReadKnownSiteRadius()
+        {
+            const double defaultRadius = 5000;
+            var setting = ReadSetting("KnownSiteRadius=");
+            double radius;
+            if (setting == null)
+                return defaultRadius;
+            if (double.TryParse(setting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius) &&
+                radius >= 0 && radius <= 1000000)
+                return radius;
+            Echo("KnownSiteRadius must be between 0 and 1000000 m. Using 5000 m.");
+            return defaultRadius;
         }
 
         private string ReadSetting(string key)

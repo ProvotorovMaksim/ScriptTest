@@ -477,14 +477,17 @@ namespace TaskBus.Tests
             Assert.Contains("\"request_id\":\"next:7:1\"", sent[sent.Count - 1]);
         }
 
-        [Fact]
-        public void PointChoosesClosestStoredEntryAfterRestartAndSkipsSurvey()
+        [Theory]
+        [InlineData(65, true)]
+        [InlineData(64, false)]
+        [InlineData(0, false)]
+        public void PointUsesTheClosestStoredEntryOnlyWithinRadius(double radius, bool shouldReuse)
         {
             string storage = "";
             var sent = new List<string>();
             TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
                 () => storage, value => storage = value, _ => { }, 42, "Point", 1,
-                getGridPositionJson: () => "{\"x\":0,\"y\":0,\"z\":0}", gridId: 500);
+                getGridPositionJson: () => "{\"x\":0,\"y\":0,\"z\":0}", gridId: 500, knownSiteRadius: radius);
             var point = Start();
             point.ProcessCommand("group MiningPoints");
             point.ProcessCommand("point auto");
@@ -503,10 +506,14 @@ namespace TaskBus.Tests
                 "{\"task_id\":\"imported\",\"lease_epoch\":7,\"details\":{\"site_required\":true," +
                 "\"resource\":\"Ore/Iron\",\"steps\":[\"survey\",\"mine\"]}}", targetId: 42);
             Assert.True(point.ProcessIncomingMessage(1, parent));
-            Assert.Contains("Stage: mine", point.GetStatus());
+            Assert.Contains(shouldReuse ? "Stage: mine" : "Stage: survey", point.GetStatus());
             point.Tick();
-            Assert.Contains("\"group_id\":\"MiningFleet\"", sent[sent.Count - 1]);
-            Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":60}", sent[sent.Count - 1]);
+            var publication = sent[sent.Count - 1];
+            Assert.Contains(shouldReuse ? "\"group_id\":\"MiningFleet\"" : "\"group_id\":\"Scouts\"", publication);
+            if (shouldReuse)
+                Assert.Contains("\"approach_position\":{\"x\":10,\"y\":20,\"z\":60}", publication);
+            else
+                Assert.DoesNotContain("approach_position", publication);
         }
 
         [Fact]

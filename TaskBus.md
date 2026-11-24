@@ -244,9 +244,11 @@ On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This
 registers an operator-approved, reusable site for the requested ore at
 that point. The local catalog holds up to 32 deposits across all ores.
-Future leases for that ore start at mining and use the recorded entry
-nearest the point. If the point cannot report its position, it uses the
-first matching record. Use `site forget GPS:Iron:X:Y:Z:` to remove one
+Future leases for that ore start at mining when the nearest recorded
+entry is within the point's search radius. Set `KnownSiteRadius=5000`
+in the point PB's Custom Data to configure the radius in metres. The
+default is 5000 m, measured from the point grid origin. If no entry
+qualifies or the origin is unavailable, the point starts a survey. Use `site forget GPS:Iron:X:Y:Z:` to remove one
 depleted deposit by its ore GPS, or `site forget Ore/Iron` to remove all
 entries for that ore.
 To seed it from an already verified deposit, run
