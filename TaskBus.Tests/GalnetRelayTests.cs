@@ -92,6 +92,35 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void FullReceiptLogKeepsLiveReceiptsUntilTheirDeadline()
+        {
+            var expires = DateTime.UtcNow.AddMinutes(1).Ticks;
+            var receipts = Enumerable.Range(0, 64).Select(i => "SEEN:1:old" + i + "|" + expires);
+            var relay = Start(4, "0\n1\n" + string.Join("\n", receipts));
+            var application = new TestApplication { Accept = true };
+            relay.GridTerminalSystem.Application = application;
+
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "HELLO"));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "APP|1|4|new|8|" + expires + "|YQ=="));
+            relay.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "APP|1|4|old0|8|" + expires + "|YQ=="));
+            relay.Main("", UpdateType.Update10);
+
+            Assert.Equal(0, application.Calls);
+            Assert.DoesNotContain("SEEN:1:new", relay.Storage);
+            Assert.Contains("SEEN:1:old0", relay.Storage);
+            Assert.DoesNotContain(relay.IGC.UnicastOutbox, packet => packet.Data.StartsWith("ACK|4|1|new|"));
+
+            var expired = DateTime.UtcNow.AddMinutes(-1).Ticks;
+            var restart = Start(4, relay.Storage.Replace("SEEN:1:old0|" + expires, "SEEN:1:old0|" + expired));
+            restart.GridTerminalSystem.Application = application;
+            restart.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "HELLO"));
+            restart.IGC.UnicastListener.Inbox.Enqueue((1, "SE1-GALNET-V1", "APP|1|4|new|8|" + expires + "|YQ=="));
+            restart.Main("", UpdateType.Update10);
+            Assert.Equal(1, application.Calls);
+            Assert.Contains("SEEN:1:new", restart.Storage);
+        }
+
+        [Fact]
         public void ApplicationPacketIsAcknowledgedOnlyAfterLocalHandoff()
         {
             var relay = Start(4, "0\n1");

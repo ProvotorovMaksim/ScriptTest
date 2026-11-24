@@ -28,7 +28,7 @@ namespace SpaceEngineers.Services.Galnet
         private const int MaxPending = 16;
         private const int MaxReceived = 64;
         private readonly List<string> _outbox = new List<string>();
-        private readonly Queue<string> _received = new Queue<string>();
+        private readonly Dictionary<string, long> _received = new Dictionary<string, long>();
         private string _lastDelivery = "No message received.";
 
         public Program()
@@ -36,6 +36,7 @@ namespace SpaceEngineers.Services.Galnet
             var settings = Storage.Split('\n');
             long.TryParse(settings[0], out _generation);
             _generation++;
+            long now = DateTime.UtcNow.Ticks;
             for (int i = 1; i < settings.Length; i++)
             {
                 var line = settings[i].TrimEnd('\r');
@@ -43,11 +44,19 @@ namespace SpaceEngineers.Services.Galnet
                 if (line.StartsWith("SEND:", StringComparison.Ordinal) && _outbox.Count < MaxPending)
                 {
                     var packet = line.Substring(5);
-                    if (IsCurrentPacket(packet, DateTime.UtcNow.Ticks))
+                    if (IsCurrentPacket(packet, now))
                         _outbox.Add(packet);
                 }
                 else if (line.StartsWith("SEEN:", StringComparison.Ordinal) && _received.Count < MaxReceived)
-                    _received.Enqueue(line.Substring(5));
+                {
+                    int delimiter = line.IndexOf('|', 5);
+                    long expires = now + MessageLifetime;
+                    if (delimiter >= 0 && (!long.TryParse(line.Substring(delimiter + 1), out expires) ||
+                        expires <= now))
+                        continue;
+                    var key = delimiter < 0 ? line.Substring(5) : line.Substring(5, delimiter - 5);
+                    _received[key] = expires;
+                }
                 else if (line.StartsWith("LAST:", StringComparison.Ordinal))
                 {
                     try { _lastDelivery = TaskBusIgcHelper.DecodeStorage(line.Substring(5)); }
@@ -309,17 +318,21 @@ namespace SpaceEngineers.Services.Galnet
         private void AcceptData(string kind, long origin, string id, long expires, string encoded)
         {
             var key = origin + ":" + id;
-            if (!_received.Contains(key))
+            long now = DateTime.UtcNow.Ticks;
+            foreach (var entry in _received.Where(entry => entry.Value <= now).ToArray())
+                _received.Remove(entry.Key);
+
+            if (!_received.ContainsKey(key))
             {
+                if (_received.Count >= MaxReceived)
+                    return;
                 string message;
                 try { message = TaskBusIgcHelper.DecodeStorage(encoded); }
                 catch (FormatException) { return; }
                 if (message.Length > (kind == "APP" ? MaxApplicationLength : 255) ||
                     (kind == "APP" && !DeliverApplication(origin, id, message)))
                     return;
-                if (_received.Count >= MaxReceived)
-                    _received.Dequeue();
-                _received.Enqueue(key);
+                _received[key] = expires;
                 _lastDelivery = kind == "APP" ? "Application packet from " + origin + "." :
                     "From " + origin + ": " + message;
                 SaveConfiguration();
@@ -375,7 +388,7 @@ namespace SpaceEngineers.Services.Galnet
             var lines = new List<string> { _generation.ToString() };
             foreach (var peer in _peers.Keys) lines.Add(peer.ToString());
             foreach (var packet in _outbox) lines.Add("SEND:" + packet);
-            foreach (var key in _received) lines.Add("SEEN:" + key);
+            foreach (var entry in _received) lines.Add("SEEN:" + entry.Key + "|" + entry.Value);
             lines.Add("LAST:" + TaskBusIgcHelper.EncodeStorage(_lastDelivery));
             Storage = string.Join("\n", lines);
         }

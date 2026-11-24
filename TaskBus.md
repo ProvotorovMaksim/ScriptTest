@@ -76,8 +76,9 @@ Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
 up to 16 pending messages in Storage and retries them via the current
 route until the destination acknowledges or the five-minute UTC deadline
 expires. Upgrade all relays together. Older diagnostic packets without
-a deadline are discarded. The last 64 delivery IDs are
-retained for duplicate suppression across receiver restarts. Text delivery is a diagnostic. Use `app <node ID> <payload>` to deliver
+a deadline are discarded. The receiver retains up to 64 delivery IDs until their original deadlines
+for duplicate suppression across restarts. If every slot is occupied, new
+messages wait for the sender to retry after a slot expires. Text delivery is a diagnostic. Use `app <node ID> <payload>` to deliver
 up to 1024 characters to a working local programmable block named
 `[GALNET APP]`. The recipient script gets `galnet recv <origin> <ID> <payload>`.
 The relay acknowledges a successful local invocation. Application handlers
