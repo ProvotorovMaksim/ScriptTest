@@ -8,6 +8,25 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void MiningApproachRequiresARecentlyConfirmedLease()
+        {
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((_, __) => { }, () => storage,
+                value => storage = value, _ => { }, 42, "Miner");
+            var worker = Start();
+            worker.ProcessCommand("group MiningFleet");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"mine-1\",\"lease_epoch\":1,\"details\":{" +
+                "\"steps\":[\"mine\"],\"approach_position\":{\"x\":10,\"y\":20,\"z\":30}}}", targetId: 42);
+            worker.ProcessIncomingMessage(1, assignment);
+            Assert.True(worker.TryGetMiningApproach(out var id, out var x, out var y, out var z));
+            Assert.Equal("mine-1", id);
+            Assert.Equal((10d, 20d, 30d), (x, y, z));
+            worker = Start();
+            Assert.False(worker.TryGetMiningApproach(out _, out _, out _, out _));
+        }
+
+        [Fact]
         public void AutomaticMiningPointRetriesChildAndRequiresItsCompletion()
         {
             string storage = "";

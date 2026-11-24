@@ -92,7 +92,11 @@ During a new request's survey stage, select the deposit with
 `site GPS:Ore:X:Y:Z:` and record a distinct approach point outside the voxel
 with `approach GPS:Name:X:Y:Z:`. Both points survive a restart and are included
 in the mining assignment. This records an operator-selected approach point.
-Flight routing and automatic site selection are separate work.
+On a worker in `MiningFleet`, name the route Remote Control `[AMN ROUTE]`
+and run `route approach` with a confirmed mining lease. This appends the
+approach to the configured waypoint list while autopilot is off. A previous
+AMN approach must be removed before loading a different task. Review route
+and terrain clearance before enabling autopilot.
 
 A point publishing a child includes `parent_task_id` and
 `parent_lease_epoch` in its `TASK_PUBLISH` payload. The broker admits new

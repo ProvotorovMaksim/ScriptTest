@@ -236,6 +236,27 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// </summary>
         public bool HasActiveTask => !string.IsNullOrEmpty(_activeTaskId);
 
+        public bool TryGetMiningApproach(out string taskId, out double x, out double y, out double z)
+        {
+            taskId = null;
+            x = y = z = 0;
+            if (_consumerGroup != "MiningFleet" || !HasActiveTask || CurrentStage() != "mine" ||
+                !HasRecentLeaseConfirmation)
+                return false;
+
+            string details;
+            string position;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(details, "approach_position", out position) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z))
+                return false;
+
+            taskId = _activeTaskId;
+            return true;
+        }
+
         private bool HasRecentLeaseConfirmation => _lastLeaseConfirmationTick.HasValue &&
             _tick - _lastLeaseConfirmationTick.Value < LeaseConfirmationTimeoutTicks;
 
