@@ -240,7 +240,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (_tick % _pollIntervalTicks == 0 || !string.IsNullOrEmpty(_pendingCompletedTaskId))
                 PollBroker();
             if (_tick % _pollIntervalTicks == 0 && IsAutomaticPoint && HasRecentLeaseConfirmation)
-                PublishCurrentChild();
+            {
+                if (CurrentStage() == "transport" && _completedChildRequest == CurrentChildRequestId() &&
+                    _baseStockConfirmed && AssignmentRequires("receipt_required"))
+                    AdvanceStage("transport");
+                else
+                    PublishCurrentChild();
+            }
             if (_autoHauler && _consumerGroup == "Haulers" && HasActiveTask &&
                 HasRecentLeaseConfirmation && _tick % _pollIntervalTicks == 0)
             {
@@ -271,7 +277,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (CurrentStage() == "transport" && AssignmentRequires("receipt_required"))
                     sb.AppendLine(_baseStockConfirmed ? "Base stock confirmed" : "Waiting for base stock confirmation");
                 if (_completedChildRequest == CurrentChildRequestId())
-                    sb.AppendLine("Child task complete. Confirm stage.");
+                    sb.AppendLine(CurrentStage() == "transport" && AssignmentRequires("receipt_required")
+                        ? "Hauler task complete."
+                        : "Child task complete. Confirm stage.");
             }
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));

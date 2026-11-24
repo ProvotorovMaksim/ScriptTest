@@ -149,7 +149,9 @@ The point leases a parent request with `survey`, `mine` and `transport`
 stages. While the point is idle, run `point auto` to automatically publish
 one child for the current stage to `Scouts`, `MiningFleet` or `Haulers`
 respectively. The child request ID is stable across retries and restart.
-After the child completes, confirm the stage on the point consumer.
+After the child completes, confirm survey and mining on the point consumer.
+Transport with a required base receipt completes automatically once the
+receipt and hauler completion are both confirmed.
 For new point requests, transport confirmation also requires the original
 base to report stock at or above its requested minimum. This is a stock-level
 confirmation. It does not identify the source of individual items.
@@ -225,7 +227,9 @@ and recompile. Confirming pickup then requires the requested resource
 and amount in that container. The hauler saves the measured pickup amount
 and checks that the requested quantity has left the same container before
 accepting `stage deliver`. Base stock confirmation is still required to close
-the parent request. Assignments picked up without a recorded measurement
+the parent request. In `point auto` mode, the point closes the transport
+stage once the broker confirms both the hauler completion and base stock.
+Assignments picked up without a recorded measurement
 can still be confirmed manually.
 
 Set `HaulerDock=<local connector name>` and recompile to require docking

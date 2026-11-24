@@ -8,6 +8,34 @@ namespace TaskBus.Tests
     public sealed class TaskBusConsumerTests
     {
         [Fact]
+        public void AutomaticPointClosesTransportAfterHaulerAndBaseConfirm()
+        {
+            string storage = "";
+            var sent = new List<string>();
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message), () => storage,
+                value => storage = value, _ => { }, 42, "Mining point", 1);
+            var point = Start();
+            point.ProcessCommand("group MiningPoints");
+            point.ProcessCommand("point auto");
+            var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
+                "{\"task_id\":\"parent\",\"lease_epoch\":1,\"base_stock_confirmed\":false," +
+                "\"details\":{\"receipt_required\":true,\"steps\":[\"transport\"]}}", targetId: 42);
+            point.ProcessIncomingMessage(1, assignment);
+            point.ProcessIncomingMessage(1, TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
+                "{\"request_id\":\"parent:1:0\",\"state\":\"DONE\"}", targetId: 42));
+            point.Tick();
+            Assert.Contains("Waiting for base stock confirmation", point.GetStatus());
+
+            point = Start();
+            point.Tick();
+            Assert.Contains("Pending completion: none", point.GetStatus());
+            point.ProcessIncomingMessage(1, assignment.Replace("false", "true"));
+            point.Tick();
+            Assert.Contains("Pending completion: parent", point.GetStatus());
+            Assert.Contains("TASK_DONE", sent[sent.Count - 1]);
+        }
+
+        [Fact]
         public void TransportAssignmentIncludesPickupAndDeliveryPositions()
         {
             var sent = new List<string>();
