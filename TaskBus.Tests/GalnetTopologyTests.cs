@@ -63,6 +63,12 @@ namespace TaskBus.Tests
             Assert.True(topology.TryGetNextHop(1, 4, 1, out hop, previousHop: 2));
             Assert.Equal(3, hop);
             Assert.False(topology.TryGetNextHop(1, 4, 1, out _, previousHop: 2, firstHopAvailable: id => id != 3));
+            Assert.False(topology.TryGetNextHop(1, 4, 1, out _, previousHop: 2, maxHops: 1));
+            Assert.True(topology.TryGetNextHop(1, 4, 1, out hop, previousHop: 2, maxHops: 2));
+            Assert.Equal(3, hop);
+            Assert.False(topology.TryGetNextHop(1, 3, 1, out _, maxHops: 0));
+            Assert.True(topology.TryGetNextHop(1, 3, 1, out hop, maxHops: 1));
+            Assert.Equal(3, hop);
         }
 
         [Fact]

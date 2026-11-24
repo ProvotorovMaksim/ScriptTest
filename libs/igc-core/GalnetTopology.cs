@@ -65,7 +65,7 @@ namespace SpaceEngineers.Libs.IgcCore
         }
 
         public bool TryGetNextHop(long source, long destination, long now, out long nextHop,
-            long previousHop = 0, Func<long, bool> firstHopAvailable = null)
+            long previousHop = 0, Func<long, bool> firstHopAvailable = null, int maxHops = int.MaxValue)
         {
             nextHop = 0;
             if (source == destination)
@@ -74,30 +74,34 @@ namespace SpaceEngineers.Libs.IgcCore
             var firstHop = new Dictionary<long, long> { { source, source } };
             var queue = new Queue<long>();
             queue.Enqueue(source);
-            while (queue.Count > 0)
+            for (int depth = 0; depth < maxHops && queue.Count != 0; depth++)
             {
-                long node = queue.Dequeue();
-                Advertisement current;
-                if (!_links.TryGetValue(node, out current) || current.ExpiresAt <= now)
-                    continue;
-
-                foreach (var neighbor in current.Neighbors)
+                int layerCount = queue.Count;
+                for (int index = 0; index < layerCount; index++)
                 {
-                    Advertisement peer;
-                    if (neighbor == previousHop || firstHop.ContainsKey(neighbor) ||
-                        (node == source && firstHopAvailable != null && !firstHopAvailable(neighbor)) ||
-                        !_links.TryGetValue(neighbor, out peer) ||
-                        peer.ExpiresAt <= now || !peer.Neighbors.Contains(node))
+                    long node = queue.Dequeue();
+                    Advertisement current;
+                    if (!_links.TryGetValue(node, out current) || current.ExpiresAt <= now)
                         continue;
 
-                    long hop = node == source ? neighbor : firstHop[node];
-                    if (neighbor == destination)
+                    foreach (var neighbor in current.Neighbors)
                     {
-                        nextHop = hop;
-                        return true;
+                        Advertisement peer;
+                        if (neighbor == previousHop || firstHop.ContainsKey(neighbor) ||
+                            (node == source && firstHopAvailable != null && !firstHopAvailable(neighbor)) ||
+                            !_links.TryGetValue(neighbor, out peer) ||
+                            peer.ExpiresAt <= now || !peer.Neighbors.Contains(node))
+                            continue;
+
+                        long hop = node == source ? neighbor : firstHop[node];
+                        if (neighbor == destination)
+                        {
+                            nextHop = hop;
+                            return true;
+                        }
+                        firstHop.Add(neighbor, hop);
+                        queue.Enqueue(neighbor);
                     }
-                    firstHop.Add(neighbor, hop);
-                    queue.Enqueue(neighbor);
                 }
             }
             return false;

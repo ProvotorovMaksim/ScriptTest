@@ -174,9 +174,9 @@ namespace SpaceEngineers.Services.Galnet
                 Echo(peer.Key + (IsLive(peer.Key) ? " direct online" : " direct offline"));
         }
 
-        private bool TryGetLiveRoute(long destination, out long hop, long previousHop = 0)
+        private bool TryGetLiveRoute(long destination, out long hop, long previousHop = 0, int maxHops = MaxHops)
         {
-            return _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop, previousHop, IsLive);
+            return _topology.TryGetNextHop(Me.EntityId, destination, _tick, out hop, previousHop, IsLive, maxHops);
         }
 
         private void ShowNetworkStatus()
@@ -193,6 +193,8 @@ namespace SpaceEngineers.Services.Galnet
                 string status;
                 if (expires <= DateTime.UtcNow.Ticks)
                     status = "expired";
+                else if (destination == Me.EntityId)
+                    status = "waiting for local application";
                 else if (TryGetLiveRoute(destination, out hop))
                     status = "route via " + hop + ", awaiting ACK";
                 else
@@ -396,12 +398,13 @@ namespace SpaceEngineers.Services.Galnet
             }
 
             long nextHop;
-            if (hops <= 1 || !TryGetLiveRoute(destination, out nextHop, previousHop))
+            int availableHops = previousHop == 0 ? hops : hops - 1;
+            if (!TryGetLiveRoute(destination, out nextHop, previousHop, availableHops))
                 return;
 
             if (previousHop != 0)
             {
-                fields[4] = (hops - 1).ToString();
+                fields[4] = availableHops.ToString();
                 packet = string.Join("|", fields);
             }
             IGC.SendUnicastMessage(nextHop, Channel, packet);

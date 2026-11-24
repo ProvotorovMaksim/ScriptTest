@@ -36,6 +36,8 @@ namespace TaskBus.Tests
             relay.Main(Command(42), UpdateType.Terminal);
             Assert.Empty(received);
             Assert.Contains("SEND:", relay.Storage);
+            relay.Main("network status", UpdateType.Terminal);
+            Assert.Contains(relay.Output, line => line.EndsWith("waiting for local application"));
 
             relay.Main("", UpdateType.Update10);
             Assert.StartsWith("galnet recv 4 ", Assert.Single(received));

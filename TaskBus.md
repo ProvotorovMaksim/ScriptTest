@@ -110,6 +110,8 @@ backup must fit in one text panel.
 advertisements. The shortest path wins, with node ID as the tie-breaker. Route computation
 skips locally unavailable next hops and excludes the previous hop during
 forwarding, so it can use an alternative while link advertisements converge.
+Packets start with a budget of eight hops, and each relay searches only
+within the remaining budget.
 A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
 up to 128 node versions and accepts up to 32 neighbors per node. When
@@ -118,7 +120,8 @@ record. Current records remain eligible for routing. Install `GalnetRelay.pb.cs`
 `peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
 shows the current next hop. The relay's default peer list reports direct
 heartbeat status. Run `network status` for each queued delivery's current
-route and next hop, or to see that it is waiting for a route.
+route and next hop, or to see that it is waiting for a route or the local
+application.
 Use `send <node ID> <text>` to check end-to-end delivery. The sender keeps
 up to 16 pending messages in Storage. Timed messages are admitted while
 fewer than 12 total messages are pending, leaving four slots for regular
