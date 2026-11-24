@@ -36,6 +36,8 @@ namespace SpaceEngineers.Apps.Platform
         private string _surveyOre;
         private string _surveyLease;
         private Vector3D _samplePosition;
+        private Vector3D? _reportOre;
+        private Vector3D? _reportView;
         private double _sampleWait;
         private int _positiveViews;
         private bool _autoSample;
@@ -172,6 +174,8 @@ namespace SpaceEngineers.Apps.Platform
             _autoSample = false;
             _surveyViews.Clear();
             _oreHits.Clear();
+            _reportOre = null;
+            _reportView = null;
             _positiveViews = 0;
             _sampleDetector = null;
             SaveSurvey();
@@ -208,6 +212,10 @@ namespace SpaceEngineers.Apps.Platform
                     _surveyViews.Add(new Vector3D(x, y, z));
                 else if (kind == "hit" && _oreHits.Count < MaxOreHits)
                     _oreHits.Add(new Vector3D(x, y, z));
+                else if (kind == "reportOre")
+                    _reportOre = new Vector3D(x, y, z);
+                else if (kind == "reportView")
+                    _reportView = new Vector3D(x, y, z);
             }
             int positives;
             if (rows.Length > 1 && int.TryParse(rows[1].TrimEnd('\r'), NumberStyles.None, CultureInfo.InvariantCulture, out positives))
@@ -226,6 +234,11 @@ namespace SpaceEngineers.Apps.Platform
                 saved.AppendLine(FormatSurveyGps("view", view));
             foreach (var hit in _oreHits)
                 saved.AppendLine(FormatSurveyGps("hit", hit));
+            if (_reportOre.HasValue && _reportView.HasValue)
+            {
+                saved.AppendLine(FormatSurveyGps("reportOre", _reportOre.Value));
+                saved.AppendLine(FormatSurveyGps("reportView", _reportView.Value));
+            }
             _surveyStorage = saved.ToString();
             Storage = _workerStorage + _surveyStorage;
         }
@@ -240,10 +253,20 @@ namespace SpaceEngineers.Apps.Platform
 
             var report = _surveyOre + ": " + _positiveViews + "/" + _surveyViews.Count +
                 " positive samples, " + _oreHits.Count + " distinct reports. Coverage unknown.";
-            foreach (var hit in _oreHits)
+            if (_reportOre.HasValue && _reportView.HasValue)
             {
-                report += " " + FormatSurveyGps(_surveyOre, hit);
-                break;
+                report += " " + FormatSurveyGps(_surveyOre, _reportOre.Value);
+                var observation = " | " + FormatSurveyGps("Observation", _reportView.Value);
+                if (report.Length + observation.Length <= 320)
+                    report += observation;
+            }
+            else
+            {
+                foreach (var hit in _oreHits)
+                {
+                    report += " " + FormatSurveyGps(_surveyOre, hit);
+                    break;
+                }
             }
             _worker.CompleteSurvey(report);
             _autoSample = false;
@@ -378,7 +401,13 @@ namespace SpaceEngineers.Apps.Platform
                         string.Equals(ore, _surveyOre, StringComparison.OrdinalIgnoreCase))
                     {
                         hit = true;
-                        if (_oreHits.Count < MaxOreHits) _oreHits.Add(new Vector3D(x, y, z));
+                        var orePosition = new Vector3D(x, y, z);
+                        if (_oreHits.Count < MaxOreHits) _oreHits.Add(orePosition);
+                        if (!_reportOre.HasValue || !_reportView.HasValue)
+                        {
+                            _reportOre = orePosition;
+                            _reportView = Me.CubeGrid.GetPosition();
+                        }
                     }
                 }
                 _surveyViews.Add(_samplePosition);

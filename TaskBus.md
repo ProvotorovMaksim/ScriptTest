@@ -224,8 +224,10 @@ pauses when that lease is no longer confirmed. Run `ore report` to
 complete the survey child with sample counts and one observed GPS, when
 available. The broker retains this report and returns it to the mining
 point with the child status. After reviewing the report, use `site report`
-on the mining point to select the reported ore GPS. Record a separate,
-clear approach waypoint before starting mining.
+on the mining point to select the reported ore GPS. New reports can also
+include the platform position from the same positive sample. Use
+`approach report` to select that position after reviewing route clearance,
+or record a separate approach waypoint manually.
 If the completed survey needs another flight, run `survey retry` on the
 mining point. It clears the current site and approach selections and
 issues a new survey child under the same parent lease.

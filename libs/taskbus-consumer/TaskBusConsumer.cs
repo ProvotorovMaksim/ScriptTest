@@ -183,9 +183,10 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 RetrySurvey();
                 return;
             }
-            if (string.Equals(cmd, "site report", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(cmd, "site report", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cmd, "approach report", StringComparison.OrdinalIgnoreCase))
             {
-                SetSiteFromSurveyReport();
+                SetWaypointFromSurveyReport(cmd.StartsWith("approach", StringComparison.OrdinalIgnoreCase));
                 return;
             }
             if (cmd == "site remember")
@@ -477,7 +478,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             _echo("Using known site for " + resource + ".");
         }
 
-        private void SetSiteFromSurveyReport()
+        private void SetWaypointFromSurveyReport(bool approach)
         {
             if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
                 _completedChildRequest != CurrentChildRequestId())
@@ -486,15 +487,26 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
-            int marker = _childSurveyReport == null ? -1 :
-                _childSurveyReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
+            var report = _childSurveyReport ?? "";
+            int separator = report.IndexOf(" | GPS:Observation:", StringComparison.Ordinal);
+            if (approach)
+            {
+                if (separator >= 0)
+                    SetSurveyWaypoint("approach " + report.Substring(separator + 3));
+                else
+                    _echo("The survey report has no observation position.");
+                return;
+            }
+
+            var oreReport = separator < 0 ? report : report.Substring(0, separator);
+            int marker = oreReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
             if (marker < 0)
             {
                 _echo("The survey report has no ore GPS.");
                 return;
             }
 
-            SetSurveyWaypoint("site " + _childSurveyReport.Substring(marker + 1));
+            SetSurveyWaypoint("site " + oreReport.Substring(marker + 1));
         }
 
         private void SetSurveyWaypoint(string command)
