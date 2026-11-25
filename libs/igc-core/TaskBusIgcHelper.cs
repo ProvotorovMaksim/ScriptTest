@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.Collections.Generic;
 using System.Text;
 
@@ -122,7 +121,7 @@ namespace SpaceEngineers.Libs.IgcCore
         }
 
         private static bool TryParseFiniteNumber(string value, out double result) =>
-            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+            double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result) &&
             !double.IsNaN(result) && !double.IsInfinity(result);
     }
 }

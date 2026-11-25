@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.Text;
 
 namespace SpaceEngineers.Libs.IgcCore
@@ -41,7 +40,7 @@ namespace SpaceEngineers.Libs.IgcCore
             if (!string.IsNullOrEmpty(messageId))
                 json.Append(",\"message_id\":").Append(Quote(messageId));
             if (targetId != 0)
-                json.Append(",\"target_id\":").Append(targetId.ToString(CultureInfo.InvariantCulture));
+                json.Append(",\"target_id\":").Append(targetId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             json.Append('}');
             return json.ToString();
         }
@@ -69,7 +68,7 @@ namespace SpaceEngineers.Libs.IgcCore
             string targetIdJson;
             long targetId;
             if (TryGetProperty(json, "target_id", out targetIdJson) &&
-                long.TryParse(targetIdJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId))
+                long.TryParse(targetIdJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out targetId))
                 result.TargetId = targetId;
 
             envelope = result;
@@ -92,7 +91,7 @@ namespace SpaceEngineers.Libs.IgcCore
                     case '\t': result.Append("\\t"); break;
                     default:
                         if (character < 0x20)
-                            result.Append("\\u" + ((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                            result.Append("\\u" + ((int)character).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
                         else
                             result.Append(character);
                         break;
@@ -212,7 +211,7 @@ namespace SpaceEngineers.Libs.IgcCore
                     case 't': result.Append('\t'); break;
                     case 'u':
                         int codePoint;
-                        if (index + 4 > json.Length || !int.TryParse(json.Substring(index, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out codePoint))
+                        if (index + 4 > json.Length || !int.TryParse(json.Substring(index, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out codePoint))
                             return false;
                         result.Append((char)codePoint);
                         index += 4;

@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 
@@ -132,7 +131,7 @@ namespace SpaceEngineers.Services.Broker
                     if (DateTime.UtcNow.Ticks < _resumeAfterUtc)
                     {
                         Echo("Broker remains paused until " +
-                            new DateTime(_resumeAfterUtc, DateTimeKind.Utc).ToString("u", CultureInfo.InvariantCulture));
+                            new DateTime(_resumeAfterUtc, DateTimeKind.Utc).ToString("u", System.Globalization.CultureInfo.InvariantCulture));
                         return;
                     }
                     _paused = false;
@@ -147,7 +146,7 @@ namespace SpaceEngineers.Services.Broker
                     const string prefix = "broker handoff ";
                     long target;
                     if (!command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                        !long.TryParse(command.Substring(prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out target) ||
+                        !long.TryParse(command.Substring(prefix.Length), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out target) ||
                         target == 0 || target == Me.EntityId)
                         Echo("Use broker handoff <destination PB ID>.");
                     else if (_handoffTarget != 0 && _handoffTarget != target)
@@ -248,7 +247,7 @@ namespace SpaceEngineers.Services.Broker
                 string rawDeadline;
                 if (TaskBusProtocol.TryParseEnvelope(envelope, out parsed) && parsed.EventType == "TASK_ASSIGN" &&
                     TaskBusIgcHelper.TryGetJsonProperty(parsed.PayloadJson, "lease_expires_utc_ticks", out rawDeadline) &&
-                    long.TryParse(rawDeadline, NumberStyles.Integer, CultureInfo.InvariantCulture, out reply.Deadline))
+                    long.TryParse(rawDeadline, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out reply.Deadline))
                     reply.AssignmentId = parsed.MessageId;
 
                 if (reply.AssignmentId != null)
@@ -327,7 +326,7 @@ namespace SpaceEngineers.Services.Broker
             int leaseEpoch;
             string epochJson;
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                !int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseEpoch))
                 return;
 
             if (eventType == "TASK_DONE")
@@ -380,7 +379,7 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "group_id", out groupJson) || !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId))
                 groupId = "default";
 
-            var id = requesterId.ToString(CultureInfo.InvariantCulture) + "-" + (++_sequence).ToString(CultureInfo.InvariantCulture);
+            var id = requesterId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + (++_sequence).ToString(System.Globalization.CultureInfo.InvariantCulture);
             _tasks.Add(new TaskRecord
             {
                 Id = id,
@@ -492,7 +491,7 @@ namespace SpaceEngineers.Services.Broker
             return TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out parentIdJson) &&
                 TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out epochJson) &&
                 TaskBusIgcHelper.TryReadJsonString(parentIdJson, out parentId) &&
-                int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch);
+                int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out epoch);
         }
 
         private static int MiningPhaseForGroup(string group) =>
@@ -557,7 +556,7 @@ namespace SpaceEngineers.Services.Broker
                 SaveQueue();
             if (cancelled && task.WorkerId != 0)
                 SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
-                    ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", task.WorkerId);
+                    ",\"lease_epoch\":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", task.WorkerId);
             SendMessage("TASK_CANCEL_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", requesterId, "cancel-ack:" + requestId);
         }
 
@@ -583,7 +582,7 @@ namespace SpaceEngineers.Services.Broker
                 string completedEpochJson;
                 int completedEpoch;
                 if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out completedEpochJson) &&
-                    int.TryParse(completedEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out completedEpoch))
+                    int.TryParse(completedEpochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out completedEpoch))
                     MarkTaskDone(consumerId, completedId, completedEpoch, ReadSurveyReport(payloadJson));
                 return;
             }
@@ -597,7 +596,7 @@ namespace SpaceEngineers.Services.Broker
                 string activeEpochJson;
                 var activeEpoch = -1;
                 var hasActiveEpoch = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "active_lease_epoch", out activeEpochJson) &&
-                    int.TryParse(activeEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out activeEpoch);
+                    int.TryParse(activeEpochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out activeEpoch);
                 if (!hasActiveEpoch)
                     return;
                 if (previous == null || previous.WorkerId != consumerId ||
@@ -720,7 +719,7 @@ namespace SpaceEngineers.Services.Broker
         private void SendTaskRevoked(long consumerId, string taskId, int leaseEpoch)
         {
             SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
-                ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
+                ",\"lease_epoch\":" + leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", consumerId);
         }
 
         private void AddTaskCommit(string taskId, long consumerId, int leaseEpoch)
@@ -734,7 +733,7 @@ namespace SpaceEngineers.Services.Broker
 
         private void SendTaskDoneAck(TaskCommit commit)
         {
-            SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(commit.TaskId) + ",\"lease_epoch\":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", commit.ConsumerId, "done-ack:" + commit.TaskId + ":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+            SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(commit.TaskId) + ",\"lease_epoch\":" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", commit.ConsumerId, "done-ack:" + commit.TaskId + ":" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private static string ReadOreName(string request)
@@ -760,8 +759,8 @@ namespace SpaceEngineers.Services.Broker
                 !TryReadCoordinates(position, out x, out y, out z))
                 return;
 
-            var gps = "GPS:" + ore + ":" + x.ToString("R", CultureInfo.InvariantCulture) + ":" +
-                y.ToString("R", CultureInfo.InvariantCulture) + ":" + z.ToString("R", CultureInfo.InvariantCulture) + ":";
+            var gps = "GPS:" + ore + ":" + x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" +
+                y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" + z.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":";
             _sharedDeposits.Remove(gps);
             if (_sharedDeposits.Count == MaxSharedDeposits)
                 _sharedDeposits.RemoveAt(0);
@@ -795,17 +794,17 @@ namespace SpaceEngineers.Services.Broker
             var candidate = FindSharedDeposit(task, poll);
             var payload = "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
                 ",\"request_id\":" + TaskBusIgcHelper.ToJsonString(task.RequestId) +
-                ",\"requester_id\":" + task.RequesterId.ToString(CultureInfo.InvariantCulture) +
+                ",\"requester_id\":" + task.RequesterId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(task.Key) +
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(task.GroupId) +
-                ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) +
-                ",\"lease_expires_utc_ticks\":" + task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture) +
+                ",\"lease_epoch\":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"lease_expires_utc_ticks\":" + task.LeaseExpiresUtc.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
                 (candidate == null ? "" : ",\"shared_ore_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
                 ",\"details\":" + task.RequestJson + "}";
             task.Attempts++;
             SaveQueue();
-            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Echo("Sent " + task.Id + " to PB " + task.WorkerId + " (attempt " + task.Attempts + ")");
         }
 
@@ -847,7 +846,7 @@ namespace SpaceEngineers.Services.Broker
 
         private string GetScopedRequestId(long producerId, string requestId)
         {
-            return producerId.ToString(CultureInfo.InvariantCulture) + ":" + requestId;
+            return producerId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + requestId;
         }
 
         private void ShowStatus()
@@ -932,7 +931,7 @@ namespace SpaceEngineers.Services.Broker
                 int targetEnd = queue.IndexOf('\n', valueStart);
                 long target;
                 if (targetEnd != queue.Length - 1 || !long.TryParse(queue.Substring(valueStart, targetEnd - valueStart),
-                    NumberStyles.Integer, CultureInfo.InvariantCulture, out target) || target != Me.EntityId)
+                    System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out target) || target != Me.EntityId)
                 {
                     Echo("This broker is not the handoff destination.");
                     return;
@@ -951,7 +950,7 @@ namespace SpaceEngineers.Services.Broker
             uint hash = 2166136261;
             foreach (var character in value)
                 hash = unchecked((hash ^ character) * 16777619);
-            return hash.ToString("X8", CultureInfo.InvariantCulture);
+            return hash.ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private void LoadQueue()
@@ -980,8 +979,8 @@ namespace SpaceEngineers.Services.Broker
                 }
                 if (line.StartsWith(HandoffField, StringComparison.Ordinal))
                 {
-                    long.TryParse(line.Substring(HandoffField.Length), NumberStyles.Integer,
-                        CultureInfo.InvariantCulture, out _handoffTarget);
+                    long.TryParse(line.Substring(HandoffField.Length), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out _handoffTarget);
                     continue;
                 }
                 if (parts.Length == 2 && parts[0] == "RETIRED")
@@ -992,7 +991,7 @@ namespace SpaceEngineers.Services.Broker
                 if (parts.Length == 2 && parts[0] == "RESUME_AFTER_UTC")
                 {
                     long deadline;
-                    if (long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out deadline) &&
+                    if (long.TryParse(parts[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out deadline) &&
                         deadline >= 0 && deadline <= DateTime.MaxValue.Ticks)
                         _resumeAfterUtc = deadline;
                     continue;
@@ -1073,10 +1072,10 @@ namespace SpaceEngineers.Services.Broker
                     }
                     long leaseExpiry = 0;
                     if (parts.Length >= 14)
-                        long.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseExpiry);
+                        long.TryParse(parts[12], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseExpiry);
                     int completedPhase = 0;
                     if (parts.Length == 15 &&
-                        (!int.TryParse(parts[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out completedPhase) ||
+                        (!int.TryParse(parts[14], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out completedPhase) ||
                             completedPhase < 0 || completedPhase > 3))
                         completedPhase = 0;
                     _tasks.Add(new TaskRecord
@@ -1112,11 +1111,11 @@ namespace SpaceEngineers.Services.Broker
         private void SaveQueue()
         {
             var storage = new StringBuilder();
-            storage.AppendLine("SEQ|" + _sequence.ToString(CultureInfo.InvariantCulture));
+            storage.AppendLine("SEQ|" + _sequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (_paused)
             {
                 storage.AppendLine("PAUSED|1");
-                storage.AppendLine("RESUME_AFTER_UTC|" + _resumeAfterUtc.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine("RESUME_AFTER_UTC|" + _resumeAfterUtc.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
             if (_retired)
                 storage.AppendLine("RETIRED|1");
@@ -1133,28 +1132,28 @@ namespace SpaceEngineers.Services.Broker
                 storage.AppendLine();
             }
             foreach (var commit in _commits)
-                storage.AppendLine("COMMIT|" + TaskBusIgcHelper.EncodeStorage(commit.TaskId) + "|" + commit.ConsumerId.ToString(CultureInfo.InvariantCulture) + "|" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine("COMMIT|" + TaskBusIgcHelper.EncodeStorage(commit.TaskId) + "|" + commit.ConsumerId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
             foreach (var task in _tasks)
             {
                 storage.Append("TASK|").Append(task.Id).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.RequestId)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.GroupId)).Append('|')
-                    .Append(task.RequesterId.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.WorkerId.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.RequesterId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.WorkerId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.Key)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.RequestJson)).Append('|')
                     .Append(task.State).Append('|')
-                    .Append(task.Attempts.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.LastDispatchTick.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.LeaseExpiresUtc.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.Attempts.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LastDispatchTick.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LeaseExpiresUtc.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
                     .Append(task.BaseStockConfirmed ? "1" : "0");
                 if (task.CompletedMiningPhase != 0)
-                    storage.Append('|').Append(task.CompletedMiningPhase.ToString(CultureInfo.InvariantCulture));
+                    storage.Append('|').Append(task.CompletedMiningPhase.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 storage.AppendLine();
             }
             if (_retired && _handoffTarget != 0)
-                storage.AppendLine(HandoffField + _handoffTarget.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine(HandoffField + _handoffTarget.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Storage = storage.ToString();
         }
 

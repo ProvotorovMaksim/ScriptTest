@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Text;
 using Sandbox.ModAPI.Ingame;
 using VRageMath;
@@ -157,7 +156,7 @@ namespace SpaceEngineers.Apps.Platform
             if (clearanceSetting != null)
             {
                 double radius;
-                if (double.TryParse(clearanceSetting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius) &&
+                if (double.TryParse(clearanceSetting, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius) &&
                     radius >= 0 && radius <= 100)
                     _surveyClearanceRadius = radius;
                 else
@@ -181,7 +180,7 @@ namespace SpaceEngineers.Apps.Platform
             if (laneSetting != null)
             {
                 double radius;
-                _miningLaneRadius = double.TryParse(laneSetting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius)
+                _miningLaneRadius = double.TryParse(laneSetting, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius)
                     && radius >= 1 && radius <= 100 ? radius : double.NaN;
             }
             _miningUnloadTo = ReadSetting("MiningUnloadTo=");
@@ -519,8 +518,8 @@ namespace SpaceEngineers.Apps.Platform
             if (transferred > 0)
             {
                 _worker.RecordMiningDeposit(transferred);
-                Echo("Mining deposit: " + _worker.MiningDeposited.ToString("G", CultureInfo.InvariantCulture) +
-                    " / " + amount.ToString("G", CultureInfo.InvariantCulture) + " " + resource + ".");
+                Echo("Mining deposit: " + _worker.MiningDeposited.ToString("G", System.Globalization.CultureInfo.InvariantCulture) +
+                    " / " + amount.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + " " + resource + ".");
                 if (completeWhenReady && _worker.MiningDeposited + 0.0000001 >= amount)
                 {
                     FinishMiningDeposit();
@@ -575,8 +574,8 @@ namespace SpaceEngineers.Apps.Platform
                 Echo("Docking requires an active broker lease with a UTC deadline.");
                 return;
             }
-            if (!TryRunMiningFcs("dock leased " + grid.ToString(CultureInfo.InvariantCulture) + " " +
-                deadline.ToString(CultureInfo.InvariantCulture)))
+            if (!TryRunMiningFcs("dock leased " + grid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                deadline.ToString(System.Globalization.CultureInfo.InvariantCulture)))
             {
                 Echo("Could not send docking to the local [AMN FCS] block.");
                 return;
@@ -613,7 +612,7 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
             _cancelFcsDock |= cancel || _fcsDockLease != _worker.ConfirmedLeaseIdentity;
-            string requestId = _fcsDockRequestId.ToString(CultureInfo.InvariantCulture);
+            string requestId = _fcsDockRequestId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (_cancelFcsDock)
             {
                 if (TryRunMiningFcs("dock lease stop " + requestId))
@@ -623,7 +622,7 @@ namespace SpaceEngineers.Apps.Platform
 
             long deadline = Math.Min(_fcsDockLimitUtc, _worker.ConfirmedLeaseDeadlineUtc);
             if (deadline > _fcsDockDeadlineUtc &&
-                TryRunMiningFcs("dock lease refresh " + requestId + " " + deadline.ToString(CultureInfo.InvariantCulture)))
+                TryRunMiningFcs("dock lease refresh " + requestId + " " + deadline.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                 _fcsDockDeadlineUtc = deadline;
         }
 
@@ -740,9 +739,9 @@ namespace SpaceEngineers.Apps.Platform
             }
             double collected = MeasureMiningCargo(inventory, resource);
             double deposited = _worker.MiningDeposited;
-            _lastProbe = "Mining cargo " + resource + ": " + collected.ToString("G", CultureInfo.InvariantCulture) +
-                " aboard, " + deposited.ToString("G", CultureInfo.InvariantCulture) +
-                " deposited / " + target.ToString("G", CultureInfo.InvariantCulture);
+            _lastProbe = "Mining cargo " + resource + ": " + collected.ToString("G", System.Globalization.CultureInfo.InvariantCulture) +
+                " aboard, " + deposited.ToString("G", System.Globalization.CultureInfo.InvariantCulture) +
+                " deposited / " + target.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
             if (collected + deposited >= target)
             {
                 _lastProbe += ". Target reached; drills halted.";
@@ -880,7 +879,7 @@ namespace SpaceEngineers.Apps.Platform
                     _reportView = new Vector3D(x, y, z);
             }
             int positives;
-            if (rows.Length > 1 && int.TryParse(rows[1].TrimEnd('\r'), NumberStyles.None, CultureInfo.InvariantCulture, out positives))
+            if (rows.Length > 1 && int.TryParse(rows[1].TrimEnd('\r'), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out positives))
                 _positiveViews = Math.Min(positives, _surveyViews.Count);
             _lastProbe = "Saved survey restored. Move to a new position to resume sampling.";
         }
@@ -889,7 +888,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             var saved = new StringBuilder(SurveyStorageMarker);
             saved.AppendLine(TaskBusIgcHelper.EncodeStorage(_surveyOre));
-            saved.AppendLine(_positiveViews.ToString(CultureInfo.InvariantCulture));
+            saved.AppendLine(_positiveViews.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (_surveyLease != null)
                 saved.AppendLine("lease|" + TaskBusIgcHelper.EncodeStorage(_surveyLease));
             foreach (var point in _surveyPlan)
@@ -968,8 +967,8 @@ namespace SpaceEngineers.Apps.Platform
             double y;
             double z;
             string label;
-            if (split < 1 || !double.TryParse(argument.Substring(0, split), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out parsedSpacing) ||
+            if (split < 1 || !double.TryParse(argument.Substring(0, split), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out parsedSpacing) ||
                 !(parsedSpacing >= MinimumViewSeparation && parsedSpacing <= 500) ||
                 !TaskBusIgcHelper.TryReadOreGps(argument.Substring(split + 1), out label, out x, out y, out z))
                 return false;
@@ -1071,9 +1070,9 @@ namespace SpaceEngineers.Apps.Platform
             double parsedStandOff;
             double parsedSpacing;
             if (parts.Length != 3 ||
-                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedRange) ||
-                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedStandOff) ||
-                !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedSpacing) ||
+                !double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedRange) ||
+                !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedStandOff) ||
+                !double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedSpacing) ||
                 !(parsedRange <= 5000 && parsedStandOff >= 10 && parsedStandOff < parsedRange &&
                     parsedSpacing >= MinimumViewSeparation && parsedSpacing <= 500))
                 return false;
@@ -1117,8 +1116,8 @@ namespace SpaceEngineers.Apps.Platform
             double parsedStandOff;
             double parsedSpacing;
             if (parts.Length != 2 ||
-                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedStandOff) ||
-                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out parsedSpacing) ||
+                !double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedStandOff) ||
+                !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedSpacing) ||
                 !(parsedStandOff >= 10 && parsedStandOff <= 500 && parsedSpacing >= MinimumViewSeparation &&
                     parsedSpacing <= 500))
                 return false;
@@ -1232,7 +1231,7 @@ namespace SpaceEngineers.Apps.Platform
         private void PlanPerimeterSurvey(string argument)
         {
             double offset;
-            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out offset) ||
+            if (!double.TryParse(argument, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out offset) ||
                 !(offset >= MinimumViewSeparation && offset <= 500))
             {
                 Echo("Use ore refine <outward offset in metres, 10 to 500>.");
@@ -1294,7 +1293,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             double gap;
             maxGap = 0;
-            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out gap) ||
+            if (!double.TryParse(argument, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out gap) ||
                 !(gap >= 2 * MinimumViewSeparation && gap <= 500))
                 return false;
             maxGap = gap;
@@ -2347,7 +2346,7 @@ namespace SpaceEngineers.Apps.Platform
             double heightMiddle = (lowest + highest) * 0.5;
             Echo("Observed " + _surveyOre + " perimeter (" + hull.Count + " vertices, " +
                 (inGravity ? "gravity plane" : "ship plane") + ").");
-            Echo("Reported vertical span: " + (highest - lowest).ToString("0.0", CultureInfo.InvariantCulture) + " m.");
+            Echo("Reported vertical span: " + (highest - lowest).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " m.");
             for (int i = 0; i < hull.Count; i++)
             {
                 var point = hull[i];
@@ -2401,7 +2400,7 @@ namespace SpaceEngineers.Apps.Platform
 
         private static string FormatSurveyGps(string label, Vector3D position)
         {
-            var culture = CultureInfo.InvariantCulture;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             return "GPS:" + label + ":" + position.X.ToString("R", culture) + ":" +
                 position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
         }
@@ -2534,7 +2533,7 @@ namespace SpaceEngineers.Apps.Platform
         private void Probe(string argument)
         {
             double distance;
-            if (!double.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out distance) ||
+            if (!double.TryParse(argument, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out distance) ||
                 !(distance >= 1 && distance <= 5000))
             {
                 _lastProbe = "Use probe <1 to 5000 metres>.";
@@ -2568,9 +2567,9 @@ namespace SpaceEngineers.Apps.Platform
 
             var point = hit.HitPosition.Value;
             _lastProbe = environment + ": " + hit.Type + " " + hit.EntityId + "\n" +
-                "Hit X/Y/Z: " + point.X.ToString("0.00", CultureInfo.InvariantCulture) + " / " +
-                point.Y.ToString("0.00", CultureInfo.InvariantCulture) + " / " +
-                point.Z.ToString("0.00", CultureInfo.InvariantCulture);
+                "Hit X/Y/Z: " + point.X.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " / " +
+                point.Y.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " / " +
+                point.Z.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         // PB BODY END

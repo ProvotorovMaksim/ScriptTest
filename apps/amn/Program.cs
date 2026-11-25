@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
 using System.Linq;
 using VRageMath;
 using VRage.Game.ModAPI.Ingame;
@@ -226,7 +225,7 @@ namespace SpaceEngineers.Apps.Amn
             if (parts.Length == 3 && string.Equals(parts[0], "set", StringComparison.OrdinalIgnoreCase))
             {
                 double minimum;
-                if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) || double.IsNaN(minimum) || double.IsInfinity(minimum) || minimum < 0)
+                if (!double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out minimum) || double.IsNaN(minimum) || double.IsInfinity(minimum) || minimum < 0)
                 {
                     Echo("Usage: set Component/SteelPlate 500");
                     return;
@@ -290,8 +289,8 @@ namespace SpaceEngineers.Apps.Amn
         {
             int split = argument.LastIndexOf(' ');
             double radius;
-            if (split < 1 || !double.TryParse(argument.Substring(split + 1), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out radius) || !(radius > 0) || double.IsInfinity(radius))
+            if (split < 1 || !double.TryParse(argument.Substring(split + 1), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out radius) || !(radius > 0) || double.IsInfinity(radius))
             {
                 Echo("Usage: survey nearest <ore name> <radius in metres>.");
                 return;
@@ -372,7 +371,7 @@ namespace SpaceEngineers.Apps.Amn
             if (!TaskBusIgcHelper.TryReadOreGps(report, out ore, out x, out y, out z) || ore.Length > 64)
                 return false;
 
-            var culture = CultureInfo.InvariantCulture;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             observation = "GPS:" + ore + ":" + x.ToString("R", culture) + ":" +
                 y.ToString("R", culture) + ":" + z.ToString("R", culture) + ":";
             return true;
@@ -393,7 +392,7 @@ namespace SpaceEngineers.Apps.Amn
             {
                 if (line.StartsWith("SURVEY_TARGET|", StringComparison.Ordinal))
                 {
-                    long.TryParse(line.Substring(14), NumberStyles.Integer, CultureInfo.InvariantCulture, out _surveyRecipient);
+                    long.TryParse(line.Substring(14), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _surveyRecipient);
                     continue;
                 }
                 if (line.StartsWith("SURVEY_PENDING|", StringComparison.Ordinal))
@@ -421,12 +420,12 @@ namespace SpaceEngineers.Apps.Amn
                 }
                 if (line.StartsWith("BROKER|", StringComparison.Ordinal))
                 {
-                    long.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
+                    long.TryParse(line.Substring(7), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _brokerId);
                     continue;
                 }
                 if (line.StartsWith("REQSEQ|", StringComparison.Ordinal))
                 {
-                    int.TryParse(line.Substring(7), NumberStyles.Integer, CultureInfo.InvariantCulture, out _requestSequence);
+                    int.TryParse(line.Substring(7), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _requestSequence);
                     continue;
                 }
                 if (line.StartsWith("REQUEST|", StringComparison.Ordinal))
@@ -462,7 +461,7 @@ namespace SpaceEngineers.Apps.Amn
                 double minimum;
                 var key = minimumLine.Substring(0, separator).Trim();
                 var value = minimumLine.Substring(separator + 1).Trim();
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out minimum) && !double.IsInfinity(minimum) && minimum >= 0)
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out minimum) && !double.IsInfinity(minimum) && minimum >= 0)
                     _minimums[key] = minimum;
             }
         }
@@ -471,10 +470,10 @@ namespace SpaceEngineers.Apps.Amn
         {
             var storage = new StringBuilder();
             storage.AppendLine("DISPATCH|" + (_dispatchToPoint ? "point" : "fleet"));
-            storage.AppendLine("BROKER|" + _brokerId.ToString(CultureInfo.InvariantCulture));
-            storage.AppendLine("REQSEQ|" + _requestSequence.ToString(CultureInfo.InvariantCulture));
+            storage.AppendLine("BROKER|" + _brokerId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            storage.AppendLine("REQSEQ|" + _requestSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
             foreach (var minimum in _minimums.OrderBy(entry => entry.Key))
-                storage.AppendLine("MIN|" + minimum.Key + "=" + minimum.Value.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine("MIN|" + minimum.Key + "=" + minimum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
             foreach (var request in _requestIds.OrderBy(entry => entry.Key))
                 storage.AppendLine("REQUEST|" + TaskBusIgcHelper.EncodeStorage(request.Key) + "|" + TaskBusIgcHelper.EncodeStorage(request.Value));
             foreach (var resource in _lowResources.OrderBy(key => key))
@@ -485,7 +484,7 @@ namespace SpaceEngineers.Apps.Amn
                 storage.AppendLine("ORE|" + TaskBusIgcHelper.EncodeStorage(observation));
             if (_surveyOutbox.Count > 0)
             {
-                storage.AppendLine("SURVEY_TARGET|" + _surveyRecipient.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine("SURVEY_TARGET|" + _surveyRecipient.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 foreach (var observation in _surveyOutbox)
                     storage.AppendLine("SURVEY_PENDING|" + TaskBusIgcHelper.EncodeStorage(observation));
             }
@@ -584,7 +583,7 @@ namespace SpaceEngineers.Apps.Amn
                     string requestId;
                     if (!_requestIds.TryGetValue(minimum.Key, out requestId))
                     {
-                        requestId = Me.EntityId.ToString(CultureInfo.InvariantCulture) + "-" + (++_requestSequence).ToString(CultureInfo.InvariantCulture);
+                        requestId = Me.EntityId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + (++_requestSequence).ToString(System.Globalization.CultureInfo.InvariantCulture);
                         _requestIds[minimum.Key] = requestId;
                         createdRequest = true;
                         SaveMinimums();
@@ -604,7 +603,7 @@ namespace SpaceEngineers.Apps.Amn
                         if (_lowResources.Contains(minimum.Key) || retryOutstanding)
                             SendMessage("TASK_QUERY", "{\"request_id\":" +
                                 TaskBusIgcHelper.ToJsonString(requestId) + ",\"stock\":" +
-                                current.ToString("R", CultureInfo.InvariantCulture) + "}", _brokerId);
+                                current.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}", _brokerId);
                     }
                     else
                     {
@@ -639,17 +638,17 @@ namespace SpaceEngineers.Apps.Amn
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(DispatchGroup) +
                 ",\"resource\":" + TaskBusIgcHelper.ToJsonString(resource) +
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(resource) +
-                ",\"current\":" + current.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"minimum\":" + minimum.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"amount\":" + (minimum - current).ToString("R", CultureInfo.InvariantCulture) +
+                ",\"current\":" + current.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"minimum\":" + minimum.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"amount\":" + (minimum - current).ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
                 (_dispatchToPoint ? ",\"receipt_required\":true,\"site_required\":true,\"steps\":[\"survey\",\"mine\",\"transport\"]" :
                     ",\"steps\":[\"survey\",\"mine\",\"intermediate\",\"deliver\"]") +
                 (candidate == null ? "" : ",\"ore_candidate_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
-                ",\"base_grid_id\":" + Me.CubeGrid.EntityId.ToString(CultureInfo.InvariantCulture) +
+                ",\"base_grid_id\":" + Me.CubeGrid.EntityId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 ",\"base_grid_name\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
-                ",\"base_position\":{\"x\":" + position.X.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"y\":" + position.Y.ToString("R", CultureInfo.InvariantCulture) +
-                ",\"z\":" + position.Z.ToString("R", CultureInfo.InvariantCulture) + "}}";
+                ",\"base_position\":{\"x\":" + position.X.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"y\":" + position.Y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"z\":" + position.Z.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}}";
             SendMessage("TASK_PUBLISH", payload, _brokerId, requestId);
         }
 
@@ -671,7 +670,7 @@ namespace SpaceEngineers.Apps.Amn
             string targetJson;
             long targetId = 0;
             if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
-                long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
+                long.TryParse(targetJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out targetId) &&
                 targetId != 0 && targetId != Me.EntityId)
                 return;
 

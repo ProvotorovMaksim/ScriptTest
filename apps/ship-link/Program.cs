@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using VRageMath;
@@ -87,9 +86,9 @@ namespace SpaceEngineers.Apps.ShipLink
             var settings = Storage.Split('\n');
             _fleetName = settings[0];
             if (settings.Length > 1)
-                long.TryParse(settings[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _workerId);
+                long.TryParse(settings[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _workerId);
             if (settings.Length > 2)
-                long.TryParse(settings[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out _brokerId);
+                long.TryParse(settings[2], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _brokerId);
             LoadWithdrawnMarks(settings);
             const string heartbeatSetting = "GalnetFleetPeer=";
             foreach (var line in Me.CustomData.Split('\n'))
@@ -314,7 +313,7 @@ namespace SpaceEngineers.Apps.ShipLink
             double range;
             if (string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || parts.Length != 2 ||
                 !long.TryParse(parts[0], out target) || !_heartbeatRelays.Contains(target) ||
-                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out range) ||
+                !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out range) ||
                 !(range >= 1 && range <= 5000))
             {
                 Echo("Use hazard scan <configured wingmate relay ID> <1 to 5000 metres>.");
@@ -343,7 +342,7 @@ namespace SpaceEngineers.Apps.ShipLink
             }
 
             var point = hit.HitPosition.Value;
-            var culture = CultureInfo.InvariantCulture;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             var gps = "GPS:Obstacle:" + point.X.ToString("R", culture) + ":" +
                 point.Y.ToString("R", culture) + ":" + point.Z.ToString("R", culture) + ":";
             if (!SendFleetPacket(relay, target, "hazard", gps, ContactLifetime))
@@ -366,7 +365,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private string GetAssistanceGps()
         {
             var position = Me.CubeGrid.GetPosition();
-            var culture = CultureInfo.InvariantCulture;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             return "GPS:Assistance:" + position.X.ToString("R", culture) + ":" +
                 position.Y.ToString("R", culture) + ":" + position.Z.ToString("R", culture) + ":";
         }
@@ -396,7 +395,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private static string MarkKind(FleetContact mark) => mark.Assistance ? "assist" : mark.Hazard ? "hazard" : "contact";
 
         private static string MarkKey(long source, string kind, string name) =>
-            source.ToString(CultureInfo.InvariantCulture) + ":" + kind + (kind == "assist" ? "" : ":" + name);
+            source.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + kind + (kind == "assist" ? "" : ":" + name);
 
         private void WithdrawFleetMark(long source, string kind, string name, long expires, long now)
         {
@@ -529,7 +528,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_antennas.Count == 0 && !heartbeatDue)
                 return;
             var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl) ?? _cockpits.FirstOrDefault();
-            var speed = cockpit == null ? "unknown" : cockpit.GetShipSpeed().ToString("0.0", CultureInfo.InvariantCulture);
+            var speed = cockpit == null ? "unknown" : cockpit.GetShipSpeed().ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
             var payload = "{\"fleet\":" + TaskBusIgcHelper.ToJsonString(_fleetName) +
                 ",\"name\":" + TaskBusIgcHelper.ToJsonString(_shipName.Substring(0, Math.Min(_shipName.Length, 64))) +
                 ",\"speed\":" + TaskBusIgcHelper.ToJsonString(speed) +
@@ -701,7 +700,7 @@ namespace SpaceEngineers.Apps.ShipLink
 
             if (nearest != null)
                 display.AppendLine("COURSE HAZARD | " + nearest.Name + " | " +
-                    soonest.ToString("0.0", CultureInfo.InvariantCulture) + " s ahead | " +
+                    soonest.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s ahead | " +
                     Math.Round(lateral) + " m off course");
         }
 
@@ -726,7 +725,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 var fields = settings[i].Split('|');
                 long deadline;
                 if (fields.Length != 3 || fields[0] != "MARK_CLEAR" ||
-                    !long.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deadline) ||
+                    !long.TryParse(fields[2], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out deadline) ||
                     deadline <= now || deadline - now > ContactLifetime)
                     continue;
                 try
@@ -742,14 +741,14 @@ namespace SpaceEngineers.Apps.ShipLink
         private void SaveSettings()
         {
             var saved = new StringBuilder(_fleetName).Append('\n')
-                .Append(_workerId.ToString(CultureInfo.InvariantCulture)).Append('\n')
-                .Append(_brokerId.ToString(CultureInfo.InvariantCulture));
+                .Append(_workerId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('\n')
+                .Append(_brokerId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             long now = DateTime.UtcNow.Ticks;
             foreach (var withdrawal in _withdrawnMarks)
             {
                 if (withdrawal.Value > now)
                     saved.Append("\nMARK_CLEAR|").Append(TaskBusIgcHelper.EncodeStorage(withdrawal.Key))
-                        .Append('|').Append(withdrawal.Value.ToString(CultureInfo.InvariantCulture));
+                        .Append('|').Append(withdrawal.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
             Storage = saved.ToString();
         }
@@ -781,7 +780,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (!TaskBusIgcHelper.TryGetJsonProperty(payload, "task_id", out value) ||
                 !TaskBusIgcHelper.TryReadJsonString(value, out taskId) ||
                 !TaskBusIgcHelper.TryGetJsonProperty(payload, "lease_epoch", out value) ||
-                !int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch))
+                !int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out epoch))
                 return;
 
             if (eventType != "TASK_ASSIGN")
@@ -840,7 +839,7 @@ namespace SpaceEngineers.Apps.ShipLink
             display.AppendLine($"Ship: {_shipName}");
             display.AppendLine($"Base: {_baseName}");
             if (_workerId != 0)
-                display.AppendLine("Broker: " + (_brokerId == 0 ? "any" : _brokerId.ToString(CultureInfo.InvariantCulture)));
+                display.AppendLine("Broker: " + (_brokerId == 0 ? "any" : _brokerId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             display.AppendLine();
 
             // Connection status
@@ -881,13 +880,13 @@ namespace SpaceEngineers.Apps.ShipLink
                     display.AppendLine($"Details: {_activeTaskDetails}");
                 }
                 if (_requestedAmount.HasValue)
-                    display.AppendLine("Requested: " + _requestedAmount.Value.ToString("G", CultureInfo.InvariantCulture));
+                    display.AppendLine("Requested: " + _requestedAmount.Value.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
                 if (_deliveryPosition.HasValue)
                 {
                     double distance = Vector3D.Distance(Me.CubeGrid.GetPosition(), _deliveryPosition.Value);
                     if (!double.IsInfinity(distance) && !double.IsNaN(distance))
                         display.AppendLine("Range to recorded base: " +
-                            (distance / 1000).ToString("0.000", CultureInfo.InvariantCulture) + " km");
+                            (distance / 1000).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + " km");
                 }
             }
             else

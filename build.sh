@@ -117,9 +117,6 @@ else
       ' "$library" >> "$destination"
     done
 
-    awk '{ gsub(/CultureInfo\.InvariantCulture/, "System.Globalization.CultureInfo.InvariantCulture"); gsub(/NumberStyles\./, "System.Globalization.NumberStyles."); print }' \
-      "$destination" > "$destination.tmp"
-    mv "$destination.tmp" "$destination"
     local namespace="${name//./_}"
     wrap_pb_for_compile_check "$destination" "$namespace"
   }

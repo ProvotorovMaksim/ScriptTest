@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 
 namespace SpaceEngineers.Libs.RadarCore
 {
@@ -88,7 +87,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "MaxRange", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && parsed > 0 && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed > 0 && !double.IsInfinity(parsed))
                 {
                     config.MaxRange = parsed;
                 }
@@ -128,7 +127,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "PlatformSpeedLimitDegreesPerSecond", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && parsed > 0 && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed > 0 && !double.IsInfinity(parsed))
                 {
                     config.PlatformSpeedLimitDegreesPerSecond = parsed;
                 }
@@ -136,7 +135,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "PlatformAzimuthMin", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
                 {
                     config.PlatformAzimuthMin = parsed;
                 }
@@ -144,7 +143,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "PlatformAzimuthMax", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
                 {
                     config.PlatformAzimuthMax = parsed;
                 }
@@ -152,7 +151,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "PlatformElevationMin", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
                 {
                     config.PlatformElevationMin = parsed;
                 }
@@ -160,7 +159,7 @@ namespace SpaceEngineers.Libs.RadarCore
             else if (string.Equals(key, "PlatformElevationMax", StringComparison.OrdinalIgnoreCase))
             {
                 double parsed;
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
+                if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && !double.IsNaN(parsed) && !double.IsInfinity(parsed))
                 {
                     config.PlatformElevationMax = parsed;
                 }

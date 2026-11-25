@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using VRageMath;
 using Sandbox.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
@@ -89,7 +88,7 @@ namespace SpaceEngineers.Apps.Radar
                 default:
                     double range;
                     if (command.StartsWith("range ", StringComparison.OrdinalIgnoreCase) &&
-                        double.TryParse(command.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out range) &&
+                        double.TryParse(command.Substring(6), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out range) &&
                         range > 0 && !double.IsInfinity(range))
                         _config.MaxRange = range;
                     else
@@ -186,8 +185,8 @@ namespace SpaceEngineers.Apps.Radar
             {
                 status += (_contact.IsActive ? "\nContact: " : "\nLast seen: ") +
                     _contact.Name + " [" + _contact.EntityId + "]\nAge: " +
-                    _contact.AgeSecondsAt(now).ToString("0.0", CultureInfo.InvariantCulture) + " s | Range: " +
-                    _contact.Range.ToString("0", CultureInfo.InvariantCulture) + " m";
+                    _contact.AgeSecondsAt(now).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s | Range: " +
+                    _contact.Range.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " m";
                 if (!_contact.IsActive)
                     status += "\nLast position: " + _contact.Position.ToString();
             }

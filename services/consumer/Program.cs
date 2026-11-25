@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
 using VRage.Game.GUI.TextPanel;
 using VRage.Game.ModAPI.Ingame;
 
@@ -75,7 +74,7 @@ namespace SpaceEngineers.Services.Consumer
                 autoAcceptSurvey: string.Equals(ReadSetting("PointAutoSurveyAccept="), "true", StringComparison.OrdinalIgnoreCase));
 
             _routes = new MiningRouteLoader(_consumer, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo,
-                gridId => ReadSetting("HaulerApproach." + gridId.ToString(CultureInfo.InvariantCulture) + "="),
+                gridId => ReadSetting("HaulerApproach." + gridId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "="),
                 CanStartHaulerCruise, GridTerminalSystem.GetBlockWithId,
                 string.Equals(ReadSetting("HaulerAutoDock="), "true", StringComparison.OrdinalIgnoreCase)
                     ? (Action<long>)RequestHaulerApproach : null);
@@ -168,8 +167,8 @@ namespace SpaceEngineers.Services.Consumer
                 Echo("Docking requires an active broker lease with a UTC deadline.");
                 return;
             }
-            if (!RequestFcs("dock leased " + grid.ToString(CultureInfo.InvariantCulture) + " " +
-                deadline.ToString(CultureInfo.InvariantCulture)))
+            if (!RequestFcs("dock leased " + grid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                deadline.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                 return;
 
             _fcsDockLease = _consumer.ConfirmedLeaseIdentity;
@@ -191,7 +190,7 @@ namespace SpaceEngineers.Services.Consumer
                 return;
             }
             _cancelFcsDock |= _fcsDockLease != _consumer.ConfirmedLeaseIdentity;
-            string requestId = _fcsDockRequestId.ToString(CultureInfo.InvariantCulture);
+            string requestId = _fcsDockRequestId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (_cancelFcsDock)
             {
                 if (RequestFcs("dock lease stop " + requestId))
@@ -201,7 +200,7 @@ namespace SpaceEngineers.Services.Consumer
 
             long deadline = Math.Min(_fcsDockLimitUtc, _consumer.ConfirmedLeaseDeadlineUtc);
             if (deadline > _fcsDockDeadlineUtc &&
-                RequestFcs("dock lease refresh " + requestId + " " + deadline.ToString(CultureInfo.InvariantCulture)))
+                RequestFcs("dock lease refresh " + requestId + " " + deadline.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                 _fcsDockDeadlineUtc = deadline;
         }
 
@@ -235,7 +234,7 @@ namespace SpaceEngineers.Services.Consumer
             double radius;
             if (setting == null)
                 return defaultRadius;
-            if (double.TryParse(setting, NumberStyles.Float, CultureInfo.InvariantCulture, out radius) &&
+            if (double.TryParse(setting, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius) &&
                 radius >= 0 && radius <= 1000000)
                 return radius;
             Echo("KnownSiteRadius must be between 0 and 1000000 m. Using 5000 m.");
@@ -375,7 +374,7 @@ namespace SpaceEngineers.Services.Consumer
         private string ReadGridPositionJson()
         {
             var position = Me.CubeGrid.GetPosition();
-            var culture = CultureInfo.InvariantCulture;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             return "{\"x\":" + position.X.ToString("R", culture) +
                 ",\"y\":" + position.Y.ToString("R", culture) +
                 ",\"z\":" + position.Z.ToString("R", culture) + "}";
