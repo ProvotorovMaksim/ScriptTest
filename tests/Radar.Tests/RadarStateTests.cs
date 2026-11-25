@@ -18,6 +18,8 @@ namespace Tests.Radar.Tests
             Assert.AreEqual(5, (int)RadarState.OUT_OF_FOV);
             Assert.AreEqual(6, (int)RadarState.CHARGING);
             Assert.AreEqual(7, (int)RadarState.UNAVAILABLE);
+            Assert.AreEqual(8, (int)RadarState.PARKING);
+            Assert.AreEqual(9, (int)RadarState.PARKED);
         }
 
         [Test]
@@ -33,7 +35,7 @@ namespace Tests.Radar.Tests
             foreach (RadarState rs in Enum.GetValues(typeof(RadarState)))
             {
                 var val = (int)rs;
-                Assert.IsTrue(val >= 0 && val <= 7);
+                Assert.IsTrue(val >= 0 && val <= 9);
             }
         }
     }

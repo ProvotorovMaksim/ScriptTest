@@ -19,6 +19,7 @@ namespace SpaceEngineers.Apps.Radar
         private readonly GimbalController _gimbal;
         private IMyTextPanel _lcd;
         private bool _scanning;
+        private bool _parking;
         private string _scanProblem;
         private RadarState _state = RadarState.IDLE;
 
@@ -36,6 +37,8 @@ namespace SpaceEngineers.Apps.Radar
             var now = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(argument))
                 Command(argument.Trim());
+            else if (_parking)
+                Park();
             else if (_scanning)
                 Scan(now);
             Render(now);
@@ -57,17 +60,21 @@ namespace SpaceEngineers.Apps.Radar
                 case "scan":
                     Discover();
                     _scanProblem = null;
+                    _parking = false;
                     _scanning = true;
                     _state = RadarState.ACQUIRING;
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
                     break;
                 case "unlock":
+                    if (_parking)
+                        StopParking(RadarState.IDLE);
                     _contact.Clear();
                     _gimbal.Stop();
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
                     break;
                 case "off":
                     _scanning = false;
+                    _parking = false;
                     _scanProblem = null;
                     _contact.Clear();
                     _gimbal.Stop();
@@ -76,12 +83,27 @@ namespace SpaceEngineers.Apps.Radar
                     break;
                 case "mode fixed":
                 case "mode gimbal":
+                    if (_parking)
+                        StopParking(RadarState.IDLE);
                     _gimbal.Unbind();
                     _scanProblem = null;
                     _contact.Clear();
                     _config.Mode = command.EndsWith("gimbal", StringComparison.OrdinalIgnoreCase) ? "Gimbal" : "Fixed";
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
                     Discover();
+                    break;
+                case "gimbal park":
+                    if (!IsGimbal)
+                    {
+                        Echo("Switch to gimbal mode before parking.");
+                        break;
+                    }
+                    Discover();
+                    _scanning = false;
+                    _parking = true;
+                    _contact.Clear();
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                    Park();
                     break;
                 case "status":
                     break;
@@ -92,9 +114,28 @@ namespace SpaceEngineers.Apps.Radar
                         range > 0 && !double.IsInfinity(range))
                         _config.MaxRange = range;
                     else
-                        Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, range <meters>");
+                        Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, gimbal park, range <meters>");
                     break;
             }
+        }
+
+        private void Park()
+        {
+            _scanProblem = _gimbal.GetUnavailableReason();
+            if (_scanProblem != null)
+                StopParking(RadarState.UNAVAILABLE);
+            else if (_gimbal.ParkAtZero())
+                StopParking(RadarState.PARKED);
+            else
+                _state = RadarState.PARKING;
+        }
+
+        private void StopParking(RadarState state)
+        {
+            _parking = false;
+            _gimbal.Stop();
+            Runtime.UpdateFrequency = UpdateFrequency.None;
+            _state = state;
         }
 
         private void Scan(DateTime now)

@@ -22,6 +22,8 @@ namespace SpaceEngineers.Libs.RadarCore
         LOST,
         OUT_OF_FOV,
         CHARGING,
-        UNAVAILABLE
+        UNAVAILABLE,
+        PARKING,
+        PARKED
     }
 }

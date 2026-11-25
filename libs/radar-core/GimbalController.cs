@@ -106,6 +106,23 @@ namespace SpaceEngineers.Libs.RadarCore
             _sweep.Advance(GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper), lower, upper);
         }
 
+        public bool ParkAtZero()
+        {
+            bool azimuthParked = ParkAxis(_azimuth, _config.PlatformAzimuthMin, _config.PlatformAzimuthMax);
+            bool elevationParked = ParkAxis(_elevation, _config.PlatformElevationMin, _config.PlatformElevationMax);
+            return azimuthParked && elevationParked;
+        }
+
+        private bool ParkAxis(IMyMotorStator motor, double minimum, double maximum)
+        {
+            double lower = LowerLimit(motor, minimum);
+            double upper = UpperLimit(motor, maximum);
+            double angle = GimbalAngles.InTravelFrame(motor.Angle, lower, upper);
+            double goal = Math.Max(lower, Math.Min(0, upper));
+            DriveTo(motor, angle, goal, lower, upper);
+            return Math.Abs(goal - angle) <= 0.002;
+        }
+
         private static double LowerLimit(IMyMotorStator motor, double minimum) =>
             Math.Max(minimum * Math.PI / 180, motor.LowerLimitRad);
 

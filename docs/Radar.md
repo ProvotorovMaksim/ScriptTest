@@ -26,6 +26,12 @@ measured lock from a predicted contact during a missed measurement. The
 display shows the age of the last measurement and preserves the last
 known coordinates after tracking times out. Use `unlock` to clear them.
 
+Run `gimbal park` to stop scanning and move both axes toward their hardware
+zero angles. If zero is outside an axis's allowed travel, it parks at the
+nearest allowed angle. The display shows `PARKING` during movement and
+`PARKED` once both axes reach their setpoints. Use `off` to stop movement
+or `scan` to resume scanning.
+
 ## Diagnostics and acceptance
 
 If the status is `UNAVAILABLE`, follow the message about camera placement,
@@ -46,3 +52,6 @@ Verify these scenarios in Space Engineers before recording an acceptance result.
    Restore the blocks and run `on` if they were replaced.
 5. Run `off` while tracking and confirm both axes stop. Repeat when switching
    from Gimbal to Fixed.
+6. Park from a nonzero position, first with both zero angles reachable
+   and then with zero outside one axis's limits. Confirm the final
+   setpoints and zero drive velocity. Repeat and interrupt with `off`.
