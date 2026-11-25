@@ -76,8 +76,13 @@ if [[ -n "${release_dir:-}" ]]; then
       printf 'Missing or empty MDK script: %s\n' "$body" >&2
       exit 1
     fi
+    characters="$(wc -m < "$body")"
+    if (( characters > 100000 )); then
+      printf 'MDK script exceeds the 100000-character PB limit: %s (%d characters)\n' "$body" "$characters" >&2
+      exit 1
+    fi
     wrap_pb_for_compile_check "$body" "${name//-/_}"
-    printf 'Validated MDK input: %s\n' "$body"
+    printf 'Validated MDK input: %s (%d characters)\n' "$body" "$characters"
   done
 else
   awk '
