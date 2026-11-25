@@ -642,6 +642,9 @@ below 95% full. The same confirmed lease and reviewed outbound route
 are required. FCS still waits for sufficient battery charge before
 undocking. If no ore was deposited during this unloading session or a
 transfer stalls with ore aboard, automatic unloading does not arm a trip.
+It transfers the portion that fits and retries a stalled transfer once
+per second while docked under the same lease. `mine unload stop` cancels
+the retry.
 
 Set `MiningUnloadTo=<mining point cargo container name>` and run
 `mine unload` while docked there with drills off. Each command transfers

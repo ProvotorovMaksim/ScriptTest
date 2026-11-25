@@ -556,7 +556,7 @@ namespace SpaceEngineers.Apps.Platform
                 if (!MatchesMiningResource(item, resource))
                     continue;
 
-                var quantity = (VRage.MyFixedPoint)Math.Min(remaining, (double)item.Amount);
+                var quantity = InventoryTransfer.AmountThatFits(destination, item, remaining);
                 if ((double)quantity > 0)
                 {
                     source.TransferItemTo(destination, item, quantity);
@@ -581,8 +581,8 @@ namespace SpaceEngineers.Apps.Platform
                 return true;
             }
 
-            Echo("No requested ore transferred. Check cargo, available space and conveyor permissions.");
-            return false;
+            _lastProbe = "No requested ore transferred. Check available space and conveyor permissions.";
+            return completeWhenReady;
         }
 
         private bool IsDockedAtMiningPoint(long grid)
