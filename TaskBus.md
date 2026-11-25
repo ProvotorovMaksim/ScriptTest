@@ -576,9 +576,11 @@ after a supervised retreat reaches its waypoint under the same lease.
 With automatic retreat also enabled, a settled platform already within
 2 m of the validated retreat waypoint can start return without a separate
 backward leg.
-The platform must settle within 2 m of that waypoint. The usual
-`mine return` checks still apply, including an exact match to the
-reviewed reverse route. A failed start requires operator intervention.
+The platform must settle within 2 m of that waypoint. If `[AMN RETURN]`
+is empty, automatic return loads the reviewed outbound corridor in
+reverse order, omitting the ore approach waypoint. An existing return
+route must match that sequence exactly. The usual `mine return` flight
+checks still apply. A failed start requires operator intervention.
 `ore stop` cancels the pending return.
 
 After returning to the assigned mining point, stop the drills and enter

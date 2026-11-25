@@ -371,7 +371,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        public void LoadReturnRoute(Action<IMyRemoteControl> start = null)
+        public void LoadReturnRoute(Action<IMyRemoteControl> start = null, bool prepare = false)
         {
             string taskId;
             double x;
@@ -413,10 +413,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
                 _returnWaypoints.Clear();
                 inbound.GetWaypointInfo(_returnWaypoints);
+                bool loadWaypoints = _returnWaypoints.Count == 0 && (start == null || prepare);
                 if (start != null)
                 {
-                    if (inbound.FlightMode != FlightMode.OneWay || _returnWaypoints.Count != _routeWaypoints.Count - 1 ||
-                        Vector3D.DistanceSquared(outbound.GetPosition(), last.Coords) > 100)
+                    if (inbound.FlightMode != FlightMode.OneWay ||
+                        Vector3D.DistanceSquared(outbound.GetPosition(), last.Coords) > 100 ||
+                        (!loadWaypoints && _returnWaypoints.Count != _routeWaypoints.Count - 1))
                     {
                         _echo("Return requires a prepared One Way controller and the ship within 10 m of the ore approach.");
                         return;
@@ -431,22 +433,28 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                             return;
                         }
                     }
-                    start(inbound);
-                    return;
                 }
-                if (_returnWaypoints.Count != 0)
+                else if (!loadWaypoints)
                 {
                     _echo("Clear " + ReturnControllerName + " waypoints before loading a return route.");
                     return;
                 }
 
-                writing = true;
-                for (int i = _routeWaypoints.Count - 2; i >= 0; i--)
+                if (loadWaypoints)
                 {
-                    var waypoint = _routeWaypoints[i];
-                    inbound.AddWaypoint(waypoint.Coords, waypoint.Name);
+                    writing = true;
+                    for (int i = _routeWaypoints.Count - 2; i >= 0; i--)
+                    {
+                        var waypoint = _routeWaypoints[i];
+                        inbound.AddWaypoint(waypoint.Coords, waypoint.Name);
+                    }
+                    writing = false;
                 }
-                _echo("Return route loaded. Review it before enabling autopilot.");
+
+                if (start != null)
+                    start(inbound);
+                else
+                    _echo("Return route loaded. Review it before enabling autopilot.");
             }
             catch (Exception error)
             {

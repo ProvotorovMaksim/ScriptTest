@@ -1628,7 +1628,7 @@ namespace SpaceEngineers.Apps.Platform
             }
         }
 
-        private void StartMiningCruise(bool returning)
+        private void StartMiningCruise(bool returning, bool prepareReturn = false)
         {
             if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 || !CanStartPlatformFlight())
             {
@@ -1637,7 +1637,7 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             if (returning)
-                _routes.LoadReturnRoute(StartMiningReturnFlight);
+                _routes.LoadReturnRoute(StartMiningReturnFlight, prepare: prepareReturn);
             else
                 _routes.LoadMiningApproach(StartMiningApproachFlight);
         }
@@ -2167,7 +2167,7 @@ namespace SpaceEngineers.Apps.Platform
                 Vector3D.DistanceSquared(remote.GetPosition(), _miningPassEndpoint) <= 4)
             {
                 _pendingReturnLease = null;
-                StartMiningCruise(returning: true);
+                StartMiningCruise(returning: true, prepareReturn: true);
             }
             else if (++_returnSettleUpdates >= 30)
             {
