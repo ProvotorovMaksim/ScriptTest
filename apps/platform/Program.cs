@@ -1455,6 +1455,8 @@ namespace SpaceEngineers.Apps.Platform
             double minimumGap = 2 * MinimumViewSeparation;
             foreach (var view in _surveyViews)
             {
+                if (Runtime.CurrentInstructionCount >= Runtime.MaxInstructionCount / 2)
+                    break;
                 if (view.FoundOre != true)
                     continue;
 
@@ -1462,18 +1464,21 @@ namespace SpaceEngineers.Apps.Platform
                 Vector3D? next = null;
                 foreach (var noReport in noReports)
                 {
+                    if (Runtime.CurrentInstructionCount >= Runtime.MaxInstructionCount / 2)
+                        break;
                     double gapSquared = Vector3D.DistanceSquared(view.Position, noReport);
-                    if (gapSquared > bestGapSquared)
+                    if (gapSquared > bestGapSquared || gapSquared < minimumGap * minimumGap)
                         continue;
-                    next = view.Position + (noReport - view.Position) * 0.5;
+                    var midpoint = view.Position + (noReport - view.Position) * 0.5;
+                    var waypoint = midpoint + remoteOffset;
+                    if (!IsNewSurveyPosition(midpoint) || IsNearPlannedSurveyPosition(waypoint, planned))
+                        continue;
+                    next = waypoint;
                     bestGapSquared = gapSquared;
                 }
-                if (!next.HasValue || bestGapSquared < minimumGap * minimumGap || !IsNewSurveyPosition(next.Value))
+                if (!next.HasValue)
                     continue;
-                var waypoint = next.Value + remoteOffset;
-                if (IsNearPlannedSurveyPosition(waypoint, planned))
-                    continue;
-                planned.Add(waypoint);
+                planned.Add(next.Value);
                 if (planned.Count == maxPoints)
                     break;
             }
