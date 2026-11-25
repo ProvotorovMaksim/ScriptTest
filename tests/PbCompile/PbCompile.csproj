@@ -3,9 +3,10 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>6</LangVersion>
+    <PbCheckInputs Condition="'$(PbCheckInputs)' == ''">../../build/pb-check</PbCheckInputs>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../build/pb-check/*.cs" />
+    <Compile Include="$(PbCheckInputs)/*.cs" />
   </ItemGroup>
 </Project>

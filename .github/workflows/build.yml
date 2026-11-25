@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet --info | tee build/logs/dotnet.log
-          bash build.sh 2>&1 | tee build/logs/build.log
+          bash build.sh --mdk-release 2>&1 | tee build/logs/build.log
 
       - name: Upload validated build and results
         uses: actions/upload-artifact@v4
@@ -104,12 +104,11 @@ jobs:
             build/output/services/producer/producer/TaskProducer.dll
             build/output/apps/amn/amn/AMN.Base.dll
             build/output/apps/fcs/fcs/FlightControl.dll
-            build/output/**/*.pb.cs
+            build/mdk-scripts/*/script.cs
             build/output/apps/sample/sample/SampleMain.dll
             build/output/apps/ship-link/ship-link/ShipLink.dll
             build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll
             build/output/apps/radar/radar/Radar.dll
-            build/output/apps/radar/radar/Radar.pb.cs
 
       - name: Upload failed build diagnostics
         if: failure()
