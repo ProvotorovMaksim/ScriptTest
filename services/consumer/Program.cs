@@ -130,7 +130,9 @@ namespace SpaceEngineers.Services.Consumer
             if (_autoDepart && (updateSource & UpdateType.Update10) != 0 && ++_departureTicks >= 12)
             {
                 _departureTicks = 0;
-                if (_consumer.CanDepartHaulerPickup())
+                if (_consumer.CanDepartHaulerPickup() ||
+                    (_autoCruise && _consumer.SupervisedCruiseRemote == 0 && _fcsDockLease == null &&
+                        _consumer.CanDepartHaulerBase() && _routes.LoadStationApproach(startCruise: false, prepare: true)))
                     RequestFcs("dock depart ready");
             }
             CheckLeasedHaulerDock();
@@ -145,7 +147,7 @@ namespace SpaceEngineers.Services.Consumer
             if (!connected)
                 status = (viaGalnet ? "Galnet relay unavailable or misconfigured.\n" : "Radio unavailable.\n") + status;
             if (_autoDepart)
-                status += "\nAutomatic pickup departure enabled.";
+                status += "\nAutomatic departure enabled.";
             if (_autoCruise)
                 status += "\nAutomatic hauler cruise enabled.";
             Echo(status);

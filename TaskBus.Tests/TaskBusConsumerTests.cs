@@ -234,6 +234,7 @@ namespace TaskBus.Tests
             Assert.True(pickup);
             Assert.Equal(500, grid);
             Assert.False(hauler.CanDepartHaulerPickup());
+            Assert.False(hauler.CanDepartHaulerBase());
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
 
@@ -245,6 +246,7 @@ namespace TaskBus.Tests
             Assert.Contains("Stage: pickup", hauler.GetStatus());
             cargo = 75;
             dockedGrid = 600;
+            Assert.True(hauler.CanDepartHaulerBase());
             hauler.ProcessCommand("stage pickup");
             Assert.Contains("Stage: pickup", hauler.GetStatus());
             dockedGrid = 500;
@@ -253,6 +255,7 @@ namespace TaskBus.Tests
             Assert.Contains("Stage: deliver", hauler.GetStatus());
             Assert.False(hauler.TryGetHaulerDestination(out _, out _, out _));
             Assert.False(hauler.CanDepartHaulerPickup());
+            Assert.False(hauler.CanDepartHaulerBase());
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());
             hauler.ProcessIncomingMessage(1, assignment);
@@ -262,6 +265,7 @@ namespace TaskBus.Tests
             Assert.True(hauler.CanDepartHaulerPickup());
             dockedGrid = 600;
             Assert.False(hauler.CanDepartHaulerPickup());
+            Assert.False(hauler.CanDepartHaulerBase());
             cargo = null;
             hauler.ProcessCommand("stage deliver");
             Assert.Contains("Pending completion: none", hauler.GetStatus());

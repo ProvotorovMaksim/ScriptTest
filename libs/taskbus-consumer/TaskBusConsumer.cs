@@ -1105,6 +1105,17 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _readDockedGrid() == pickupGrid;
         }
 
+        public bool CanDepartHaulerBase()
+        {
+            string taskId;
+            bool pickup;
+            long pickupGrid;
+            long baseGrid;
+            return _readDockedGrid != null && TryGetHaulerDestination(out taskId, out pickup, out pickupGrid) &&
+                pickup && TryReadHaulerGrid(false, out baseGrid) && baseGrid != pickupGrid &&
+                _readDockedGrid() == baseGrid;
+        }
+
         private bool TryReadHaulerGrid(bool pickup, out long grid)
         {
             grid = 0;

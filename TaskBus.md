@@ -516,6 +516,10 @@ command after charging. For automatic retries, set `HaulerAutoDepart=true` or ru
 connection before each request. Use `route stop` to suspend automatic
 departure for the current session. Enable `HaulerAutoCruise=true` to
 continue into the prepared delivery leg after departure.
+With both automatic options enabled, a hauler docked at the assigned
+base also prepares the pickup route on a confirmed pickup lease and
+requests charge-gated departure. A missing or mismatched pickup route
+keeps it docked.
 
 ### AMN platform worker
 

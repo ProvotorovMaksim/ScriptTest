@@ -155,7 +155,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
-        public void LoadStationApproach(bool startCruise, bool prepare = false)
+        public bool LoadStationApproach(bool startCruise, bool prepare = false)
         {
             string taskId;
             bool pickup;
@@ -163,7 +163,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (!_worker.TryGetHaulerDestination(out taskId, out pickup, out grid))
             {
                 _echo("A confirmed hauler lease with an assigned station is required.");
-                return;
+                return false;
             }
 
             string name;
@@ -173,16 +173,29 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             if (!TaskBusIgcHelper.TryReadOreGps(_findStationApproach(grid), out name, out x, out y, out z))
             {
                 _echo("Set HaulerApproach." + grid + "=GPS:Name:X:Y:Z: for the assigned station.");
-                return;
+                return false;
             }
 
             string controller = pickup ? "[AMN PICKUP]" : "[AMN DELIVERY]";
             string waypoint = RouteWaypointPrefix + taskId;
             var position = new Vector3D(x, y, z);
+            if (prepare && !startCruise)
+            {
+                try
+                {
+                    return PrepareAssignedApproach(controller, waypoint, position, allowNewPosition: false);
+                }
+                catch (Exception error)
+                {
+                    _echo("Could not prepare station approach: " + error.Message);
+                    return false;
+                }
+            }
             if (startCruise)
                 StartPreparedCruise(controller, waypoint, position, pickup, grid, prepare);
             else
                 AppendApproach(controller, waypoint, position);
+            return true;
         }
 
         private void StartPreparedCruise(string controller, string waypoint, Vector3D position, bool pickup, long grid,
