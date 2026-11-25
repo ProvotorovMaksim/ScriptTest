@@ -147,6 +147,7 @@ namespace SpaceEngineers.Apps.ShipLink
                     long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
                     _heartbeatRelays.Add(peer);
             }
+            RestoreWeaponProfile(settings);
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
@@ -261,6 +262,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (_showWeaponSettings && _weaponProfiles.Count > 0)
                 {
                     _weaponSelected = _weaponCursor;
+                    SaveSettings();
                     _showWeaponSettings = false;
                     _displayTick = DisplayUpdateIntervalTicks;
                 }
@@ -392,7 +394,9 @@ namespace SpaceEngineers.Apps.ShipLink
                     System.Globalization.CultureInfo.InvariantCulture, out speed) ||
                 !(speed > 0 && speed <= 100000))
                 return;
-            _weaponProfiles.Add(new WeaponProfile { Name = fields[0].Trim(), Speed = speed });
+            string name = fields[0].Trim();
+            if (!_weaponProfiles.Any(profile => string.Equals(profile.Name, name, StringComparison.OrdinalIgnoreCase)))
+                _weaponProfiles.Add(new WeaponProfile { Name = name, Speed = speed });
         }
 
         private void MovePilotSelection(int step)
@@ -1243,6 +1247,23 @@ namespace SpaceEngineers.Apps.ShipLink
             }
         }
 
+        private void RestoreWeaponProfile(string[] settings)
+        {
+            const string prefix = "WEAPON_PROFILE|";
+            foreach (var line in settings)
+            {
+                if (!line.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
+                try
+                {
+                    var name = TaskBusIgcHelper.DecodeStorage(line.Substring(prefix.Length));
+                    _weaponSelected = _weaponProfiles.FindIndex(profile =>
+                        string.Equals(profile.Name, name, StringComparison.OrdinalIgnoreCase));
+                }
+                catch (FormatException) { }
+            }
+        }
+
         private void SaveSettings()
         {
             var saved = new StringBuilder(_fleetName).Append('\n')
@@ -1255,6 +1276,9 @@ namespace SpaceEngineers.Apps.ShipLink
                     saved.Append("\nMARK_CLEAR|").Append(TaskBusIgcHelper.EncodeStorage(withdrawal.Key))
                         .Append('|').Append(withdrawal.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
+            if (_weaponSelected >= 0)
+                saved.Append("\nWEAPON_PROFILE|")
+                    .Append(TaskBusIgcHelper.EncodeStorage(_weaponProfiles[_weaponSelected].Name));
             Storage = saved.ToString();
         }
 

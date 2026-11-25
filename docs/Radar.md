@@ -158,8 +158,9 @@ while its measurement is at most two seconds old.
 
 In `manual`, FCS displays yaw and pitch to the lead point on
 `[FCS STATUS]`. This calculation assumes constant relative velocity
-and inherited ship velocity. Profile and contact selections are
-session settings.
+and inherited ship velocity. The selected profile is restored by name
+after a recompile or restart if that profile is still configured.
+Select the active contact again after restarting ShipLink.
 
 On FCS, `aimassist` applies limited corrections within 20 degrees on
 each axis while the pilot leaves the rotation controls neutral.
