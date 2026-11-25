@@ -51,6 +51,7 @@ namespace SpaceEngineers.Apps.Platform
         private readonly bool _autoMiningDepart;
         private readonly bool _autoMiningStart;
         private string _automaticMiningStartLease;
+        private string _stoppedMiningStartLease;
         private int _miningStartRetryUpdates;
         private int _miningDepartureUpdates;
         private long _armedMiningCruiseRemote;
@@ -96,6 +97,7 @@ namespace SpaceEngineers.Apps.Platform
         private const int MaxSurveyViews = 64;
         private const int MaxOreHits = 256;
         private const string SurveyStorageMarker = "\nAMN_SURVEY_V1\n";
+        private const string MiningStopPrefix = "AMN_MINING_STOP|";
         private string _workerStorage;
         private string _surveyStorage = "";
         private readonly List<SurveyView> _surveyViews = new List<SurveyView>();
@@ -197,11 +199,29 @@ namespace SpaceEngineers.Apps.Platform
                 () => GridTerminalSystem.GetBlockWithName(GalnetWorkerBridge.RelayName) as IMyProgrammableBlock,
                 (envelope, _) => IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax),
                 message => Echo(message));
-            int surveyStart = Storage.IndexOf(SurveyStorageMarker, StringComparison.Ordinal);
-            _workerStorage = surveyStart < 0 ? Storage : Storage.Substring(0, surveyStart);
+            string savedStorage = Storage;
+            if (savedStorage.StartsWith(MiningStopPrefix, StringComparison.Ordinal))
+            {
+                int end = savedStorage.IndexOf('\n');
+                if (end >= 0)
+                {
+                    try
+                    {
+                        _stoppedMiningStartLease = TaskBusIgcHelper.DecodeStorage(
+                            savedStorage.Substring(MiningStopPrefix.Length, end - MiningStopPrefix.Length));
+                    }
+                    catch (FormatException)
+                    {
+                        Echo("Saved mining stop lease could not be read.");
+                    }
+                    savedStorage = savedStorage.Substring(end + 1);
+                }
+            }
+            int surveyStart = savedStorage.IndexOf(SurveyStorageMarker, StringComparison.Ordinal);
+            _workerStorage = surveyStart < 0 ? savedStorage : savedStorage.Substring(0, surveyStart);
             if (surveyStart >= 0)
             {
-                _surveyStorage = Storage.Substring(surveyStart);
+                _surveyStorage = savedStorage.Substring(surveyStart);
                 LoadSurvey(_surveyStorage.Substring(SurveyStorageMarker.Length));
             }
 
@@ -210,7 +230,7 @@ namespace SpaceEngineers.Apps.Platform
                 () => _workerStorage, value =>
                 {
                     _workerStorage = value;
-                    Storage = _workerStorage + _surveyStorage;
+                    SavePlatformStorage();
                 }, message => Echo(message),
                 Me.EntityId, Me.CubeGrid.CustomName, miningPlatform: true);
             _routes = new MiningRouteLoader(_worker, Me.CubeGrid, GridTerminalSystem.GetBlockWithName, Echo);
@@ -299,7 +319,14 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
                 _autoMiningUnload = false;
-                _automaticMiningStartLease = _worker.ConfirmedLeaseIdentity;
+                var lease = _worker.ConfirmedLeaseIdentity;
+                if (lease != null)
+                {
+                    _stoppedMiningStartLease = lease;
+                    SavePlatformStorage();
+                }
+                if (_drillingLease != null)
+                    StopManagedDrills();
                 string surveyOre;
                 _worker.TryGetSurveyLease(out _suppressedAutomaticSurveyLease, out surveyOre);
                 CheckLeasedMiningDock(cancel: true);
@@ -945,7 +972,14 @@ namespace SpaceEngineers.Apps.Platform
                 saved.AppendLine(FormatSurveyGps("reportView", _reportView.Value));
             }
             _surveyStorage = saved.ToString();
-            Storage = _workerStorage + _surveyStorage;
+            SavePlatformStorage();
+        }
+
+        private void SavePlatformStorage()
+        {
+            var stoppedLease = _stoppedMiningStartLease == null ? "" :
+                MiningStopPrefix + TaskBusIgcHelper.EncodeStorage(_stoppedMiningStartLease) + "\n";
+            Storage = stoppedLease + _workerStorage + _surveyStorage;
         }
 
         private void ShowSurveySamples()
@@ -1522,7 +1556,8 @@ namespace SpaceEngineers.Apps.Platform
 
             var lease = _worker.ConfirmedLeaseIdentity;
             long grid;
-            if (lease == null || lease == _automaticMiningStartLease || _worker.MiningDeposited > 0 ||
+            if (lease == null || lease == _automaticMiningStartLease || lease == _stoppedMiningStartLease ||
+                _worker.MiningDeposited > 0 ||
                 !_worker.TryGetMiningPoint(out grid) || !IsDockedAtMiningPoint(grid))
                 return;
 

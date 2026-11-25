@@ -349,8 +349,9 @@ to the assigned approach must be clear. The platform appends the
 assignment's GPS or replaces the previous generated final waypoint.
 While it remains docked under that lease, it retries the preparation
 about every two seconds until it arms successfully. It arms the first
-trip only once per lease per PB session. `ore stop` suppresses automatic
-start for the confirmed lease until the PB is restarted.
+trip only once per lease per PB session. `ore stop` stops managed drills
+and suppresses automatic start for the confirmed lease across PB
+restarts. Use `mine cruise arm` to restart a stopped assignment manually.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This
