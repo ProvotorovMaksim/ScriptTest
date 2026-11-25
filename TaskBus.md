@@ -594,6 +594,14 @@ automatic unloading and completion checks. `mine unload stop` cancels the
 wait or stops an ongoing unload. Configure both cargo container names.
 The pending wait does not survive a PB restart.
 
+Set `MiningAutoRepeat=true` alongside `MiningAutoDepart=true` to have
+automatic unloading arm another trip if it recorded a partial deposit,
+the requested ore is gone from the local container, and the container is
+below 95% full. The same confirmed lease and reviewed outbound route
+are required. FCS still waits for sufficient battery charge before
+undocking. If no ore was deposited during this unloading session or a
+transfer stalls with ore aboard, automatic unloading does not arm a trip.
+
 Set `MiningUnloadTo=<mining point cargo container name>` and run
 `mine unload` while docked there with drills off. Each command transfers
 up to one stack of the requested resource from `MiningCargo` into the

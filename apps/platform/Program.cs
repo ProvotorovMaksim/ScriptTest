@@ -25,6 +25,8 @@ namespace SpaceEngineers.Apps.Platform
         private bool _autoMiningUnload;
         private string _autoMiningUnloadLease;
         private int _miningUnloadTicks;
+        private double _miningUnloadStartDeposit;
+        private readonly bool _autoMiningRepeat;
         private readonly string _miningCargoName;
         private readonly double? _miningLaneRadius;
         private readonly string _miningUnloadTo;
@@ -183,6 +185,7 @@ namespace SpaceEngineers.Apps.Platform
                 _miningLaneRadius = double.TryParse(laneSetting, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius)
                     && radius >= 1 && radius <= 100 ? radius : double.NaN;
             }
+            _autoMiningRepeat = string.Equals(ReadSetting("MiningAutoRepeat="), "true", StringComparison.OrdinalIgnoreCase);
             _miningUnloadTo = ReadSetting("MiningUnloadTo=");
             _unloadOnDock = string.Equals(ReadSetting("MiningAutoUnloadOnDock="), "true", StringComparison.OrdinalIgnoreCase);
             _listener = IGC.RegisterBroadcastListener(Channel);
@@ -424,6 +427,7 @@ namespace SpaceEngineers.Apps.Platform
         {
             _miningUnloadTicks = 0;
             _autoMiningUnloadLease = _worker.ConfirmedLeaseIdentity;
+            _miningUnloadStartDeposit = _worker.MiningDeposited;
             _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
         }
 
@@ -497,6 +501,19 @@ namespace SpaceEngineers.Apps.Platform
 
             double bufferBefore = MeasureMiningCargo(destination, resource);
             double before = MeasureMiningCargo(source, resource);
+            if (before <= 0)
+            {
+                if (completeWhenReady && _autoMiningRepeat && _autoMiningDepart &&
+                    _worker.MiningDeposited > _miningUnloadStartDeposit &&
+                    (double)source.CurrentVolume < 0.95 * (double)source.MaxVolume)
+                {
+                    Echo("Partial deposit recorded. Checking the reviewed route for another trip.");
+                    ArmMiningCruise();
+                }
+                else
+                    Echo("No requested ore left aboard. The mining assignment still needs another deposit.");
+                return false;
+            }
             double attempted = 0;
             foreach (var item in _miningItems)
             {
