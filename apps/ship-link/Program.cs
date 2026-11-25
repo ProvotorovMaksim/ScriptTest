@@ -70,13 +70,18 @@ namespace SpaceEngineers.Apps.ShipLink
         private string _journalSelection;
         private sealed class PendingObservation
         {
-            public string Gps;
+            public string Kind;
+            public string Payload;
+            public long Lifetime;
             public long Expires;
             public readonly HashSet<long> Peers = new HashSet<long>();
         }
         private readonly Dictionary<string, PendingObservation> _pendingObservations =
             new Dictionary<string, PendingObservation>();
         private bool _autoTurret;
+        private bool _autoAi;
+        private long _nextAiSample;
+        private const long AiDetectionLifetime = 5 * TimeSpan.TicksPerSecond;
         private long _nextTurretSample;
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
@@ -127,6 +132,8 @@ namespace SpaceEngineers.Apps.ShipLink
                     ReadWeaponProfile(line.Substring(profileSetting.Length));
                 if (string.Equals(line.Trim(), "ShareTurretContacts=true", StringComparison.OrdinalIgnoreCase))
                     _autoTurret = true;
+                if (string.Equals(line.Trim(), "ShareAiDetections=true", StringComparison.OrdinalIgnoreCase))
+                    _autoAi = true;
                 long peer;
                 if (_heartbeatRelays.Count < 4 && line.StartsWith(heartbeatSetting, StringComparison.OrdinalIgnoreCase) &&
                     long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
@@ -154,6 +161,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (command.Length == 0)
             {
                 SampleTurret();
+                SampleAi();
                 FlushObservations();
             }
             _tick++;
@@ -457,10 +465,16 @@ namespace SpaceEngineers.Apps.ShipLink
             if (gps.Length > 200)
                 return;
             long now = DateTime.UtcNow.Ticks;
-            if (!RecordFleetMark(Me.EntityId, "contact", gps, now + ContactLifetime, now) ||
-                string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || _heartbeatRelays.Count == 0)
+            if (RecordFleetMark(Me.EntityId, "contact", gps, now + ContactLifetime, now))
+                QueueObservation(source, "contact", gps, ContactLifetime, now);
+        }
+
+        private void QueueObservation(string source, string kind, string payload, long lifetime, long now)
+        {
+            if (string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || _heartbeatRelays.Count == 0)
                 return;
-            var observation = new PendingObservation { Gps = gps, Expires = now + 2 * TimeSpan.TicksPerSecond };
+            var observation = new PendingObservation { Kind = kind, Payload = payload, Lifetime = lifetime,
+                Expires = now + 2 * TimeSpan.TicksPerSecond };
             observation.Peers.UnionWith(_heartbeatRelays);
             _pendingObservations[source] = observation;
         }
@@ -483,7 +497,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (relay == null)
                     continue;
                 foreach (long peer in observation.Peers.ToArray())
-                    if (peer == relay.EntityId || SendFleetPacket(relay, peer, "contact", observation.Gps, ContactLifetime))
+                    if (peer == relay.EntityId || SendFleetPacket(relay, peer, observation.Kind, observation.Payload, observation.Lifetime))
                         observation.Peers.Remove(peer);
                 if (observation.Peers.Count == 0)
                     _pendingObservations.Remove(entry.Key);
@@ -571,22 +585,46 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
-            var block = GridTerminalSystem.GetBlockWithName("[SHIPLINK AI]") as IMyOffensiveCombatBlock;
-            if (block == null || !block.IsWorking || block.CubeGrid != Me.CubeGrid)
-            {
-                Echo("A working local [SHIPLINK AI] offensive block is required.");
-                return;
-            }
-
-            var search = block.SearchEnemyComponent;
-            long entityId = search?.FoundEnemyId ?? 0;
+            long entityId = ReadAiDetection();
             if (entityId == 0)
             {
-                Echo("The offensive AI has no current detection.");
+                Echo("A working local [SHIPLINK AI] with a current detection is required.");
                 return;
             }
 
-            SendFleetMark(relay, "ai-detection", entityId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var fleetRelay = FindGalnetRelay();
+            if (fleetRelay == null || !SendFleetPacket(fleetRelay, relay, "ai-detection",
+                entityId.ToString(System.Globalization.CultureInfo.InvariantCulture), AiDetectionLifetime))
+                Echo("Could not hand the AI detection to the local Galnet relay.");
+        }
+
+        private long ReadAiDetection()
+        {
+            var block = GridTerminalSystem.GetBlockWithName("[SHIPLINK AI]") as IMyOffensiveCombatBlock;
+            if (block == null || !block.IsWorking || block.CubeGrid != Me.CubeGrid)
+                return 0;
+            return block.SearchEnemyComponent?.FoundEnemyId ?? 0;
+        }
+
+        private void SampleAi()
+        {
+            if (!_autoAi)
+                return;
+            long now = DateTime.UtcNow.Ticks;
+            if (now < _nextAiSample)
+                return;
+            _nextAiSample = now + 2 * TimeSpan.TicksPerSecond;
+
+            long id = ReadAiDetection();
+            if (id == 0)
+            {
+                _aiDetections.Remove(Me.EntityId);
+                _pendingObservations.Remove("AI");
+                return;
+            }
+            _aiDetections[Me.EntityId] = new AiDetection { EntityId = id, Expires = now + AiDetectionLifetime };
+            QueueObservation("AI", "ai-detection",
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture), AiDetectionLifetime, now);
         }
 
         private void ShareCockpitContact(string argument)
@@ -1329,7 +1367,8 @@ namespace SpaceEngineers.Apps.ShipLink
             foreach (var detection in _aiDetections.Where(pair => pair.Value.Expires <= now).Select(pair => pair.Key).ToArray())
                 _aiDetections.Remove(detection);
             foreach (var detection in _aiDetections.OrderBy(pair => pair.Key))
-                display.AppendLine("AI detection from " + detection.Key + ": " + detection.Value.EntityId + " (ID only)");
+                display.AppendLine("AI detection from " + (detection.Key == Me.EntityId ? "local" : detection.Key.ToString()) +
+                    ": " + detection.Value.EntityId + " (ID only)");
 
             if (_weaponSelected >= 0)
                 display.AppendLine("Weapon profile: " + _weaponProfiles[_weaponSelected].Name);

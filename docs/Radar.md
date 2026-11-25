@@ -87,7 +87,9 @@ Name a local offensive AI block `[SHIPLINK AI]`. Configure the other
 ship's relay as a fleet heartbeat peer on each side. Run
 `contact ai <recipient relay ID>` on ShipLink to send the ID reported by
 the AI. The receiving display labels it as an ID-only detection. The
-offensive AI may report a block or character ID. Radar acquisition
+offensive AI may report a block or character ID. Set
+`ShareAiDetections=true` in ShipLink Custom Data for automatic reports
+every two seconds. Reports expire after five seconds without renewal. Radar acquisition
 requires a separate observation with measured coordinates.
 
 ## Acquiring a fleet mark
