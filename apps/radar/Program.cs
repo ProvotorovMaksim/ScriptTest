@@ -192,6 +192,37 @@ case "off":
                         Echo($"Current gimbal elevation: {_gimbalController.GetElevation():0.##}°");
                     }
                     break;
+#endregion
+
+        #region Error Handling and Safety
+
+        private void SafeRaycast(IMyCameraBlock camera)
+        {
+            try
+            {
+                if (camera == null) return;
+                camera.EnableRaycast = true;
+            }
+            catch
+            {
+                // Camera may be destroyed or disabled
+                Echo("Camera operation failed (block may be damaged or removed).");
+            }
+        }
+
+        private void SafeLcdWrite()
+        {
+            try
+            {
+                _lcdPanel?.WriteText(_lcdText.ToString(), writePublic: false);
+            }
+            catch
+            {
+                // LCD may be removed or disabled
+            }
+        }
+
+        #endregion
                     }
                     else
                     {
