@@ -543,9 +543,12 @@ Planning leaves the controller idle and preserves manually loaded routes.
 Stop the drills, align the controller's rear with the approach and run `mine retreat`.
 Supervision stops retreat on lease loss, lane exit, excessive speed or
 lack of progress. Use `ore stop` to cancel the supervised flight.
-Set `MiningAutoRetreat=true` to attempt the reviewed retreat once when
-a supervised pass ends within 2 m of its endpoint and the ship settles.
-Automatic retreat uses the same start checks as `mine retreat`. Fault
+Set `MiningAutoRetreat=true` to attempt a retreat once when a supervised
+pass ends within 2 m of its endpoint and the ship settles. If the retreat
+controller is empty or holds a single generated waypoint, the platform
+loads the assigned approach adjusted for the two controllers' offset.
+It preserves manually loaded routes and runs the same lane, alignment
+and flight checks as `mine retreat` before engaging autopilot. Fault
 stops and PB restarts require a manual decision. Use `ore stop` or
 `mine drills off` to cancel a pending automatic retreat.
 

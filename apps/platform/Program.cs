@@ -1785,7 +1785,7 @@ namespace SpaceEngineers.Apps.Platform
             Echo("Review the retreat path and alignment before running mine retreat.");
         }
 
-        private void StartMiningRetreat()
+        private void StartMiningRetreat(bool automatic = false)
         {
             string taskId;
             double x;
@@ -1805,22 +1805,27 @@ namespace SpaceEngineers.Apps.Platform
 
             _surveyWaypoints.Clear();
             remote.GetWaypointInfo(_surveyWaypoints);
-            if (_surveyWaypoints.Count != 1)
+            var approach = new Vector3D(x, y, z);
+            bool generateWaypoint = automatic && (_surveyWaypoints.Count == 0 ||
+                (_surveyWaypoints.Count == 1 && _surveyWaypoints[0].Name == MiningRetreatWaypointName));
+            if (!generateWaypoint && _surveyWaypoints.Count != 1)
             {
                 Echo("Configure exactly one reviewed retreat waypoint.");
                 return;
             }
-            var waypoint = _surveyWaypoints[0];
-            var approach = new Vector3D(x, y, z);
+
             var expected = approach;
-            if (waypoint.Name == MiningRetreatWaypointName && !TryGetMiningRetreatEndpoint(remote, approach, out expected))
+            if ((generateWaypoint || _surveyWaypoints[0].Name == MiningRetreatWaypointName) &&
+                !TryGetMiningRetreatEndpoint(remote, approach, out expected))
                 return;
-            if (Vector3D.DistanceSquared(waypoint.Coords, expected) > 1)
+
+            var endpoint = generateWaypoint ? expected : _surveyWaypoints[0].Coords;
+            if (Vector3D.DistanceSquared(endpoint, expected) > 1)
             {
                 Echo("The retreat waypoint does not match the assigned approach and current alignment.");
                 return;
             }
-            var toApproach = waypoint.Coords - remote.GetPosition();
+            var toApproach = endpoint - remote.GetPosition();
             if (toApproach.LengthSquared() <= 4 ||
                 Vector3D.Dot(Vector3D.Normalize(toApproach), remote.WorldMatrix.Backward) < 0.996)
             {
@@ -1828,8 +1833,13 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            if (generateWaypoint)
+            {
+                remote.ClearWaypoints();
+                remote.AddWaypoint(endpoint, MiningRetreatWaypointName);
+            }
             _platformMiningRetreat = true;
-            _miningPassEndpoint = _surveyWaypoints[0].Coords;
+            _miningPassEndpoint = endpoint;
             _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
             StartPlatformFlight(remote, "Mining retreat", false);
             if (_worker.SupervisedCruiseRemote == 0)
@@ -2014,7 +2024,7 @@ namespace SpaceEngineers.Apps.Platform
             if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking && remote.GetShipSpeed() <= 0.25)
             {
                 _pendingRetreatLease = null;
-                StartMiningRetreat();
+                StartMiningRetreat(automatic: true);
             }
             else if (++_retreatSettleUpdates >= 30)
             {
