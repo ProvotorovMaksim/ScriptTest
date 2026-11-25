@@ -48,6 +48,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public bool Assistance;
             public bool Hazard;
             public Vector3D Position;
+            public string RadarMotion;
         }
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
@@ -305,7 +306,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (radar == null || radar.CubeGrid != Me.CubeGrid || !radar.IsWorking || radar.EntityId == Me.EntityId ||
                 !radar.TryRun("acquire " + entityId.ToString(culture) + " " + mark.Expires.ToString(culture) +
                     " " + mark.Position.X.ToString("R", culture) + " " + mark.Position.Y.ToString("R", culture) +
-                    " " + mark.Position.Z.ToString("R", culture)))
+                    " " + mark.Position.Z.ToString("R", culture) + mark.RadarMotion))
                 Echo("A working local [RADAR] programmable block is required.");
         }
 
@@ -501,7 +502,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 double x;
                 double y;
                 double z;
-                if (!TaskBusIgcHelper.TryReadOreGps(TaskBusIgcHelper.DecodeStorage(fields[3]),
+                var gps = TaskBusIgcHelper.DecodeStorage(fields[3]);
+                if (!TaskBusIgcHelper.TryReadOreGps(gps,
                     out name, out x, out y, out z) || name.Length > 64)
                     return;
 
@@ -533,6 +535,14 @@ namespace SpaceEngineers.Apps.ShipLink
 
                 existing.Expires = expiry;
                 existing.Position = new Vector3D(x, y, z);
+                existing.RadarMotion = null;
+                if (!assistance && !hazard && name.StartsWith("Radar ", StringComparison.Ordinal) && gps.Length <= 200)
+                {
+                    var gpsFields = gps.Split(':');
+                    if (gpsFields.Length == 11 && gpsFields[5] == "RV1")
+                        existing.RadarMotion = " " + gpsFields[6] + " " + gpsFields[7] + " " +
+                            gpsFields[8] + " " + gpsFields[9];
+                }
                 _displayTick = DisplayUpdateIntervalTicks;
             }
             catch (FormatException) { }

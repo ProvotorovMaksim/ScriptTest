@@ -261,7 +261,7 @@ namespace SpaceEngineers.Apps.Radar
                 return;
             }
 
-            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : cue != null ? cue.Position : Vector3D.Zero;
+            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : cue != null ? cue.PositionAt(now.Ticks) : Vector3D.Zero;
             bool eligibleCamera = false;
             bool gimbalDriven = false;
             bool gimbalReadyToScan = true;

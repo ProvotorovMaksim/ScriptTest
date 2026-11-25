@@ -58,7 +58,9 @@ display to confirm delivery.
 Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh Radar
 mark with `contact track <sender relay ID> Radar <entity ID>` and run
 `contact acquire`. Fixed Radar attempts a raycast when the mark is within
-a camera's field of view. Gimbal also points toward the reported position.
+a camera's field of view. Gimbal also points toward the reported position. New Radar marks include
+velocity and measurement time, so the acquisition ray follows the
+predicted position while the cue is current. Older marks use their GPS.
 The radar starts tracking only after a local raycast confirms the same
 entity ID. An expired cue stops the attempt.
 

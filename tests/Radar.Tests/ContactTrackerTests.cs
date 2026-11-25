@@ -57,7 +57,7 @@ namespace Tests.Radar.Tests
                 new BoundingBoxD(position - Vector3D.One, position + Vector3D.One), now.Ticks), 1000, now);
 
             Assert.That(tracker.TryFormatShareCommand(42, now.AddSeconds(2), out var command), Is.True);
-            Assert.That(command, Is.EqualTo("contact 42 GPS:Radar 12345:1000.25:-4.50:7.00:"));
+            Assert.That(command, Is.EqualTo("contact 42 GPS:Radar 12345:1000.25:-4.50:7.00:RV1:" + now.Ticks + ":0:0:0:"));
             Assert.That(tracker.TryFormatShareCommand(0, now, out _), Is.False);
             Assert.That(tracker.TryFormatShareCommand(42, now.AddTicks(-1), out _), Is.False);
             Assert.That(tracker.TryFormatShareCommand(42, now.AddSeconds(2).AddTicks(1), out _), Is.False);

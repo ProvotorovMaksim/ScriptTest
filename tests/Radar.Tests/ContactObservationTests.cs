@@ -8,6 +8,17 @@ namespace Tests.Radar.Tests
     public class ContactObservationTests
     {
         [Test]
+        public void MovingCueExtrapolatesFromTheOriginalMeasurementTime()
+        {
+            const long second = System.TimeSpan.TicksPerSecond;
+            Assert.That(RadarCue.TryParse("42 " + 6 * second + " 100 0 0 " + second + " 10 0 0",
+                3 * second, out var cue), Is.True);
+            Assert.That(cue.PositionAt(4 * second), Is.EqualTo(new Vector3D(130, 0, 0)));
+            Assert.That(RadarCue.TryParse("42 " + 6 * second + " 100 0 0 " + 4 * second + " 10 0 0",
+                3 * second, out _), Is.False);
+        }
+
+        [Test]
         public void NetworkCueRequiresFreshFiniteCoordinatesAndMatchingEntity()
         {
             Assert.That(RadarCue.TryParse("42 110 20.5 -3 9", 100, out var cue), Is.True);

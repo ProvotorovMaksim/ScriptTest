@@ -44,7 +44,9 @@ namespace SpaceEngineers.Libs.RadarCore
 
             var culture = System.Globalization.CultureInfo.InvariantCulture;
             command = "contact " + relay.ToString(culture) + " " +
-                FormatGps("Radar " + EntityId.ToString(culture));
+                FormatGps("Radar " + EntityId.ToString(culture)) + "RV1:" + LastSeen.Ticks.ToString(culture) +
+                ":" + Velocity.X.ToString("R", culture) + ":" + Velocity.Y.ToString("R", culture) +
+                ":" + Velocity.Z.ToString("R", culture) + ":";
             return true;
         }
 
