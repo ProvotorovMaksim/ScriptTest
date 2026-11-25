@@ -347,8 +347,10 @@ deposit. Configure the cargo, lane, and a reviewed outbound corridor
 with at least one fixed waypoint. The final segment from that corridor
 to the assigned approach must be clear. The platform appends the
 assignment's GPS or replaces the previous generated final waypoint.
-It attempts to arm once per lease per PB session. `ore stop` suppresses the automatic start
-for the confirmed lease until the PB is restarted.
+While it remains docked under that lease, it retries the preparation
+about every two seconds until it arms successfully. It arms the first
+trip only once per lease per PB session. `ore stop` suppresses automatic
+start for the confirmed lease until the PB is restarted.
 
 On the mining point, run `site remember` after its survey child completes
 and both waypoints are set, before confirming the survey stage. This

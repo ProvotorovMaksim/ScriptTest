@@ -51,6 +51,7 @@ namespace SpaceEngineers.Apps.Platform
         private readonly bool _autoMiningDepart;
         private readonly bool _autoMiningStart;
         private string _automaticMiningStartLease;
+        private int _miningStartRetryUpdates;
         private int _miningDepartureUpdates;
         private long _armedMiningCruiseRemote;
         private readonly List<MyWaypointInfo> _armedMiningCruiseWaypoints = new List<MyWaypointInfo>();
@@ -1525,7 +1526,13 @@ namespace SpaceEngineers.Apps.Platform
                 !_worker.TryGetMiningPoint(out grid) || !IsDockedAtMiningPoint(grid))
                 return;
 
-            _automaticMiningStartLease = lease;
+            if (_miningStartRetryUpdates > 0)
+            {
+                _miningStartRetryUpdates--;
+                return;
+            }
+
+            _miningStartRetryUpdates = 11;
             bool cargoLimitReached;
             if (!_miningLaneRadius.HasValue || double.IsNaN(_miningLaneRadius.Value) || _miningCargoName == null ||
                 !CheckMiningCargo(out cargoLimitReached))
@@ -1534,7 +1541,13 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
 
+            if (!CanStartPlatformFlight(describeBlocker: false, allowDocked: true) ||
+                _surveyConnectors.Count != 1)
+                return;
+
             ArmMiningCruise(prepareApproach: true);
+            if (_armedMiningCruiseLease == lease)
+                _automaticMiningStartLease = lease;
         }
 
         private void ArmMiningCruise(bool prepareApproach = false)
