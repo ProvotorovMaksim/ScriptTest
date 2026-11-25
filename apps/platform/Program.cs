@@ -1684,10 +1684,11 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             var remote = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
-            var approach = new Vector3D(x, y, z);
+            var approachController = automatic ? FindMiningRouteController() : remote;
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking ||
                 remote.FlightMode != FlightMode.OneWay || !(remote.SpeedLimit > 0 && remote.SpeedLimit <= 1) ||
-                remote.GetShipSpeed() > 0.25 || Vector3D.DistanceSquared(remote.GetPosition(), approach) > 25)
+                remote.GetShipSpeed() > 0.25 || approachController == null ||
+                Vector3D.DistanceSquared(approachController.GetPosition(), new Vector3D(x, y, z)) > 25)
             {
                 Echo("Use a local One Way " + MiningPassRemoteName +
                     " at no more than 1 m/s. Settle within 5 m of the ore approach.");
@@ -1776,16 +1777,18 @@ namespace SpaceEngineers.Apps.Platform
             return null;
         }
 
-        private bool TryGetMiningRetreatEndpoint(IMyRemoteControl retreat, Vector3D approach, out Vector3D endpoint)
+        private bool TryGetMiningRetreatEndpoint(IMyRemoteControl retreat, Vector3D approach, out Vector3D endpoint,
+            bool automatic = false)
         {
             endpoint = approach;
-            var pass = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
-            if (pass == null || pass.CubeGrid != Me.CubeGrid || !pass.IsWorking)
+            var referenceName = automatic ? MiningRouteLoader.RouteControllerName : MiningPassRemoteName;
+            var reference = GridTerminalSystem.GetBlockWithName(referenceName) as IMyRemoteControl;
+            if (reference == null || reference.CubeGrid != Me.CubeGrid || !reference.IsWorking)
             {
-                Echo("The generated retreat requires a working local " + MiningPassRemoteName + ".");
+                Echo("The generated retreat requires a working local " + referenceName + ".");
                 return false;
             }
-            endpoint += retreat.GetPosition() - pass.GetPosition();
+            endpoint += retreat.GetPosition() - reference.GetPosition();
             return true;
         }
 
@@ -1851,7 +1854,7 @@ namespace SpaceEngineers.Apps.Platform
 
             var expected = approach;
             if ((generateWaypoint || _surveyWaypoints[0].Name == MiningRetreatWaypointName) &&
-                !TryGetMiningRetreatEndpoint(remote, approach, out expected))
+                !TryGetMiningRetreatEndpoint(remote, approach, out expected, automatic))
                 return;
 
             var endpoint = generateWaypoint ? expected : _surveyWaypoints[0].Coords;
@@ -2031,6 +2034,12 @@ namespace SpaceEngineers.Apps.Platform
             }
         }
 
+        private IMyRemoteControl FindMiningRouteController()
+        {
+            var remote = GridTerminalSystem.GetBlockWithName(MiningRouteLoader.RouteControllerName) as IMyRemoteControl;
+            return remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking ? remote : null;
+        }
+
         private bool IsAtMiningApproach(IMyRemoteControl remote, double maxDistanceSquared)
         {
             string taskId;
@@ -2052,8 +2061,10 @@ namespace SpaceEngineers.Apps.Platform
             }
 
             var remote = GridTerminalSystem.GetBlockWithName(MiningPassRemoteName) as IMyRemoteControl;
+            var approachController = FindMiningRouteController();
             if (remote != null && remote.CubeGrid == Me.CubeGrid && remote.IsWorking &&
-                !remote.IsAutoPilotEnabled && remote.GetShipSpeed() <= 0.25 && IsAtMiningApproach(remote, 25))
+                !remote.IsAutoPilotEnabled && remote.GetShipSpeed() <= 0.25 &&
+                approachController != null && IsAtMiningApproach(approachController, 25))
             {
                 _pendingPassLease = null;
                 StartMiningPass(automatic: true);

@@ -10,7 +10,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
     public sealed class MiningRouteLoader
     {
-        private const string RouteControllerName = "[AMN ROUTE]";
+        public const string RouteControllerName = "[AMN ROUTE]";
         private const string ReturnControllerName = "[AMN RETURN]";
         private const string RouteWaypointPrefix = "AMN approach ";
         private readonly List<MyWaypointInfo> _routeWaypoints = new List<MyWaypointInfo>();

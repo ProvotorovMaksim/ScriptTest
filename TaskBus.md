@@ -524,7 +524,9 @@ origin and preserves manually prepared waypoints. It leaves the autopilot
 and drills idle while the operator checks alignment and clearance.
 Run `mine pass` to start both the drills and the controller. With
 `MiningAutoPass=true`, arriving within 2 m of the assignment approach
-under the same lease enables a single attempt to start the pass. If the
+under the same lease enables a single attempt to start the pass. The
+automatic handoff measures arrival at `[AMN ROUTE]`, the controller that
+flew the approach, even if `[AMN MINE PASS]` is mounted elsewhere. If the
 pass controller is empty or holds one generated waypoint, the platform
 calculates the endpoint from the current assignment's ore GPS and the
 controller offset. It preserves manually loaded routes. The ship must
@@ -551,7 +553,9 @@ after a supervised pass reaches its endpoint (within 2 m), meets the ore
 target, or reaches 95% of cargo volume. For a cargo stop, the flight
 controller must confirm autopilot is off before retreat is queued. If the retreat
 controller is empty or holds a single generated waypoint, the platform
-loads the assigned approach adjusted for the two controllers' offset.
+loads the assigned approach adjusted from `[AMN ROUTE]` to
+`[AMN MINE RETREAT]`. Manual `mine retreat plan` uses the pass controller
+as its reference.
 It preserves manually loaded routes and runs the same lane, alignment
 and flight checks as `mine retreat` before engaging autopilot. Fault
 stops and PB restarts require a manual decision. Use `ore stop` or
