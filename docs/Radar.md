@@ -69,6 +69,10 @@ selected by the turret, run `contact turret <recipient relay ID>` on
 ShipLink. The report includes its entity ID, position, velocity and
 observation time. Select it at the receiver as `Turret <entity ID>`.
 
+Set `ShareTurretContacts=true` in ShipLink Custom Data to log and send
+the turret observation automatically once per second. The same
+`GalnetFleetPeer` configuration is used for Radar and turret observations.
+
 ## Sharing a cockpit sighting
 
 Install a forward camera named `[SHIPLINK COCKPIT CAM]` on the cockpit

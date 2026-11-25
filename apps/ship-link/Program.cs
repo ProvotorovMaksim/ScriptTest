@@ -68,9 +68,16 @@ namespace SpaceEngineers.Apps.ShipLink
         private bool _showWeaponSettings;
         private string _lastFcsSample;
         private string _journalSelection;
-        private string _pendingObservation;
-        private long _pendingObservationExpires;
-        private readonly HashSet<long> _pendingObservationPeers = new HashSet<long>();
+        private sealed class PendingObservation
+        {
+            public string Gps;
+            public long Expires;
+            public readonly HashSet<long> Peers = new HashSet<long>();
+        }
+        private readonly Dictionary<string, PendingObservation> _pendingObservations =
+            new Dictionary<string, PendingObservation>();
+        private bool _autoTurret;
+        private long _nextTurretSample;
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
@@ -118,6 +125,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 const string profileSetting = "WeaponProfile=";
                 if (line.StartsWith(profileSetting, StringComparison.OrdinalIgnoreCase))
                     ReadWeaponProfile(line.Substring(profileSetting.Length));
+                if (string.Equals(line.Trim(), "ShareTurretContacts=true", StringComparison.OrdinalIgnoreCase))
+                    _autoTurret = true;
                 long peer;
                 if (_heartbeatRelays.Count < 4 && line.StartsWith(heartbeatSetting, StringComparison.OrdinalIgnoreCase) &&
                     long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
@@ -138,11 +147,15 @@ namespace SpaceEngineers.Apps.ShipLink
 
             if (command.StartsWith("contact publish ", StringComparison.Ordinal))
             {
-                PublishLocalObservation(command.Substring(16));
+                PublishLocalObservation("Radar", command.Substring(16));
                 return;
             }
 
-            FlushObservation();
+            if (command.Length == 0)
+            {
+                SampleTurret();
+                FlushObservations();
+            }
             _tick++;
             _displayTick++;
             if (command.StartsWith("base ", StringComparison.OrdinalIgnoreCase))
@@ -160,8 +173,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
                 _journalSelection = null;
-                _pendingObservation = null;
-                _pendingObservationPeers.Clear();
+                _pendingObservations.Clear();
                 _aiDetections.Clear();
                 _trackedContact = null;
                 _trackedAssistanceRelay = 0;
@@ -440,7 +452,7 @@ namespace SpaceEngineers.Apps.ShipLink
             _displayTick = DisplayUpdateIntervalTicks;
         }
 
-        private void PublishLocalObservation(string gps)
+        private void PublishLocalObservation(string source, string gps)
         {
             if (gps.Length > 200)
                 return;
@@ -448,30 +460,57 @@ namespace SpaceEngineers.Apps.ShipLink
             if (!RecordFleetMark(Me.EntityId, "contact", gps, now + ContactLifetime, now) ||
                 string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || _heartbeatRelays.Count == 0)
                 return;
-            _pendingObservation = gps;
-            _pendingObservationExpires = now + 2 * TimeSpan.TicksPerSecond;
-            _pendingObservationPeers.Clear();
-            _pendingObservationPeers.UnionWith(_heartbeatRelays);
+            var observation = new PendingObservation { Gps = gps, Expires = now + 2 * TimeSpan.TicksPerSecond };
+            observation.Peers.UnionWith(_heartbeatRelays);
+            _pendingObservations[source] = observation;
         }
 
-        private void FlushObservation()
+        private void FlushObservations()
         {
-            if (_pendingObservation == null)
+            if (_pendingObservations.Count == 0)
                 return;
-            if (DateTime.UtcNow.Ticks >= _pendingObservationExpires)
-            {
-                _pendingObservation = null;
-                _pendingObservationPeers.Clear();
-                return;
-            }
+
             var relay = FindGalnetRelay();
-            if (relay == null)
+            long now = DateTime.UtcNow.Ticks;
+            foreach (var entry in _pendingObservations.ToArray())
+            {
+                var observation = entry.Value;
+                if (observation.Expires <= now)
+                {
+                    _pendingObservations.Remove(entry.Key);
+                    continue;
+                }
+                if (relay == null)
+                    continue;
+                foreach (long peer in observation.Peers.ToArray())
+                    if (peer == relay.EntityId || SendFleetPacket(relay, peer, "contact", observation.Gps, ContactLifetime))
+                        observation.Peers.Remove(peer);
+                if (observation.Peers.Count == 0)
+                    _pendingObservations.Remove(entry.Key);
+            }
+        }
+
+        private IMyLargeTurretBase FindObservationTurret()
+        {
+            var turret = GridTerminalSystem.GetBlockWithName("[SHIPLINK TURRET]") as IMyLargeTurretBase;
+            return turret != null && turret.IsWorking && turret.CubeGrid == Me.CubeGrid ? turret : null;
+        }
+
+        private void SampleTurret()
+        {
+            if (!_autoTurret)
                 return;
-            foreach (long peer in _pendingObservationPeers.ToArray())
-                if (peer == relay.EntityId || SendFleetPacket(relay, peer, "contact", _pendingObservation, ContactLifetime))
-                    _pendingObservationPeers.Remove(peer);
-            if (_pendingObservationPeers.Count == 0)
-                _pendingObservation = null;
+            long now = DateTime.UtcNow.Ticks;
+            if (now < _nextTurretSample)
+                return;
+            _nextTurretSample = now + TimeSpan.TicksPerSecond;
+
+            var turret = FindObservationTurret();
+            if (turret == null)
+                return;
+            var hit = turret.GetTargetedEntity();
+            if (!hit.IsEmpty() && hit.EntityId != 0)
+                PublishLocalObservation("Turret", FormatObservation("Turret", hit, now));
         }
 
         private void CueLocalRadar()
@@ -512,8 +551,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
-            var turret = GridTerminalSystem.GetBlockWithName("[SHIPLINK TURRET]") as IMyLargeTurretBase;
-            if (turret == null || !turret.IsWorking || turret.CubeGrid != Me.CubeGrid)
+            var turret = FindObservationTurret();
+            if (turret == null)
             {
                 Echo("A working local [SHIPLINK TURRET] is required.");
                 return;
@@ -593,14 +632,20 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
+            SendContact(relay.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                FormatObservation(source, hit, DateTime.UtcNow.Ticks));
+        }
+
+        private static string FormatObservation(string source, MyDetectedEntityInfo hit, long measured)
+        {
             var culture = System.Globalization.CultureInfo.InvariantCulture;
             var position = hit.Position;
             var velocity = hit.Velocity;
-            SendContact(relay.ToString(culture) + " GPS:" + source + " " + hit.EntityId.ToString(culture) + ":" +
+            return "GPS:" + source + " " + hit.EntityId.ToString(culture) + ":" +
                 position.X.ToString("0.00", culture) + ":" + position.Y.ToString("0.00", culture) + ":" +
-                position.Z.ToString("0.00", culture) + ":RV1:" + DateTime.UtcNow.Ticks.ToString(culture) + ":" +
+                position.Z.ToString("0.00", culture) + ":RV1:" + measured.ToString(culture) + ":" +
                 velocity.X.ToString("R", culture) + ":" + velocity.Y.ToString("R", culture) + ":" +
-                velocity.Z.ToString("R", culture) + ":");
+                velocity.Z.ToString("R", culture) + ":";
         }
 
         private void SendContact(string argument)
