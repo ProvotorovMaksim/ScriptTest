@@ -504,8 +504,8 @@ The hauler appends the final waypoint or updates its task ID when its
 coordinates already match the assigned station approach. A corridor
 ending at a different station requires review. The hauler checks readiness
 about every two seconds and launches at most once per leg and lease in a
-PB session. `route stop` disables automatic cruise for the session.
-`route cruise auto` enables it again, and `route cruise` can retry a leg
+PB session. `route stop` suspends automatic cruise across PB restarts.
+`route cruise auto` clears that suspension, and `route cruise` can retry a leg
 that already launched.
 
 With `HaulerDock` configured, use `route depart` after pickup while still
@@ -514,7 +514,8 @@ the departure charge before disconnecting. If charge is low, repeat the
 command after charging. For automatic retries, set `HaulerAutoDepart=true` or run
 `route depart auto`. The hauler rechecks the lease and the pickup
 connection before each request. Use `route stop` to suspend automatic
-departure for the current session. Enable `HaulerAutoCruise=true` to
+departure across PB restarts. `route depart auto` clears that suspension.
+Enable `HaulerAutoCruise=true` to
 continue into the prepared delivery leg after departure.
 Automatic departure waits for idle flight controls. With both automatic
 options enabled, the hauler prepares the next station route before

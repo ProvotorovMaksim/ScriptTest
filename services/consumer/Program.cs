@@ -13,6 +13,11 @@ namespace SpaceEngineers.Services.Consumer
         // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int PollIntervalTicks = 30;
+        private const string HaulerStopPrefix = "HAULER_STOP|";
+        private const int DepartStopped = 1;
+        private const int CruiseStopped = 2;
+        private int _haulerStopFlags;
+        private string _consumerStorage;
         private const string MonitorName = "[AMN STATUS]";
         private int _monitorTicks;
         private int _departureTicks;
@@ -56,12 +61,29 @@ namespace SpaceEngineers.Services.Consumer
             _haulerDock = ReadSetting("HaulerDock=");
             _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
             _haulerLoadFrom = ReadSetting("HaulerLoadFrom=");
-            _autoDepart = string.Equals(ReadSetting("HaulerAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
-            _autoCruise = string.Equals(ReadSetting("HaulerAutoCruise="), "true", StringComparison.OrdinalIgnoreCase);
+            _consumerStorage = Storage;
+            if (Storage.StartsWith(HaulerStopPrefix, StringComparison.Ordinal))
+            {
+                int end = Storage.IndexOf('\n');
+                if (end >= 0)
+                {
+                    int.TryParse(Storage.Substring(HaulerStopPrefix.Length, end - HaulerStopPrefix.Length),
+                        out _haulerStopFlags);
+                    _consumerStorage = Storage.Substring(end + 1);
+                }
+            }
+            _autoDepart = (_haulerStopFlags & DepartStopped) == 0 &&
+                string.Equals(ReadSetting("HaulerAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoCruise = (_haulerStopFlags & CruiseStopped) == 0 &&
+                string.Equals(ReadSetting("HaulerAutoCruise="), "true", StringComparison.OrdinalIgnoreCase);
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
-                getStorage: () => Storage,
-                setStorage: value => Storage = value,
+                getStorage: () => _consumerStorage,
+                setStorage: value =>
+                {
+                    _consumerStorage = value;
+                    SaveHaulerStorage();
+                },
                 echo: message => Echo(message),
                 entityId: Me.EntityId,
                 gridName: Me.CubeGrid.CustomName,
@@ -88,6 +110,12 @@ namespace SpaceEngineers.Services.Consumer
             _routes.CheckCruiseLease();
         }
 
+        private void SaveHaulerStorage()
+        {
+            Storage = _haulerStopFlags == 0 ? _consumerStorage :
+                HaulerStopPrefix + _haulerStopFlags + "\n" + _consumerStorage;
+        }
+
         public void Main(string argument, UpdateType updateSource)
         {
             var command = (argument ?? "").Trim();
@@ -111,9 +139,17 @@ namespace SpaceEngineers.Services.Consumer
             else if (string.Equals(command, "route depart", StringComparison.OrdinalIgnoreCase))
                 DepartHaulerPickup();
             else if (string.Equals(command, "route depart auto", StringComparison.OrdinalIgnoreCase))
+            {
                 _autoDepart = true;
+                _haulerStopFlags &= ~DepartStopped;
+                SaveHaulerStorage();
+            }
             else if (string.Equals(command, "route cruise auto", StringComparison.OrdinalIgnoreCase))
+            {
                 _autoCruise = true;
+                _haulerStopFlags &= ~CruiseStopped;
+                SaveHaulerStorage();
+            }
             else if (string.Equals(command, "route cruise", StringComparison.OrdinalIgnoreCase))
                 StartHaulerCruise(automatic: false);
             else
@@ -122,6 +158,8 @@ namespace SpaceEngineers.Services.Consumer
                 {
                     _autoDepart = false;
                     _autoCruise = false;
+                    _haulerStopFlags = DepartStopped | CruiseStopped;
+                    SaveHaulerStorage();
                     _cancelFcsDock = true;
                 }
                 if (!_routes.TryHandle(command))
