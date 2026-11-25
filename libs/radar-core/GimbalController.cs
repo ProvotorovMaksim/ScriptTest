@@ -9,10 +9,7 @@ namespace SpaceEngineers.Libs.RadarCore
         private readonly RadarConfig _config;
         private IMyMotorStator _azimuth;
         private IMyMotorStator _elevation;
-        private const double SweepStep = 5 * Math.PI / 180;
-        private const double SweepTolerance = 0.003;
-        private bool _sweepPositive = true;
-        private double? _sweepGoal;
+        private readonly AzimuthSweep _sweep = new AzimuthSweep();
 
         public GimbalController(RadarConfig config)
         {
@@ -43,7 +40,7 @@ namespace SpaceEngineers.Libs.RadarCore
 
         public void Aim(IMyCameraBlock camera, Vector3D target)
         {
-            _sweepGoal = null;
+            _sweep.Reset();
             var forward = camera.WorldMatrix.Forward;
             var direction = target - camera.GetPosition();
             Drive(_azimuth, forward, direction, _config.InvertAzimuth,
@@ -78,8 +75,8 @@ namespace SpaceEngineers.Libs.RadarCore
                 return false;
             }
 
-            double goal = Math.Max(lower, Math.Min(upper, _sweepGoal ?? angle));
-            if (Math.Abs(angle - goal) <= SweepTolerance)
+            double goal = _sweep.Goal(angle, lower, upper);
+            if (AzimuthSweep.IsAtGoal(angle, goal))
             {
                 _azimuth.TargetVelocityRad = 0;
                 return true;
@@ -91,15 +88,9 @@ namespace SpaceEngineers.Libs.RadarCore
 
         public void AdvanceSweep()
         {
-            double angle = ReadAngle(_azimuth);
-            double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
-            double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
-            if (angle >= upper - SweepTolerance)
-                _sweepPositive = false;
-            else if (angle <= lower + SweepTolerance)
-                _sweepPositive = true;
-
-            _sweepGoal = Math.Max(lower, Math.Min(upper, angle + (_sweepPositive ? SweepStep : -SweepStep)));
+            _sweep.Advance(ReadAngle(_azimuth),
+                LowerLimit(_azimuth, _config.PlatformAzimuthMin),
+                UpperLimit(_azimuth, _config.PlatformAzimuthMax));
         }
 
         private static double ReadAngle(IMyMotorStator motor) =>
@@ -128,11 +119,42 @@ namespace SpaceEngineers.Libs.RadarCore
 
         public void Stop()
         {
-            _sweepGoal = null;
+            _sweep.Reset();
             if (_azimuth != null)
                 _azimuth.TargetVelocityRad = 0;
             if (_elevation != null)
                 _elevation.TargetVelocityRad = 0;
         }
     }
+    public sealed class AzimuthSweep
+    {
+        private const double Step = 5 * Math.PI / 180;
+        private const double Tolerance = 0.003;
+        private bool _positive = true;
+        private double? _goal;
+
+        public double Goal(double angle, double lower, double upper) =>
+            Math.Max(lower, Math.Min(upper, _goal ?? angle));
+
+        public static bool IsAtGoal(double angle, double goal) => Math.Abs(angle - goal) <= Tolerance;
+
+        public void Advance(double angle, double lower, double upper)
+        {
+            if (!IsAtGoal(angle, Goal(angle, lower, upper)))
+                return;
+            if (angle >= upper - Tolerance)
+                _positive = false;
+            else if (angle <= lower + Tolerance)
+                _positive = true;
+
+            _goal = Math.Max(lower, Math.Min(upper, angle + (_positive ? Step : -Step)));
+        }
+
+        public void Reset()
+        {
+            _goal = null;
+            _positive = true;
+        }
+    }
+
 }
