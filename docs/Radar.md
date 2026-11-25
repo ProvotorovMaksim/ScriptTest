@@ -68,6 +68,15 @@ ship at the object and run `contact cockpit <recipient relay ID> <range>`
 on ShipLink. Range must be between 1 and 5000 metres. The camera must
 have enough raycast charge. Select the report as `Cockpit <entity ID>`.
 
+## Sharing an AI detection
+
+Name a local offensive AI block `[SHIPLINK AI]`. Configure the other
+ship's relay as a fleet heartbeat peer on each side. Run
+`contact ai <recipient relay ID>` on ShipLink to send the ID reported by
+the AI. The receiving display labels it as an ID-only detection. The
+offensive AI may report a block or character ID. Radar acquisition
+requires a separate observation with measured coordinates.
+
 ## Acquiring a fleet mark
 
 Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh

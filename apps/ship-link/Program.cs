@@ -50,6 +50,13 @@ namespace SpaceEngineers.Apps.ShipLink
             public Vector3D Position;
             public string RadarMotion;
         }
+        private sealed class AiDetection
+        {
+            public long EntityId;
+            public long Expires;
+        }
+
+        private readonly Dictionary<long, AiDetection> _aiDetections = new Dictionary<long, AiDetection>();
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
@@ -128,6 +135,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 _galnetPeers.Clear();
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
+                _aiDetections.Clear();
                 _trackedContact = null;
                 _trackedAssistanceRelay = 0;
                 SaveSettings();
@@ -183,6 +191,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (command.StartsWith("contact ai ", StringComparison.OrdinalIgnoreCase))
+                ShareAiDetection(command.Substring(11).Trim());
             else if (command.StartsWith("contact cockpit ", StringComparison.OrdinalIgnoreCase))
                 ShareCockpitContact(command.Substring(16).Trim());
             else if (command.StartsWith("contact turret ", StringComparison.OrdinalIgnoreCase))
@@ -339,6 +349,34 @@ namespace SpaceEngineers.Apps.ShipLink
             }
 
             ShareObservation(relay, "Turret", turret.GetTargetedEntity());
+        }
+
+        private void ShareAiDetection(string argument)
+        {
+            long relay;
+            if (string.IsNullOrEmpty(_fleetName) || !long.TryParse(argument, out relay) ||
+                !_heartbeatRelays.Contains(relay))
+            {
+                Echo("Join a fleet and use contact ai <configured wingmate relay ID>.");
+                return;
+            }
+
+            var block = GridTerminalSystem.GetBlockWithName("[SHIPLINK AI]") as IMyOffensiveCombatBlock;
+            if (block == null || !block.IsWorking || block.CubeGrid != Me.CubeGrid)
+            {
+                Echo("A working local [SHIPLINK AI] offensive block is required.");
+                return;
+            }
+
+            var search = block.SearchEnemyComponent;
+            long entityId = search?.FoundEnemyId ?? 0;
+            if (entityId == 0)
+            {
+                Echo("The offensive AI has no current detection.");
+                return;
+            }
+
+            SendFleetMark(relay, "ai-detection", entityId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private void ShareCockpitContact(string argument)
@@ -569,6 +607,18 @@ namespace SpaceEngineers.Apps.ShipLink
                 {
                     if (_heartbeatRelays.Contains(source) && expiry - now <= HeartbeatLifetime)
                         ReceiveFleetStatus(source, TaskBusIgcHelper.DecodeStorage(fields[3]), expiry);
+                    return;
+                }
+                if (fields[0] == "ai-detection")
+                {
+                    long detectedId;
+                    if (!_heartbeatRelays.Contains(source) ||
+                        !long.TryParse(TaskBusIgcHelper.DecodeStorage(fields[3]), out detectedId) || detectedId == 0)
+                        return;
+                    AiDetection previous;
+                    if (!_aiDetections.TryGetValue(source, out previous) || previous.Expires < expiry)
+                        _aiDetections[source] = new AiDetection { EntityId = detectedId, Expires = expiry };
+                    _displayTick = DisplayUpdateIntervalTicks;
                     return;
                 }
                 if (fields[0] == "contact-clear" || fields[0] == "assist-clear" || fields[0] == "hazard-clear")
@@ -1054,6 +1104,11 @@ namespace SpaceEngineers.Apps.ShipLink
             }
             _contacts.RemoveAll(contact => contact.Expires <= now);
             AppendTrackedAssistance(display, now);
+            foreach (var detection in _aiDetections.Where(pair => pair.Value.Expires <= now).Select(pair => pair.Key).ToArray())
+                _aiDetections.Remove(detection);
+            foreach (var detection in _aiDetections.OrderBy(pair => pair.Key))
+                display.AppendLine("AI detection from " + detection.Key + ": " + detection.Value.EntityId + " (ID only)");
+
             AppendTrackedContact(display, now);
             if (_contacts.Count > 0)
             {
