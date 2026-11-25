@@ -49,6 +49,8 @@ namespace SpaceEngineers.Apps.Platform
         private bool _platformMiningApproach;
         private string _armedMiningCruiseLease;
         private readonly bool _autoMiningDepart;
+        private readonly bool _autoMiningStart;
+        private string _automaticMiningStartLease;
         private int _miningDepartureUpdates;
         private long _armedMiningCruiseRemote;
         private readonly List<MyWaypointInfo> _armedMiningCruiseWaypoints = new List<MyWaypointInfo>();
@@ -175,6 +177,7 @@ namespace SpaceEngineers.Apps.Platform
             _miningCargoName = ReadSetting("MiningCargo=");
             _autoMiningRetreat = string.Equals(ReadSetting("MiningAutoRetreat="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningDepart = string.Equals(ReadSetting("MiningAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoMiningStart = string.Equals(ReadSetting("MiningAutoStart="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningPass = string.Equals(ReadSetting("MiningAutoPass="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningReturn = string.Equals(ReadSetting("MiningAutoReturn="), "true", StringComparison.OrdinalIgnoreCase);
             _autoMiningDock = string.Equals(ReadSetting("MiningAutoDock="), "true", StringComparison.OrdinalIgnoreCase);
@@ -294,6 +297,8 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
+                _autoMiningUnload = false;
+                _automaticMiningStartLease = _worker.ConfirmedLeaseIdentity;
                 string surveyOre;
                 _worker.TryGetSurveyLease(out _suppressedAutomaticSurveyLease, out surveyOre);
                 CheckLeasedMiningDock(cancel: true);
@@ -382,7 +387,10 @@ namespace SpaceEngineers.Apps.Platform
                 UpdateAutomaticMiningDock();
                 UpdateUnloadAfterMiningDock();
                 if (command.Length == 0)
+                {
+                    TryArmInitialMiningCruise();
                     TryStartAutomaticSurvey();
+                }
             }
             UpdateSurveySweep();
             UpdateAutomaticSampling();
@@ -1504,7 +1512,32 @@ namespace SpaceEngineers.Apps.Platform
             return true;
         }
 
-        private void ArmMiningCruise()
+        private void TryArmInitialMiningCruise()
+        {
+            if (!_autoMiningStart || !_autoMiningDepart || !_autoMiningPass || _armedMiningCruiseLease != null ||
+                _autoMiningUnload || _pendingUnloadDockLease != null || _drillingLease != null ||
+                _worker.SupervisedCruiseRemote != 0 || _fcsDockLease != null)
+                return;
+
+            var lease = _worker.ConfirmedLeaseIdentity;
+            long grid;
+            if (lease == null || lease == _automaticMiningStartLease || _worker.MiningDeposited > 0 ||
+                !_worker.TryGetMiningPoint(out grid) || !IsDockedAtMiningPoint(grid))
+                return;
+
+            _automaticMiningStartLease = lease;
+            bool cargoLimitReached;
+            if (!_miningLaneRadius.HasValue || double.IsNaN(_miningLaneRadius.Value) || _miningCargoName == null ||
+                !CheckMiningCargo(out cargoLimitReached))
+            {
+                Echo("Automatic mining start needs a configured lane and usable cargo inventory.");
+                return;
+            }
+
+            ArmMiningCruise(prepareApproach: true);
+        }
+
+        private void ArmMiningCruise(bool prepareApproach = false)
         {
             _armedMiningCruiseLease = null;
             if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 || _fcsDockLease != null)
@@ -1520,7 +1553,7 @@ namespace SpaceEngineers.Apps.Platform
                 _armedMiningCruiseRemote = remote.EntityId;
                 _miningDepartureUpdates = 0;
                 _armedMiningCruiseLease = _worker.ConfirmedLeaseIdentity;
-            });
+            }, prepare: prepareApproach);
         }
 
         private void UpdateArmedMiningCruise()
@@ -1613,6 +1646,8 @@ namespace SpaceEngineers.Apps.Platform
         {
             StartPlatformFlight(remote, "Mining approach", false);
             _platformMiningApproach = _worker.SupervisedCruiseRemote == remote.EntityId;
+            if (_platformMiningApproach)
+                _automaticMiningStartLease = _platformFlightLease;
         }
 
         private void StartMiningReturnFlight(IMyRemoteControl remote)

@@ -68,7 +68,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
-        public void LoadMiningApproach(Action<IMyRemoteControl> start = null)
+        public void LoadMiningApproach(Action<IMyRemoteControl> start = null, bool prepare = false)
         {
             string taskId;
             double x;
@@ -90,6 +90,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             try
             {
+                if (prepare && !PrepareAssignedApproach(waypoint, position))
+                    return;
+
                 var remote = FindPreparedCruise(RouteControllerName, waypoint, position);
                 if (remote != null)
                     start(remote);
@@ -98,6 +101,49 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 _echo("Could not start mining approach: " + error.Message);
             }
+        }
+
+        private bool PrepareAssignedApproach(string name, Vector3D position)
+        {
+            var remote = _findBlock(RouteControllerName) as IMyRemoteControl;
+            if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking ||
+                remote.IsAutoPilotEnabled || remote.FlightMode != FlightMode.OneWay)
+            {
+                _echo("Use a working local " + RouteControllerName + " in One Way mode with autopilot off.");
+                return false;
+            }
+
+            _routeWaypoints.Clear();
+            remote.GetWaypointInfo(_routeWaypoints);
+            int fixedCount = _routeWaypoints.Count;
+            if (fixedCount > 0 && _routeWaypoints[fixedCount - 1].Name.StartsWith(RouteWaypointPrefix, StringComparison.Ordinal))
+                fixedCount--;
+            if (fixedCount == 0)
+            {
+                _echo("Automatic mining needs a reviewed outbound corridor before the ore approach.");
+                return false;
+            }
+            for (int i = 0; i < fixedCount; i++)
+            {
+                if (_routeWaypoints[i].Name.StartsWith(RouteWaypointPrefix, StringComparison.Ordinal))
+                {
+                    _echo("The generated AMN approach must be the final outbound waypoint.");
+                    return false;
+                }
+            }
+
+            if (fixedCount < _routeWaypoints.Count)
+            {
+                var last = _routeWaypoints[fixedCount];
+                if (last.Name == name && last.Coords == position)
+                    return true;
+
+                remote.ClearWaypoints();
+                for (int i = 0; i < fixedCount; i++)
+                    remote.AddWaypoint(_routeWaypoints[i].Coords, _routeWaypoints[i].Name);
+            }
+            remote.AddWaypoint(position, name);
+            return true;
         }
 
         private void LoadStationApproach(bool startCruise)
