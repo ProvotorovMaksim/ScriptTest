@@ -141,6 +141,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "dock aero on": flight.EstimateDockDisturbance = true; break;
                 case "dock aero off": flight.EstimateDockDisturbance = false; break;
                 case "manual": Activate(Mode.Manual); break;
+                case "aimassist": Activate(Mode.AimAssist); break;
+                case "lock": Activate(Mode.Lock); break;
                 case "mass":
                     Echo(mode == Mode.Off ? "Engage FCS before requesting mass limits." :
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
@@ -229,8 +231,24 @@ namespace SpaceEngineers.Apps.FlightControl
                     else if (mode == Mode.Dock)
                         UpdateDockApproach();
                     else
-                        status = flight.Update(cockpit, mode, Runtime.TimeSinceLastRun.TotalSeconds,
-                            () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2);
+                    {
+                        bool aiming = mode == Mode.AimAssist || mode == Mode.Lock;
+                        Vector3D correction = Vector3D.Zero;
+                        if (aiming)
+                        {
+                            if (mode == Mode.Lock && FlightController.HasPilotRotation(cockpit))
+                            {
+                                mode = Mode.Manual;
+                                aiming = false;
+                            }
+                            else
+                                correction = GetAimCorrection(DateTime.UtcNow.Ticks);
+                        }
+                        status = flight.Update(cockpit, aiming ? Mode.Normal : mode, Runtime.TimeSinceLastRun.TotalSeconds,
+                            () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2, correction);
+                        if (aiming)
+                            status = (mode == Mode.Lock ? "FCS lock" : "FCS aimassist") + "\n" + status;
+                    }
                 }
                 catch (Exception error)
                 {
@@ -242,7 +260,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 CheckDockPower();
 
             var displayStatus = showDockGuide ? status + GetDockStatus() : status;
-            if (mode == Mode.Manual && aimSpeed > 0)
+            if ((mode == Mode.Manual && aimSpeed > 0) || mode == Mode.AimAssist || mode == Mode.Lock)
                 displayStatus += GetAimGuide(DateTime.UtcNow.Ticks);
             Echo(displayStatus);
             bool refreshPanel = command.Length != 0 || (source & UpdateType.Update1) == 0;
@@ -276,11 +294,12 @@ namespace SpaceEngineers.Apps.FlightControl
                 System.Globalization.CultureInfo.InvariantCulture, out number) &&
             !double.IsNaN(number) && !double.IsInfinity(number);
 
-        private string GetAimGuide(long now)
+        private bool TryAimSolution(long now, out double seconds, out double yaw, out double pitch)
         {
+            seconds = yaw = pitch = 0;
             double age = (now - aimMeasuredTicks) / (double)TimeSpan.TicksPerSecond;
             if (aimTargetId == 0 || age < 0 || age > 2)
-                return "\nAIM | Waiting for a fresh Radar measurement";
+                return false;
 
             var frame = cockpit.WorldMatrix;
             var displacement = aimPosition + aimVelocity * age - cockpit.GetPosition();
@@ -290,19 +309,41 @@ namespace SpaceEngineers.Apps.FlightControl
             double a = relativeVelocity.LengthSquared() - aimSpeed * aimSpeed;
             double discriminant = b * b - a * c;
             if (discriminant < 0)
-                return "\nAIM | No intercept at configured speed";
+                return false;
 
             double denominator = Math.Sqrt(discriminant) - b;
-            double seconds = c / denominator;
+            seconds = c / denominator;
             if (denominator <= 0 || !(seconds > 0 && seconds <= 30))
-                return "\nAIM | No intercept within 30 seconds";
+                return false;
 
             var lead = displacement + relativeVelocity * seconds;
             double right = Vector3D.Dot(lead, frame.Right);
             double up = Vector3D.Dot(lead, frame.Up);
             double forward = Vector3D.Dot(lead, frame.Forward);
-            double yaw = Math.Atan2(right, forward) * 180 / Math.PI;
-            double pitch = Math.Atan2(up, Math.Sqrt(right * right + forward * forward)) * 180 / Math.PI;
+            yaw = Math.Atan2(right, forward);
+            pitch = Math.Atan2(up, Math.Sqrt(right * right + forward * forward));
+            return !double.IsNaN(yaw) && !double.IsNaN(pitch);
+        }
+
+        private Vector3D GetAimCorrection(long now)
+        {
+            double seconds, yaw, pitch;
+            if (!TryAimSolution(now, out seconds, out yaw, out pitch) ||
+                (mode == Mode.AimAssist && (Math.Abs(yaw) > Math.PI / 9 || Math.Abs(pitch) > Math.PI / 9)))
+                return Vector3D.Zero;
+
+            double limit = mode == Mode.AimAssist ? 1.25 : 3;
+            return new Vector3D(Math.Max(-limit, Math.Min(limit, pitch * 6)),
+                Math.Max(-limit, Math.Min(limit, -yaw * 6)), 0);
+        }
+
+        private string GetAimGuide(long now)
+        {
+            double seconds, yaw, pitch;
+            if (!TryAimSolution(now, out seconds, out yaw, out pitch))
+                return "\nAIM | No fresh solution for selected contact and profile";
+            yaw *= 180 / Math.PI;
+            pitch *= 180 / Math.PI;
             return $"\nAIM {aimTargetId} | lead {seconds:0.00} s | yaw {yaw:+0.0;-0.0;0.0}° pitch {pitch:+0.0;-0.0;0.0}°";
         }
 
@@ -953,7 +994,7 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
-        private enum Mode { Off, Normal, Manual, Dock }
+        private enum Mode { Off, Normal, Manual, Dock, AimAssist, Lock }
 
         private sealed class FlightController
         {
@@ -989,7 +1030,14 @@ namespace SpaceEngineers.Apps.FlightControl
                 return true;
             }
 
-            public string Update(IMyShipController pilot, Mode mode, double dt, Func<bool> hasInstructionBudget)
+            public static bool HasPilotRotation(IMyShipController pilot)
+            {
+                var input = pilot.RotationIndicator;
+                return Command(input.X) != 0 || Command(input.Y) != 0 || Command(pilot.RollIndicator) != 0;
+            }
+
+            public string Update(IMyShipController pilot, Mode mode, double dt, Func<bool> hasInstructionBudget,
+                Vector3D aimCorrection)
             {
                 var frame = pilot.WorldMatrix;
                 var velocity = pilot.GetShipVelocities();
@@ -1009,7 +1057,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 var hold = Vector3D.TransformNormal(-(gravity + disturbance) * mass, worldToLocal);
                 var input = pilot.MoveIndicator;
                 var rotation = pilot.RotationIndicator;
-                var turn = new Vector3D(rotation.X, rotation.Y, pilot.RollIndicator);
+                var turn = HasPilotRotation(pilot) ? new Vector3D(rotation.X, rotation.Y, pilot.RollIndicator) : aimCorrection;
                 var request = new Vector3D(Command(input.X), Command(input.Y), Command(input.Z));
                 var target = Vector3D.Zero;
                 var pilotOnly = Vector3D.Zero;

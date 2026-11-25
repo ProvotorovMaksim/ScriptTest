@@ -138,3 +138,9 @@ In `manual`, FCS displays yaw and pitch to the lead point on
 `[FCS STATUS]`. This calculation assumes constant relative velocity
 and inherited ship velocity. Profile and contact selections are
 session settings.
+
+On FCS, `aimassist` applies limited corrections within 20 degrees on
+each axis while the pilot leaves the rotation controls neutral.
+`lock` turns toward the lead point until the pilot rotates the ship,
+which returns FCS to `manual`. Both commands use normal-mode thrust
+and turn support checks. An expired measurement removes the correction.
