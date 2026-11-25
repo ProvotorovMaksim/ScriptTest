@@ -389,8 +389,10 @@ namespace TaskBus.Tests
             Assert.False(worker.TryGetMiningApproach(out _, out _, out _, out _));
         }
 
-        [Fact]
-        public void SurveyRetrySurvivesRestartAndFencesOldCompletion()
+        [Theory]
+        [InlineData("\n")]
+        [InlineData("\r\n")]
+        public void SurveyRetrySurvivesRestartAndFencesOldCompletion(string lineEnding)
         {
             string storage = "";
             var sent = new List<string>();
@@ -410,6 +412,7 @@ namespace TaskBus.Tests
             point.ProcessCommand("survey retry");
             Assert.Contains("\"request_id\":\"parent:7:0:retry:1\"", sent[sent.Count - 1]);
 
+            storage = storage.Replace("\r\n", "\n").Replace("\n", lineEnding);
             point = Start();
             point.ProcessIncomingMessage(1, assignment);
             Assert.False(point.ProcessIncomingMessage(1, oldCompletion));

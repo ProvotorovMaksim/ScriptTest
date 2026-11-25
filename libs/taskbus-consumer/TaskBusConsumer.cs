@@ -1388,7 +1388,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     continue;
 
                 var key = line.Substring(0, separator);
-                var value = line.Substring(separator + 1);
+                var value = line.Substring(separator + 1).TrimEnd('\r');
                 try
                 {
                     if (key == "ACTIVE_ID") _activeTaskId = TaskBusIgcHelper.DecodeStorage(value);
