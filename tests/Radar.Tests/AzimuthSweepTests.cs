@@ -7,6 +7,19 @@ namespace Tests.Radar.Tests
     [TestFixture]
     public class AzimuthSweepTests
     {
+        [TestCase(181, 0, 270, 181)]
+        [TestCase(-179, 0, 270, 181)]
+        [TestCase(179, -270, 0, -181)]
+        [TestCase(355, -90, 90, -5)]
+        [TestCase(179, -180, 180, 179)]
+        public void MotorAngleUsesTheConfiguredTravelFrame(
+            double measured, double lower, double upper, double expected)
+        {
+            const double radians = Math.PI / 180;
+            Assert.That(GimbalAngles.InTravelFrame(measured * radians, lower * radians, upper * radians),
+                Is.EqualTo(expected * radians).Within(1e-9));
+        }
+
         [Test]
         public void HoldsPositionUntilAdvancedAndReversesAtTravelLimit()
         {

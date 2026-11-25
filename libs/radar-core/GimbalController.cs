@@ -70,15 +70,17 @@ namespace SpaceEngineers.Libs.RadarCore
             if (invert)
                 error = -error;
 
-            double angle = ReadAngle(motor);
-            DriveTo(motor, angle, angle + error, LowerLimit(motor, min), UpperLimit(motor, max));
+            double lower = LowerLimit(motor, min);
+            double upper = UpperLimit(motor, max);
+            double angle = GimbalAngles.InTravelFrame(motor.Angle, lower, upper);
+            DriveTo(motor, angle, angle + error, lower, upper);
         }
 
         public bool HoldSweepPosition()
         {
-            double angle = ReadAngle(_azimuth);
             double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
             double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
+            double angle = GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper);
             _elevation.TargetVelocityRad = 0;
             if (lower > upper)
             {
@@ -99,13 +101,10 @@ namespace SpaceEngineers.Libs.RadarCore
 
         public void AdvanceSweep()
         {
-            _sweep.Advance(ReadAngle(_azimuth),
-                LowerLimit(_azimuth, _config.PlatformAzimuthMin),
-                UpperLimit(_azimuth, _config.PlatformAzimuthMax));
+            double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
+            double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
+            _sweep.Advance(GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper), lower, upper);
         }
-
-        private static double ReadAngle(IMyMotorStator motor) =>
-            Math.Atan2(Math.Sin(motor.Angle), Math.Cos(motor.Angle));
 
         private static double LowerLimit(IMyMotorStator motor, double minimum) =>
             Math.Max(minimum * Math.PI / 180, motor.LowerLimitRad);
@@ -137,6 +136,18 @@ namespace SpaceEngineers.Libs.RadarCore
                 _elevation.TargetVelocityRad = 0;
         }
     }
+    public static class GimbalAngles
+    {
+        public static double InTravelFrame(double angle, double lower, double upper)
+        {
+            if (lower > upper || (angle >= lower && angle <= upper))
+                return angle;
+            double midpoint = lower + (upper - lower) / 2;
+            double turn = 2 * Math.PI;
+            return angle + turn * Math.Round((midpoint - angle) / turn);
+        }
+    }
+
     public sealed class AzimuthSweep
     {
         private const double Step = 5 * Math.PI / 180;
