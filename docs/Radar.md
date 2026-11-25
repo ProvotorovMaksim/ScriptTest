@@ -123,3 +123,18 @@ Verify these scenarios in Space Engineers before recording an acceptance result.
 6. Park from a nonzero position, first with both zero angles reachable
    and then with zero outside one axis's limits. Confirm the final
    setpoints and zero drive velocity. Repeat and interrupt with `off`.
+
+
+## FCS lead from the pilot journal
+
+Name the local FCS PB `[SHIPLINK FCS]`. Add one or more
+`WeaponProfile=Name|speed` lines to ShipLink Custom Data, with speed
+in metres per second. Run `settings`, use `up` or `down`, and confirm
+the profile with `apply`. In the contact journal, select a measured
+contact the same way. ShipLink refreshes FCS from the active mark
+while its measurement is at most two seconds old.
+
+In `manual`, FCS displays yaw and pitch to the lead point on
+`[FCS STATUS]`. This calculation assumes constant relative velocity
+and inherited ship velocity. Profile and contact selections are
+session settings.

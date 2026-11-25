@@ -57,6 +57,16 @@ namespace SpaceEngineers.Apps.ShipLink
         }
 
         private readonly Dictionary<long, AiDetection> _aiDetections = new Dictionary<long, AiDetection>();
+        private sealed class WeaponProfile
+        {
+            public string Name;
+            public double Speed;
+        }
+        private readonly List<WeaponProfile> _weaponProfiles = new List<WeaponProfile>();
+        private int _weaponSelected = -1;
+        private int _weaponCursor;
+        private bool _showWeaponSettings;
+        private string _lastFcsSample;
         private string _journalSelection;
         private string _pendingObservation;
         private long _pendingObservationExpires;
@@ -105,6 +115,9 @@ namespace SpaceEngineers.Apps.ShipLink
             const string heartbeatSetting = "GalnetFleetPeer=";
             foreach (var line in Me.CustomData.Split('\n'))
             {
+                const string profileSetting = "WeaponProfile=";
+                if (line.StartsWith(profileSetting, StringComparison.OrdinalIgnoreCase))
+                    ReadWeaponProfile(line.Substring(profileSetting.Length));
                 long peer;
                 if (_heartbeatRelays.Count < 4 && line.StartsWith(heartbeatSetting, StringComparison.OrdinalIgnoreCase) &&
                     long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
@@ -205,12 +218,27 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (string.Equals(command, "settings", StringComparison.OrdinalIgnoreCase))
+            {
+                _showWeaponSettings = !_showWeaponSettings;
+                _weaponCursor = Math.Max(0, _weaponSelected);
+                _displayTick = DisplayUpdateIntervalTicks;
+            }
             else if (string.Equals(command, "up", StringComparison.OrdinalIgnoreCase))
-                SelectJournalEntry(-1);
+                MovePilotSelection(-1);
             else if (string.Equals(command, "down", StringComparison.OrdinalIgnoreCase))
-                SelectJournalEntry(1);
+                MovePilotSelection(1);
             else if (string.Equals(command, "apply", StringComparison.OrdinalIgnoreCase))
-                ApplyJournalEntry();
+            {
+                if (_showWeaponSettings && _weaponProfiles.Count > 0)
+                {
+                    _weaponSelected = _weaponCursor;
+                    _showWeaponSettings = false;
+                    _displayTick = DisplayUpdateIntervalTicks;
+                }
+                else if (!_showWeaponSettings)
+                    ApplyJournalEntry();
+            }
             else if (command.StartsWith("contact ai ", StringComparison.OrdinalIgnoreCase))
                 ShareAiDetection(command.Substring(11).Trim());
             else if (command.StartsWith("contact cockpit ", StringComparison.OrdinalIgnoreCase))
@@ -287,6 +315,7 @@ namespace SpaceEngineers.Apps.ShipLink
             {
                 _displayTick = 0;
                 UpdateFleetStatus();
+                UpdateFcsTarget();
                 UpdateCockpitDisplay();
             }
         }
@@ -321,6 +350,62 @@ namespace SpaceEngineers.Apps.ShipLink
             _trackedContact = mark;
             _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private void ReadWeaponProfile(string setting)
+        {
+            var fields = setting.Split('|');
+            double speed;
+            if (_weaponProfiles.Count >= 12 || fields.Length != 2 ||
+                string.IsNullOrWhiteSpace(fields[0]) || fields[0].Trim().Length > 32 ||
+                !double.TryParse(fields[1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out speed) ||
+                !(speed > 0 && speed <= 100000))
+                return;
+            _weaponProfiles.Add(new WeaponProfile { Name = fields[0].Trim(), Speed = speed });
+        }
+
+        private void MovePilotSelection(int step)
+        {
+            if (!_showWeaponSettings)
+                SelectJournalEntry(step);
+            else if (_weaponProfiles.Count > 0)
+            {
+                _weaponCursor = (_weaponCursor + step + _weaponProfiles.Count) % _weaponProfiles.Count;
+                _displayTick = DisplayUpdateIntervalTicks;
+            }
+        }
+
+        private void UpdateFcsTarget()
+        {
+            long now = DateTime.UtcNow.Ticks;
+            var selected = _trackedContact;
+            var mark = selected == null ? null : _contacts.FirstOrDefault(candidate =>
+                candidate.Expires > now && !candidate.Assistance && !candidate.Hazard &&
+                candidate.Source == selected.Source && candidate.Name == selected.Name);
+            string command = null;
+            long entityId;
+            if (_weaponSelected >= 0 && mark != null && mark.RadarMotion != null &&
+                TryReadSensedEntityId(mark.Name, out entityId))
+            {
+                var motion = mark.RadarMotion.Trim().Split(' ');
+                long measured;
+                if (motion.Length == 4 && long.TryParse(motion[0], out measured) &&
+                    measured > 0 && measured <= now && now - measured <= 2 * TimeSpan.TicksPerSecond)
+                {
+                    var culture = System.Globalization.CultureInfo.InvariantCulture;
+                    command = "aim sample " + entityId.ToString(culture) + " " + motion[0] + " " +
+                        mark.Position.X.ToString("R", culture) + " " + mark.Position.Y.ToString("R", culture) +
+                        " " + mark.Position.Z.ToString("R", culture) + " " + motion[1] + " " + motion[2] +
+                        " " + motion[3] + " " + _weaponProfiles[_weaponSelected].Speed.ToString("R", culture);
+                }
+            }
+            if (command == _lastFcsSample)
+                return;
+            var fcs = GridTerminalSystem.GetBlockWithName("[SHIPLINK FCS]") as IMyProgrammableBlock;
+            if (fcs != null && fcs.IsWorking && fcs.CubeGrid == Me.CubeGrid && fcs.EntityId != Me.EntityId &&
+                fcs.TryRun(command ?? "aim clear"))
+                _lastFcsSample = command;
         }
 
         private FleetContact[] JournalEntries(long now) =>
@@ -1200,6 +1285,18 @@ namespace SpaceEngineers.Apps.ShipLink
                 _aiDetections.Remove(detection);
             foreach (var detection in _aiDetections.OrderBy(pair => pair.Key))
                 display.AppendLine("AI detection from " + detection.Key + ": " + detection.Value.EntityId + " (ID only)");
+
+            if (_weaponSelected >= 0)
+                display.AppendLine("Weapon profile: " + _weaponProfiles[_weaponSelected].Name);
+            if (_showWeaponSettings)
+            {
+                display.AppendLine("=== WEAPON PROFILES | UP / DOWN / APPLY ===");
+                if (_weaponProfiles.Count == 0)
+                    display.AppendLine("Add WeaponProfile=Name|speed in Custom Data.");
+                for (int index = 0; index < _weaponProfiles.Count; index++)
+                    display.AppendLine((index == _weaponCursor ? "> " : "  ") + _weaponProfiles[index].Name +
+                        " | " + _weaponProfiles[index].Speed + " m/s");
+            }
 
             var journal = JournalEntries(now);
             if (journal.Length > 0)

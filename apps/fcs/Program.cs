@@ -55,6 +55,11 @@ namespace SpaceEngineers.Apps.FlightControl
         private bool previousThrusterControl;
         private bool previousDampeners;
         private Mode mode;
+        private long aimTargetId;
+        private long aimMeasuredTicks;
+        private Vector3D aimPosition;
+        private Vector3D aimVelocity;
+        private double aimSpeed;
         private string status = "FCS off. Commands: normal, manual, off, status.";
 
         public Program()
@@ -117,6 +122,17 @@ namespace SpaceEngineers.Apps.FlightControl
         {
             var previousMode = mode;
             var command = (argument ?? "").Trim().ToLowerInvariant();
+            if (command == "aim clear")
+            {
+                aimTargetId = 0;
+                aimMeasuredTicks = 0;
+                return;
+            }
+            if (command.StartsWith("aim sample ", StringComparison.Ordinal))
+            {
+                ReceiveAimSample(command.Substring(11));
+                return;
+            }
             switch (command)
             {
                 case "normal": Activate(Mode.Normal); break;
@@ -226,10 +242,68 @@ namespace SpaceEngineers.Apps.FlightControl
                 CheckDockPower();
 
             var displayStatus = showDockGuide ? status + GetDockStatus() : status;
+            if (mode == Mode.Manual && aimSpeed > 0)
+                displayStatus += GetAimGuide(DateTime.UtcNow.Ticks);
             Echo(displayStatus);
             bool refreshPanel = command.Length != 0 || (source & UpdateType.Update1) == 0;
             if (refreshPanel || previousMode != mode || (statusPanel != null && ++statusPanelTicks >= StatusPanelInterval))
                 WriteStatusPanel(refreshPanel, displayStatus);
+        }
+
+        private void ReceiveAimSample(string sample)
+        {
+            var fields = sample.Split(' ');
+            var now = DateTime.UtcNow.Ticks;
+            long id, measured;
+            double x, y, z, vx, vy, vz, speed;
+            if (fields.Length != 9 || !long.TryParse(fields[0], out id) || id == 0 ||
+                !long.TryParse(fields[1], out measured) || (id == aimTargetId && measured < aimMeasuredTicks) ||
+                measured > now || now - measured > 2 * TimeSpan.TicksPerSecond ||
+                !TryReadAimNumber(fields[2], out x) || !TryReadAimNumber(fields[3], out y) ||
+                !TryReadAimNumber(fields[4], out z) || !TryReadAimNumber(fields[5], out vx) ||
+                !TryReadAimNumber(fields[6], out vy) || !TryReadAimNumber(fields[7], out vz) || !TryReadAimNumber(fields[8], out speed) ||
+                !(speed > 0 && speed <= 100000))
+                return;
+            aimTargetId = id;
+            aimMeasuredTicks = measured;
+            aimPosition = new Vector3D(x, y, z);
+            aimVelocity = new Vector3D(vx, vy, vz);
+            aimSpeed = speed;
+        }
+
+        private static bool TryReadAimNumber(string value, out double number) =>
+            double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out number) &&
+            !double.IsNaN(number) && !double.IsInfinity(number);
+
+        private string GetAimGuide(long now)
+        {
+            double age = (now - aimMeasuredTicks) / (double)TimeSpan.TicksPerSecond;
+            if (aimTargetId == 0 || age < 0 || age > 2)
+                return "\nAIM | Waiting for a fresh Radar measurement";
+
+            var frame = cockpit.WorldMatrix;
+            var displacement = aimPosition + aimVelocity * age - cockpit.GetPosition();
+            var relativeVelocity = aimVelocity - cockpit.GetShipVelocities().LinearVelocity;
+            double c = displacement.LengthSquared();
+            double b = Vector3D.Dot(displacement, relativeVelocity);
+            double a = relativeVelocity.LengthSquared() - aimSpeed * aimSpeed;
+            double discriminant = b * b - a * c;
+            if (discriminant < 0)
+                return "\nAIM | No intercept at configured speed";
+
+            double denominator = Math.Sqrt(discriminant) - b;
+            double seconds = c / denominator;
+            if (denominator <= 0 || !(seconds > 0 && seconds <= 30))
+                return "\nAIM | No intercept within 30 seconds";
+
+            var lead = displacement + relativeVelocity * seconds;
+            double right = Vector3D.Dot(lead, frame.Right);
+            double up = Vector3D.Dot(lead, frame.Up);
+            double forward = Vector3D.Dot(lead, frame.Forward);
+            double yaw = Math.Atan2(right, forward) * 180 / Math.PI;
+            double pitch = Math.Atan2(up, Math.Sqrt(right * right + forward * forward)) * 180 / Math.PI;
+            return $"\nAIM {aimTargetId} | lead {seconds:0.00} s | yaw {yaw:+0.0;-0.0;0.0}° pitch {pitch:+0.0;-0.0;0.0}°";
         }
 
         private void SetBrakingDistance(string argument)
