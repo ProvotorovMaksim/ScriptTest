@@ -165,8 +165,7 @@ namespace SpaceEngineers.Apps.Radar
             _scanProblem = gimbal ? _gimbal.GetUnavailableReason() : null;
             if (_scanProblem != null)
             {
-                _gimbal.Stop();
-                _state = RadarState.UNAVAILABLE;
+                LoseTrackingHardware(_scanProblem);
                 return;
             }
 
@@ -178,7 +177,8 @@ namespace SpaceEngineers.Apps.Radar
             for (int i = 0; i < _cameras.Count() && rays < Math.Max(1, _config.MaxRaycastsPerUpdate); i++)
             {
                 var camera = _cameras.GetNext();
-                if (!camera.IsWorking || (gimbal && !_gimbal.HasCamera(camera)))
+                if (!camera.IsWorking || !camera.EnableRaycast || !camera.IsSameConstructAs(Me) ||
+                    (gimbal && !_gimbal.HasCamera(camera)))
                     continue;
 
                 eligibleCamera = true;
@@ -222,16 +222,22 @@ namespace SpaceEngineers.Apps.Radar
 
             if (!eligibleCamera)
             {
-                _gimbal.Stop();
-                _scanProblem = gimbal ? "A working radar camera must be on the hinge head." :
-                    "No working camera in the radar group or with the configured name prefix.";
-                _state = RadarState.UNAVAILABLE;
+                LoseTrackingHardware(gimbal ? "A working, raycast-enabled radar camera must be on the hinge head." :
+                    "No working, raycast-enabled camera in the radar group or with the configured name prefix.");
                 return;
             }
             if (gimbal && !tracking && rays > 0)
                 _gimbal.AdvanceSweep();
             _state = tracking ? RadarState.COASTING :
                 rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
+        }
+
+        private void LoseTrackingHardware(string problem)
+        {
+            _contact.Lose();
+            _gimbal.Stop();
+            _scanProblem = problem;
+            _state = RadarState.UNAVAILABLE;
         }
 
         private bool IsGimbal => string.Equals(_config.Mode, "Gimbal", StringComparison.OrdinalIgnoreCase);

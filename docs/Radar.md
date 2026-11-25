@@ -50,8 +50,10 @@ Verify these scenarios in Space Engineers before recording an acceptance result.
    reversal at both ends, and tracking movement on both axes. Confirm that
    the configured inversion matches the mounting of each motor.
 4. Disable or detach a camera, rotor or hinge while scanning. Confirm the
-   reported hardware fault and zero velocity setpoints on both available axes.
-   Restore the blocks and run `on` if they were replaced.
+   reported hardware fault, the last measured position and zero velocity
+   setpoints on both available axes. Restore the blocks and run `on` if
+   they were replaced or raycast was disabled. Confirm that Radar starts
+   a fresh search after recovery.
 5. Run `off` while tracking and confirm both axes stop. Repeat when switching
    from Gimbal to Fixed.
 6. Park from a nonzero position, first with both zero angles reachable
