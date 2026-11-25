@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="../../spaceengineers.props" />
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <IsTestProject>true</IsTestProject>
@@ -7,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Update="@(Reference)" Private="true" />
     <ProjectReference Include="../../libs/radar-core/radar-core.csproj" />
   </ItemGroup>
 

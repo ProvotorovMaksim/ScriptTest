@@ -19,15 +19,9 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="../../libs/igc-core/**/*.cs">
-      <Exclude>../../libs/igc-core/obj/**;../../libs/igc-core/bin/**</Exclude>
-    </Compile>
-    <Compile Include="../../libs/taskbus-producer/**/*.cs">
-      <Exclude>../../libs/taskbus-producer/obj/**;../../libs/taskbus-producer/bin/**</Exclude>
-    </Compile>
-    <Compile Include="../../libs/taskbus-consumer/**/*.cs">
-      <Exclude>../../libs/taskbus-consumer/obj/**;../../libs/taskbus-consumer/bin/**</Exclude>
-    </Compile>
+    <Compile Include="../../libs/igc-core/**/*.cs" Exclude="../../libs/igc-core/obj/**;../../libs/igc-core/bin/**" />
+    <Compile Include="../../libs/taskbus-producer/**/*.cs" Exclude="../../libs/taskbus-producer/obj/**;../../libs/taskbus-producer/bin/**" />
+    <Compile Include="../../libs/taskbus-consumer/**/*.cs" Exclude="../../libs/taskbus-consumer/obj/**;../../libs/taskbus-consumer/bin/**" />
   </ItemGroup>
 
   <ItemGroup>

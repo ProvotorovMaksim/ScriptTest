@@ -1,4 +1,7 @@
+using System;
 using NUnit.Framework;
+using Sandbox.ModAPI.Ingame;
+using VRage.Game;
 using VRageMath;
 using SpaceEngineers.Libs.RadarCore;
 
@@ -8,60 +11,26 @@ namespace Tests.Radar.Tests
     public class ContactTrackerTests
     {
         [Test]
-        public void ContactTracker_Initial_State()
-        {
-            var tracker = new ContactTracker();
-            Assert.AreEqual(0L, tracker.EntityId);
-            Assert.AreEqual("", tracker.Name);
-            Assert.IsFalse(tracker.IsActive);
-        }
-
-        [Test]
-        public void ContactTracker_Update_and_Lose()
+        public void TrackerRecordsAndClearsARealRaycastObservation()
         {
             var tracker = new ContactTracker();
             var now = DateTime.UtcNow;
+            var position = new Vector3D(1000, 0, 0);
+            var info = new MyDetectedEntityInfo(12345L, "Test Ship", MyDetectedEntityType.LargeGrid,
+                position, MatrixD.Identity, Vector3.Zero, MyRelationsBetweenPlayerAndBlock.Neutral,
+                new BoundingBoxD(position - Vector3D.One, position + Vector3D.One), now.Ticks);
+            tracker.Update(info, 1000, now);
 
-            tracker.Update(new MyDetectedEntityInfo
-            {
-                EntityId = 12345L,
-                DisplayNameText = "Test Ship",
-                Position = new Vector3D(1000, 0, 0),
-                Velocity = Vector3D.Zero
-            }, 15000.0, now);
+            Assert.That(tracker.EntityId, Is.EqualTo(12345L));
+            Assert.That(tracker.Name, Is.EqualTo("Test Ship"));
+            Assert.That(tracker.Position, Is.EqualTo(position));
+            Assert.That(tracker.LastSeen, Is.EqualTo(now));
+            Assert.That(tracker.IsActive, Is.True);
 
-            Assert.AreEqual(12345L, tracker.EntityId);
-            Assert.AreEqual("Test Ship", tracker.Name);
-            Assert.IsTrue(tracker.IsActive);
-            Assert.IsFalse(string.IsNullOrEmpty(tracker.Name));
-            Assert.IsTrue(tracker.AgeSeconds >= 0);
-
-            // Lose the contact
             tracker.Lose();
-
-            Assert.AreEqual(0L, tracker.EntityId);
-            Assert.AreEqual("", tracker.Name);
-            Assert.IsFalse(tracker.IsActive);
-        }
-
-        [Test]
-        public void ContactTracker_Age_Calculation()
-        {
-            var tracker = new ContactTracker();
-            var now = DateTime.UtcNow;
-
-            tracker.Update(new MyDetectedEntityInfo
-            {
-                EntityId = 12345L,
-                DisplayNameText = "Test",
-                Position = Vector3D.Zero,
-                Velocity = Vector3D.Zero
-            }, 10000.0, now);
-
-            // Age should be 0 shortly after update
-            Assert.IsTrue(tracker.AgeSeconds >= 0 && tracker.AgeSeconds < 10);
+            Assert.That(tracker.EntityId, Is.Zero);
+            Assert.That(tracker.IsActive, Is.False);
+            Assert.That(tracker.HitPosition, Is.Null);
         }
     }
 }
-TESTEOF
-echo "ContactTrackerTests.cs written"

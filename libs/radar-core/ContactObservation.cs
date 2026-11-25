@@ -11,9 +11,9 @@ namespace SpaceEngineers.Libs.RadarCore
     public sealed class ContactObservation
     {
         public long EntityId;
-        public string Name;
-        public string Type;
-        public string Relationship;
+        public string Name = "";
+        public string Type = "";
+        public string Relationship = "";
         public Vector3D Position;
         public Vector3D Velocity;
         public BoundingBoxD? BoundingBox;

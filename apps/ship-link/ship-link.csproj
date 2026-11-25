@@ -19,9 +19,7 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="../../libs/igc-core/**/*.cs">
-      <Exclude>../../libs/igc-core/obj/**;../../libs/igc-core/bin/**</Exclude>
-    </Compile>
+    <Compile Include="../../libs/igc-core/**/*.cs" Exclude="../../libs/igc-core/obj/**;../../libs/igc-core/bin/**" />
   </ItemGroup>
 
   <ItemGroup>

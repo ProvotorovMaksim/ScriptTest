@@ -65,5 +65,3 @@ namespace Tests.Radar.Tests
         }
     }
 }
-TESTEOF
-echo "RadarConfigTests.cs written"

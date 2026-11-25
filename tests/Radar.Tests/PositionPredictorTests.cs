@@ -25,7 +25,7 @@ namespace Tests.Radar.Tests
             var predictor = new PositionPredictor();
             
             // Update with known position and velocity
-            predictor.UpdateState(Vector3D.Zero, Vector3D.UnitX * 10, 0.0);
+            predictor.UpdateState(Vector3D.Zero, Vector3D.UnitX * 10);
             
             // Predict 5 seconds ahead
             var predicted = predictor.Predict(Vector3D.Zero, Vector3D.UnitX * 10, 5.0);
@@ -40,7 +40,7 @@ namespace Tests.Radar.Tests
             var predictor = new PositionPredictor();
             
             // Start at position 100, move at 20 m/s
-            predictor.UpdateState(new Vector3D(100, 0, 0), Vector3D.UnitX * 20, 0.0);
+            predictor.UpdateState(new Vector3D(100, 0, 0), Vector3D.UnitX * 20);
             
             // Predict 3 seconds ahead
             var predicted = predictor.Predict(new Vector3D(100, 0, 0), Vector3D.UnitX * 20, 3.0);
@@ -50,5 +50,3 @@ namespace Tests.Radar.Tests
         }
     }
 }
-TESTEOF
-echo "PositionPredictorTests.cs written"

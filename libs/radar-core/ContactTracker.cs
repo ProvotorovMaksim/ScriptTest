@@ -1,5 +1,6 @@
 using System;
 using VRageMath;
+using Sandbox.ModAPI.Ingame;
 
 namespace SpaceEngineers.Libs.RadarCore
 {
@@ -21,8 +22,8 @@ namespace SpaceEngineers.Libs.RadarCore
         public void Update(MyDetectedEntityInfo info, double range, DateTime now)
         {
             EntityId = info.EntityId;
-            Name = info.DisplayNameText;
-            Type = info.EntityType.ToString();
+            Name = info.Name;
+            Type = info.Type.ToString();
             Relationship = info.Relationship.ToString();
             Position = info.Position;
             Velocity = info.Velocity;

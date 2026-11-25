@@ -4,147 +4,108 @@ using Sandbox.ModAPI.Ingame;
 
 namespace SpaceEngineers.Libs.RadarCore
 {
-    /// <summary>
-    /// Управляет механической платформой радара с двумя осями (азимут и элевация).
-    /// Поддерживает Fixed (неподвижный) и Gimbal (ротор+шарнир) режимы.
-    /// </summary>
     public sealed class GimbalController
     {
         private readonly RadarConfig _config;
-        private double _azimuth; // в градусах
-        private double _elevation; // в градусах
-        private bool _enabled;
-        private bool _calibrated;
-        private double _speedDegPerSec;
-        private double _azimuthMin, _azimuthMax;
-        private double _elevationMin, _elevationMax;
+        private IMyMotorStator _azimuth;
+        private IMyMotorStator _elevation;
+        private bool _sweepPositive = true;
 
         public GimbalController(RadarConfig config)
         {
             _config = config;
-            _azimuth = 0.0;
-            _elevation = 0.0;
-            _enabled = false;
-            _calibrated = false;
-
-            // Initialize limits from config
-            _azimuthMin = config.PlatformAzimuthMin;
-            _azimuthMax = config.PlatformAzimuthMax;
-            _elevationMin = config.PlatformElevationMin;
-            _elevationMax = config.PlatformElevationMax;
-            _speedDegPerSec = config.PlatformSpeedLimitDegreesPerSecond;
         }
 
-        /// <summary>
-        /// Включает gimbal платформу.
-        /// </summary>
-        public void Enable()
-        {
-            _enabled = true;
-        }
+        public bool IsReady => _azimuth != null && _elevation != null &&
+            _azimuth.IsWorking && _elevation.IsWorking && _azimuth.TopGrid != null &&
+            _azimuth.TopGrid == _elevation.CubeGrid && _elevation.TopGrid != null;
 
-        /// <summary>
-        /// Выключает gimbal платформу и паркует её в парковочном положении.
-        /// </summary>
-        public void Disable()
+        public void Bind(IMyGridTerminalSystem terminal, IMyTerminalBlock owner)
         {
-            _enabled = false;
-            Park();
-        }
-
-        /// <summary>
-        /// Калибрирует платформу в парковочное положение (0 азимут, 0 элевация).
-        /// </summary>
-        public void Calibrate()
-        {
-            _calibrated = true;
-            _azimuth = 0.0;
-            _elevation = 0.0;
-        }
-
-        /// <summary>
-        /// Возвращает платформу в парковочное положение.
-        /// </summary>
-        public void Park()
-        {
-            if (_calibrated)
+            Unbind();
+            _azimuth = terminal.GetBlockWithName(_config.AzimuthBlock) as IMyMotorStator;
+            _elevation = terminal.GetBlockWithName(_config.ElevationBlock) as IMyMotorStator;
+            if (_azimuth == null || _azimuth.CubeGrid != owner.CubeGrid ||
+                _elevation == null || _elevation == _azimuth || !_elevation.IsSameConstructAs(owner))
             {
-                _azimuth = 0.0;
-                _elevation = 0.0;
+                _azimuth = null;
+                _elevation = null;
+                return;
             }
-            else
-            {
-                // Если не калибРирован, возвращаем в безопасную зону
-                _azimuth = MathHelper.Clamp(_azimuth, _azimuthMin, _azimuthMax);
-                _elevation = MathHelper.Clamp(_elevation, _elevationMin, _elevationMax);
-            }
+            if (IsReady)
+                Stop();
         }
 
-        /// <summary>
-        /// Устанавливает азимутную угол.
-        /// </summary>
-        /// <param name="azimuthDeg">Угол в градусах</param>
-        public void SetAzimuth(double azimuthDeg)
+        public bool HasCamera(IMyCameraBlock camera) => IsReady && camera.CubeGrid == _elevation.TopGrid;
+
+        public void Aim(IMyCameraBlock camera, Vector3D target)
         {
-            if (!_enabled) return;
-
-            var azimuth = azimuthDeg;
-            // Применение инверсии
-            if (_config.InvertAzimuth) azimuth = -azimuth;
-
-            // Ограничение диапазона
-            azimuth = MathHelper.Clamp(azimuth, (float)_azimuthMin, (float)_azimuthMax);
-
-            // Плавное движение с учетом скорости
-            var delta = azimuth - _azimuth;
-            // Нормализация угла delta
-            delta = ((delta + 180.0) % 360.0) - 180.0;
-
-            var step = _speedDegPerSec; // за один update (100ms)
-            _azimuth = MathHelper.Clamp(_azimuth + Math.Sign(delta) * Math.Min(step, Math.Abs(delta)), (float)_azimuthMin, (float)_azimuthMax);
+            var forward = camera.WorldMatrix.Forward;
+            var direction = target - camera.GetPosition();
+            Drive(_azimuth, forward, direction, _config.InvertAzimuth,
+                _config.PlatformAzimuthMin, _config.PlatformAzimuthMax);
+            Drive(_elevation, forward, direction, _config.InvertElevation,
+                _config.PlatformElevationMin, _config.PlatformElevationMax);
         }
 
-        /// <summary>
-        /// Устанавливает угол элевации.
-        /// </summary>
-        /// <param name="elevationDeg">Угол в градусах</param>
-        public void SetElevation(double elevationDeg)
+        private void Drive(IMyMotorStator motor, Vector3D forward, Vector3D direction, bool invert, double min, double max)
         {
-            if (!_enabled) return;
+            var axis = motor.WorldMatrix.Up;
+            forward -= axis * Vector3D.Dot(forward, axis);
+            direction -= axis * Vector3D.Dot(direction, axis);
+            double error = forward.LengthSquared() < 1e-8 || direction.LengthSquared() < 1e-8 ? 0 :
+                Math.Atan2(Vector3D.Dot(axis, Vector3D.Cross(forward, direction)), Vector3D.Dot(forward, direction));
+            if (invert)
+                error = -error;
 
-            var elevation = elevationDeg;
-            // Применение инверсии
-            if (_config.InvertElevation) elevation = -elevation;
-
-            // Ограничение диапазона
-            elevation = MathHelper.Clamp(elevation, (float)_elevationMin, (float)_elevationMax);
-
-            // Плавное движение
-            var delta = elevation - _elevation;
-            delta = ((delta + 180.0) % 360.0) - 180.0;
-
-            var step = _speedDegPerSec;
-            _elevation = MathHelper.Clamp(_elevation + Math.Sign(delta) * Math.Min(step, Math.Abs(delta)), (float)_elevationMin, (float)_elevationMax);
+            double angle = ReadAngle(motor);
+            DriveTo(motor, angle, angle + error, LowerLimit(motor, min), UpperLimit(motor, max));
         }
 
-        /// <summary>
-        /// Получает текущий азимут.
-        /// </summary>
-        public double GetAzimuth() => _azimuth;
+        public void Sweep()
+        {
+            double angle = ReadAngle(_azimuth);
+            double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
+            double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
+            if (angle >= upper - 0.01)
+                _sweepPositive = false;
+            else if (angle <= lower + 0.01)
+                _sweepPositive = true;
 
-        /// <summary>
-        /// Получает текущую элевацию.
-        /// </summary>
-        public double GetElevation() => _elevation;
+            DriveTo(_azimuth, angle, _sweepPositive ? upper : lower, lower, upper);
+            _elevation.TargetVelocityRad = 0;
+        }
 
-        /// <summary>
-        /// Проверяет, включен ли gimbal.
-        /// </summary>
-        public bool IsEnabled() => _enabled;
+        private static double ReadAngle(IMyMotorStator motor) =>
+            Math.Atan2(Math.Sin(motor.Angle), Math.Cos(motor.Angle));
 
-        /// <summary>
-        /// Проверяет, калибРирована ли платформа.
-        /// </summary>
-        public bool IsCalibrated() => _calibrated;
+        private static double LowerLimit(IMyMotorStator motor, double minimum) =>
+            Math.Max(minimum * Math.PI / 180, motor.LowerLimitRad);
+
+        private static double UpperLimit(IMyMotorStator motor, double maximum) =>
+            Math.Min(maximum * Math.PI / 180, motor.UpperLimitRad);
+
+        private void DriveTo(IMyMotorStator motor, double angle, double goal, double lower, double upper)
+        {
+            double speed = _config.PlatformSpeedLimitDegreesPerSecond * Math.PI / 180;
+            double error = lower <= upper ? Math.Max(lower, Math.Min(upper, goal)) - angle : 0;
+            motor.TargetVelocityRad = Math.Abs(error) < 0.002 ? 0 :
+                (float)Math.Max(-speed, Math.Min(speed, error * 2));
+        }
+
+        public void Unbind()
+        {
+            Stop();
+            _azimuth = null;
+            _elevation = null;
+        }
+
+        public void Stop()
+        {
+            if (_azimuth != null)
+                _azimuth.TargetVelocityRad = 0;
+            if (_elevation != null)
+                _elevation.TargetVelocityRad = 0;
+        }
     }
 }

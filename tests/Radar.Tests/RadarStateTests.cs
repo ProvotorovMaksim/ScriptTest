@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using SpaceEngineers.Libs.RadarCore;
 
@@ -15,7 +16,7 @@ namespace Tests.Radar.Tests
             Assert.AreEqual(3, (int)RadarState.COASTING);
             Assert.AreEqual(4, (int)RadarState.LOST);
             Assert.AreEqual(5, (int)RadarState.OUT_OF_FOV);
-            Assert.AreEqual(6, (int)RadarState.CHARED);
+            Assert.AreEqual(6, (int)RadarState.CHARGING);
         }
 
         [Test]
@@ -36,5 +37,3 @@ namespace Tests.Radar.Tests
         }
     }
 }
-TESTEOF
-echo "RadarStateTests.cs written"

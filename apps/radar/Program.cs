@@ -1,8 +1,8 @@
 #region Prelude
 using System;
+using System.Globalization;
 using VRageMath;
 using Sandbox.ModAPI.Ingame;
-using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.RadarCore;
 
@@ -12,269 +12,166 @@ namespace SpaceEngineers.Apps.Radar
     {
         #endregion
 
-        #region Fields
-
-        private RadarConfig _config = new RadarConfig();
+        private const double ContactTimeoutSeconds = 5;
+        private readonly ContactTracker _contact = new ContactTracker();
+        private readonly PositionPredictor _predictor = new PositionPredictor();
+        private readonly RadarConfig _config;
+        private readonly CameraManager _cameras;
+        private readonly GimbalController _gimbal;
+        private IMyTextPanel _lcd;
+        private bool _scanning;
         private RadarState _state = RadarState.IDLE;
-        private ContactObservation _currentContact = new ContactObservation();
-        private ContactTracker _contactTracker = new ContactTracker();
-        private CameraManager _cameraManager = new CameraManager();
-        private GimbalController _gimbalController;
-        private IMyTextPanel _lcdPanel;
-        private StringBuilder _lcdText = new StringBuilder();
-#endregion
-
-        #region Construction
 
         public Program()
         {
-            Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            string error;
+            RadarConfig.TryParse(Me.CustomData, out _config, out error);
+            _cameras = new CameraManager(_config);
+            _gimbal = new GimbalController(_config);
+            Discover();
         }
-
-        #endregion
-
-        #region Configuration Loading
-
-        private void LoadConfig()
-        {
-            var cd = Me.CustomData;
-            if (!string.IsNullOrEmpty(cd))
-            {
-                TryParseCustomData(cd, out _config, out _);
-            }
-            _gimbalController = new GimbalController(_config);
-        }
-
-        private static bool TryParseCustomData(string customData, out RadarConfig config, out string error)
-        {
-            return RadarConfig.TryParse(customData, out config, out error);
-        }
-
-        #endregion
-
-#endregion
-
-        #region Command Processing
-
-        private void ProcessCommand(string command)
-        {
-            var args = command.Split(' ');
-            var cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "";
-
-            switch (cmd)
-            {
-                case "help":
-                    Echo("Radar commands: help, status, on, off, scan, lock, unlock, mode, range");
-                    break;
-
-                case "status":
-                    Echo($"Mode: {_config.Mode}");
-                    Echo($"State: {_state}");
-                    Echo($"Target: {_currentContact.Name} (Id: {_currentContact.EntityId})");
-                    Echo($"Range: {_currentContact.Range:0.##} m");
-                    Echo($"Cameras: {_cameraManager.Count()}");
-                    break;
-
-                case "on":
-                    _state = RadarState.IDLE;
-                    Echo("Radar on.");
-                    break;
-
-                case "off":
-                    _state = RadarState.IDLE;
-                    _contactTracker.Lose();
-                    SaveConfig();
-                    Echo("Radar off, target lost.");
-                    break;
-
-                case "scan":
-                    if (_cameraManager.HasCameras())
-                    {
-                        Echo("Scanning...");
-                        _state = RadarState.ACQUIRING;
-                    }
-                    else
-                    {
-                        Echo("No radar cameras found.");
-                    }
-#endregion
-
-        #region Main Loop
 
         public void Main(string argument, UpdateType updateSource)
         {
-            LoadConfig();
-
             if (!string.IsNullOrWhiteSpace(argument))
+                Command(argument.Trim());
+            else if (_scanning)
+                Scan(DateTime.UtcNow);
+            Render();
+        }
+
+        private void Discover()
+        {
+            _cameras.DiscoverCameras(GridTerminalSystem, Me);
+            _lcd = GridTerminalSystem.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
+            if (IsGimbal)
+                _gimbal.Bind(GridTerminalSystem, Me);
+        }
+
+        private void Command(string command)
+        {
+            switch (command.ToLowerInvariant())
             {
-                ProcessCommand(argument);
+                case "on":
+                case "scan":
+                    Discover();
+                    _scanning = true;
+                    _state = RadarState.ACQUIRING;
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                    break;
+                case "unlock":
+                    _contact.Lose();
+                    _gimbal.Stop();
+                    _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
+                    break;
+                case "off":
+                    _scanning = false;
+                    _contact.Lose();
+                    _gimbal.Stop();
+                    Runtime.UpdateFrequency = UpdateFrequency.None;
+                    _state = RadarState.IDLE;
+                    break;
+                case "mode fixed":
+                case "mode gimbal":
+                    _gimbal.Unbind();
+                    _contact.Lose();
+                    _config.Mode = command.EndsWith("gimbal", StringComparison.OrdinalIgnoreCase) ? "Gimbal" : "Fixed";
+                    _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
+                    Discover();
+                    break;
+                case "status":
+                    break;
+                default:
+                    double range;
+                    if (command.StartsWith("range ", StringComparison.OrdinalIgnoreCase) &&
+                        double.TryParse(command.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out range) &&
+                        range > 0 && !double.IsInfinity(range))
+                        _config.MaxRange = range;
+                    else
+                        Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, range <meters>");
+                    break;
+            }
+        }
+
+        private void Scan(DateTime now)
+        {
+            bool tracking = _contact.IsActive;
+            double age = tracking ? (now - _contact.LastSeen).TotalSeconds : 0;
+            if (tracking && age >= ContactTimeoutSeconds + _contact.Range / 2000)
+            {
+                _contact.Lose();
+                _gimbal.Stop();
+                _state = RadarState.LOST;
                 return;
             }
 
-            // Camera discovery
-            if (_cameraManager.Count() == 0) DiscoverCameras();
-
-            // State machine
-            switch (_state)
+            bool gimbal = IsGimbal;
+            if (gimbal && !_gimbal.IsReady)
             {
-                case RadarState.IDLE:
-                    break;
+                _gimbal.Stop();
+                _state = RadarState.OUT_OF_FOV;
+                return;
+            }
 
-                case RadarState.ACQUIRING:
-                    if (_cameraManager.HasCameras())
-                    {
-                        var cam = _cameraManager.GetCurrent();
-                        if (cam != null)
-                        {
-                            cam.EnableRaycast = true;
-                            var range = _config.MaxRange;
-                            var rayResult = cam.Raycast(range);
+            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, Math.Max(0, age)) : Vector3D.Zero;
+            bool gimbalDriven = false;
+            int rays = 0;
+            for (int i = 0; i < _cameras.Count() && rays < Math.Max(1, _config.MaxRaycastsPerUpdate); i++)
+            {
+                var camera = _cameras.GetNext();
+                if (!camera.IsWorking || (gimbal && !_gimbal.HasCamera(camera)))
+                    continue;
 
-                            if (!rayResult.IsEmpty())
-                            {
-                                var entity = rayResult.Value.Entity;
-                                if (entity != null)
-                                {
-                                    var pos = entity.GetPosition();
-                                    var vel = entity.LinearVelocity;
-#endregion
+                if (gimbal && !gimbalDriven)
+                {
+                    if (tracking)
+                        _gimbal.Aim(camera, target);
+                    else
+                        _gimbal.Sweep();
+                    gimbalDriven = true;
+                }
 
-        #region LCD
+                double maxRange = camera.RaycastDistanceLimit > 0
+                    ? Math.Min(_config.MaxRange, camera.RaycastDistanceLimit) : _config.MaxRange;
+                double range = tracking ? Vector3D.Distance(camera.GetPosition(), target) : maxRange;
+                if (range <= 0 || range > maxRange || (tracking ? !camera.CanScan(target) : !camera.CanScan(range)))
+                    continue;
 
-        private void UpdateLcd()
-        {
-            _lcdPanel ??= GridTerminalSystem?.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
-            if (_lcdPanel == null) return;
+                rays++;
+                var hit = tracking ? camera.Raycast(target) : camera.Raycast(range);
+                if (hit.IsEmpty() || (tracking && hit.EntityId != _contact.EntityId))
+                    continue;
 
-            _lcdText.Clear();
-            _lcdText.AppendLine($"Mode: {_config.Mode}");
-            _lcdText.AppendLine($"State: {_state}");
-            _lcdText.AppendLine($"Target: {_currentContact.Name}");
-            _lcdText.AppendLine($"Range: {_currentContact.Range:0.##} m");
-            _lcdText.AppendLine($"Cameras: {_cameraManager.Count()}");
+                _contact.Update(hit, Vector3D.Distance(Me.GetPosition(), hit.Position), now);
+                _predictor.UpdateState(_contact.Position, _contact.Velocity);
+                _state = RadarState.LOCKED;
+                return;
+            }
 
-            _lcdPanel.WriteText(_lcdText.ToString(), writePublic: false);
+            if (gimbal && !gimbalDriven)
+                _gimbal.Stop();
+            _state = tracking ? RadarState.COASTING : rays == 0 ? RadarState.CHARGING : RadarState.ACQUIRING;
         }
 
-        #endregion
+        private bool IsGimbal => string.Equals(_config.Mode, "Gimbal", StringComparison.OrdinalIgnoreCase);
+
+        private void Render()
+        {
+            var status = "Radar " + _config.Mode + " | " + _state + "\nCameras: " + _cameras.Count();
+            if (IsGimbal && !_gimbal.IsReady)
+                status += "\nAzimuth rotor and elevation hinge required.";
+            if (_contact.IsActive)
+                status += "\n" + _contact.Name + " [" + _contact.EntityId + "]\nLast range: " +
+                    _contact.Range.ToString("0", CultureInfo.InvariantCulture) + " m";
+            Echo(status);
+            if (_lcd != null && _lcd.IsSameConstructAs(Me))
+            {
+                _lcd.ContentType = ContentType.TEXT_AND_IMAGE;
+                _lcd.WriteText(status, false);
+            }
+        }
+
+        #region PreludeFooter
     }
 }
-                                    var name = entity.DisplayName;
-
-                                    _currentContact = new ContactObservation
-                                    {
-                                        EntityId = entity.EntityId,
-                                        Name = name ?? "Unknown",
-                                        Range = Vector3D.Distance(Me.CubeGrid.GetPosition(), pos),
-                                        IsMeasured = true,
-                                        Position = pos,
-                                        Velocity = vel,
-                                        Direction = cam.WorldMatrix.Forward
-                                    };
-
-                                    _contactTracker.Update(new MyDetectedEntityInfo
-                                    {
-                                        EntityId = entity.EntityId,
-                                        DisplayNameText = name,
-                                        Position = pos,
-                                        Velocity = vel
-                                    }, _currentContact.Range, DateTime.UtcNow);
-
-                                    _state = RadarState.LOCKED;
-                                    Echo($"Target acquired: {name}");
-                                }
-                            }
-                            else
-                            {
-                                _state = RadarState.OUT_OF_FOV;
-                                Echo("Nothing in range.");
-                            }
-                        }
-                        else
-                        {
-                            _state = RadarState.IDLE;
-                            Echo("No camera available.");
-                        }
-                    }
-                    else
-                    {
-                        Echo("No radar cameras configured.");
-                        _state = RadarState.IDLE;
-                    }
-                    break;
-
-                case RadarState.LOCKED:
-                    UpdateLcd();
-                    break;
-
-                case RadarState.OUT_OF_FOV:
-                    UpdateLcd();
-                    _state = RadarState.IDLE;
-                    break;
-            }
-
-            UpdateLcd();
-        }
-
-        #endregion
-                    break;
-
-                case "lock":
-                    _state = RadarState.LOCKED;
-                    Echo("Target locked.");
-                    break;
-
-                case "unlock":
-                    _state = RadarState.IDLE;
-                    _contactTracker.Lose();
-                    Echo("Target unlocked.");
-                    break;
-
-                case "mode":
-                    if (args.Length > 1)
-                    {
-                        var mode = args[1].ToLowerInvariant();
-                        if (mode == "fixed")
-                        {
-                            _config.Mode = "Fixed";
-                            _gimbalController.Disable();
-                            Echo($"Mode set to Fixed.");
-                        }
-                        else if (mode == "gimbal")
-                        {
-                            _config.Mode = "Gimbal";
-                            _gimbalController.Enable();
-                            Echo($"Mode set to Gimbal.");
-                        }
-                        else
-                        {
-                            Echo($"Unknown mode: {mode}. Use 'fixed' or 'gimbal'.");
-                        }
-                    }
-                    else
-                    {
-                        Echo($"Current mode: {_config.Mode}");
-                        Echo($"Gimbal enabled: {_gimbalController.IsEnabled()}");
-                    }
-                    break;
-
-                case "range":
-                    if (args.Length > 1 && double.TryParse(args[1], out var r))
-                    {
-                        _config.MaxRange = r;
-                        Echo($"Max range set to {r} m");
-                    }
-                    else
-                    {
-                        Echo($"Max range: {_config.MaxRange} m");
-                    }
-                    break;
-
-                default:
-                    Echo($"Unknown command: {cmd}. Type 'help'.");
-                    break;
-            }
-        }
-
-        #endregion
-        #endregion
+#endregion

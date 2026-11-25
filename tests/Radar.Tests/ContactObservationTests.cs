@@ -69,5 +69,3 @@ namespace Tests.Radar.Tests
         }
     }
 }
-TESTEOF
-echo "ContactObservationTests.cs written"

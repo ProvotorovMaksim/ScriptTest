@@ -16,6 +16,7 @@ projects=(
   "apps/fcs/fcs.csproj"
   "apps/ship-link/ship-link.csproj"
   "apps/sample/sample.csproj"
+  "apps/radar/radar.csproj"
   "TaskBus.Tests/TaskBus.Tests.csproj"
 )
 
@@ -72,8 +73,11 @@ package_taskbus_pb() {
     END { if (!in_body || !footer) exit 1 }
   ' "$project/Program.cs" > "$destination"
 
+  if [[ "$project" != apps/radar ]]; then
+    set -- libs/igc-core/TaskBusProtocol.cs libs/igc-core/TaskBusIgcHelper.cs "$@"
+  fi
   local library
-  for library in libs/igc-core/TaskBusProtocol.cs libs/igc-core/TaskBusIgcHelper.cs "$@"; do
+  for library in "$@"; do
     printf '\n' >> "$destination"
     awk '
       { sub(/\r$/, "") }
@@ -100,6 +104,8 @@ package_taskbus_pb apps/amn AMN.Base "$producer" libs/taskbus-consumer/GalnetWor
 package_taskbus_pb apps/platform AmnPlatform libs/taskbus-consumer/TaskBusConsumer.cs libs/taskbus-consumer/GalnetWorkerBridge.cs libs/taskbus-consumer/MiningRouteLoader.cs
 package_taskbus_pb apps/sample SampleMain libs/igc-core/Autopilot.cs libs/igc-core/Logger.cs
 package_taskbus_pb apps/ship-link ShipLink
+
+package_taskbus_pb apps/radar Radar libs/radar-core/*.cs
 
 dotnet build tests/PbCompile/PbCompile.csproj -c Release --nologo
 
