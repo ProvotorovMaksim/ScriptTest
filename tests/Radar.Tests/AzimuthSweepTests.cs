@@ -21,9 +21,9 @@ namespace Tests.Radar.Tests
         }
 
         [Test]
-        public void ParkingStopsWhenAnAxisNoLongerMakesProgress()
+        public void AxisMonitorDetectsAStallAndResetsForTheNextPosition()
         {
-            var progress = new GimbalParkProgress();
+            var progress = new GimbalAxisProgress();
             var start = new DateTime(2026, 1, 1);
             Assert.That(progress.IsStalled(0.3, start, 0.001), Is.False);
             Assert.That(progress.IsStalled(0.29, start.AddSeconds(4), 0.001), Is.False);

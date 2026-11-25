@@ -10,8 +10,9 @@ namespace SpaceEngineers.Libs.RadarCore
         private IMyMotorStator _azimuth;
         private IMyMotorStator _elevation;
         private readonly AzimuthSweep _sweep = new AzimuthSweep();
-        private readonly GimbalParkProgress _azimuthPark = new GimbalParkProgress();
-        private readonly GimbalParkProgress _elevationPark = new GimbalParkProgress();
+        private readonly GimbalAxisProgress _sweepProgress = new GimbalAxisProgress();
+        private readonly GimbalAxisProgress _azimuthPark = new GimbalAxisProgress();
+        private readonly GimbalAxisProgress _elevationPark = new GimbalAxisProgress();
 
         public GimbalController(RadarConfig config)
         {
@@ -54,6 +55,7 @@ namespace SpaceEngineers.Libs.RadarCore
         public void Aim(IMyCameraBlock camera, Vector3D target)
         {
             _sweep.Reset();
+            _sweepProgress.Reset();
             var forward = camera.WorldMatrix.Forward;
             var direction = target - camera.GetPosition();
             Drive(_azimuth, forward, direction, _config.InvertAzimuth,
@@ -78,12 +80,13 @@ namespace SpaceEngineers.Libs.RadarCore
             DriveTo(motor, angle, angle + error, lower, upper);
         }
 
-        public bool HoldSweepPosition()
+        public bool HoldSweepPosition(DateTime now, out bool stalled)
         {
             double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
             double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
             double angle = GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper);
             _elevation.TargetVelocityRad = 0;
+            stalled = false;
             if (lower > upper)
             {
                 _azimuth.TargetVelocityRad = 0;
@@ -93,11 +96,16 @@ namespace SpaceEngineers.Libs.RadarCore
             double goal = _sweep.Goal(angle, lower, upper);
             if (AzimuthSweep.IsAtGoal(angle, goal))
             {
+                _sweepProgress.Reset();
                 _azimuth.TargetVelocityRad = 0;
                 return true;
             }
 
-            DriveTo(_azimuth, angle, goal, lower, upper);
+            stalled = _sweepProgress.IsStalled(Math.Abs(goal - angle), now, ProgressStep);
+            if (stalled)
+                _azimuth.TargetVelocityRad = 0;
+            else
+                DriveTo(_azimuth, angle, goal, lower, upper);
             return false;
         }
 
@@ -112,12 +120,11 @@ namespace SpaceEngineers.Libs.RadarCore
         {
             double azimuthError = ParkAxis(_azimuth, _config.PlatformAzimuthMin, _config.PlatformAzimuthMax);
             double elevationError = ParkAxis(_elevation, _config.PlatformElevationMin, _config.PlatformElevationMax);
-            double progressStep = Math.Min(0.001, _config.PlatformSpeedLimitDegreesPerSecond * Math.PI / 360);
-            bool azimuthStalled = _azimuthPark.IsStalled(azimuthError, now, progressStep);
-            bool elevationStalled = _elevationPark.IsStalled(elevationError, now, progressStep);
+            bool azimuthStalled = _azimuthPark.IsStalled(azimuthError, now, ProgressStep);
+            bool elevationStalled = _elevationPark.IsStalled(elevationError, now, ProgressStep);
             stalled = azimuthStalled || elevationStalled;
-            return azimuthError <= GimbalParkProgress.AngleTolerance &&
-                elevationError <= GimbalParkProgress.AngleTolerance;
+            return azimuthError <= GimbalAxisProgress.AngleTolerance &&
+                elevationError <= GimbalAxisProgress.AngleTolerance;
         }
 
         private double ParkAxis(IMyMotorStator motor, double minimum, double maximum)
@@ -129,6 +136,8 @@ namespace SpaceEngineers.Libs.RadarCore
             DriveTo(motor, angle, goal, lower, upper);
             return Math.Abs(goal - angle);
         }
+
+        private double ProgressStep => Math.Min(0.001, _config.PlatformSpeedLimitDegreesPerSecond * Math.PI / 360);
 
         private static double LowerLimit(IMyMotorStator motor, double minimum) =>
             Math.Max(minimum * Math.PI / 180, motor.LowerLimitRad);
@@ -154,6 +163,7 @@ namespace SpaceEngineers.Libs.RadarCore
         public void Stop()
         {
             _sweep.Reset();
+            _sweepProgress.Reset();
             _azimuthPark.Reset();
             _elevationPark.Reset();
             if (_azimuth != null)
@@ -162,7 +172,7 @@ namespace SpaceEngineers.Libs.RadarCore
                 _elevation.TargetVelocityRad = 0;
         }
     }
-    public sealed class GimbalParkProgress
+    public sealed class GimbalAxisProgress
     {
         public const double AngleTolerance = 0.002;
         private const double StallSeconds = 5;

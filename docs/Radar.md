@@ -31,7 +31,8 @@ zero angles. If zero is outside an axis's allowed travel, it parks at the
 nearest allowed angle. The display shows `PARKING` during movement and
 `PARKED` once both axes reach their setpoints. Use `off` to stop movement
 or `scan` to resume scanning. Parking stops both drives if either axis
-fails to make progress for five seconds.
+fails to make progress for five seconds. The same timeout stops Gimbal
+search when azimuth stalls between scan positions. Run `scan` to retry.
 
 ## Diagnostics and acceptance
 

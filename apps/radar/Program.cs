@@ -67,7 +67,7 @@ namespace SpaceEngineers.Apps.Radar
                     break;
                 case "unlock":
                     if (_parking)
-                        StopParking(RadarState.IDLE);
+                        StopMotion(RadarState.IDLE);
                     _contact.Clear();
                     _gimbal.Stop();
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
@@ -84,7 +84,7 @@ namespace SpaceEngineers.Apps.Radar
                 case "mode fixed":
                 case "mode gimbal":
                     if (_parking)
-                        StopParking(RadarState.IDLE);
+                        StopMotion(RadarState.IDLE);
                     _gimbal.Unbind();
                     _scanProblem = null;
                     _contact.Clear();
@@ -124,24 +124,25 @@ namespace SpaceEngineers.Apps.Radar
             _scanProblem = _gimbal.GetUnavailableReason();
             if (_scanProblem != null)
             {
-                StopParking(RadarState.UNAVAILABLE);
+                StopMotion(RadarState.UNAVAILABLE);
                 return;
             }
 
             bool stalled;
             if (_gimbal.ParkAtZero(now, out stalled))
-                StopParking(RadarState.PARKED);
+                StopMotion(RadarState.PARKED);
             else if (stalled)
             {
                 _scanProblem = "Parking stopped: an axis did not move toward its setpoint.";
-                StopParking(RadarState.UNAVAILABLE);
+                StopMotion(RadarState.UNAVAILABLE);
             }
             else
                 _state = RadarState.PARKING;
         }
 
-        private void StopParking(RadarState state)
+        private void StopMotion(RadarState state)
         {
+            _scanning = false;
             _parking = false;
             _gimbal.Stop();
             Runtime.UpdateFrequency = UpdateFrequency.None;
@@ -186,7 +187,16 @@ namespace SpaceEngineers.Apps.Radar
                     if (tracking)
                         _gimbal.Aim(camera, target);
                     else
-                        gimbalReadyToScan = _gimbal.HoldSweepPosition();
+                    {
+                        bool stalled;
+                        gimbalReadyToScan = _gimbal.HoldSweepPosition(now, out stalled);
+                        if (stalled)
+                        {
+                            _scanProblem = "Search stopped: the azimuth axis did not reach its scan position.";
+                            StopMotion(RadarState.UNAVAILABLE);
+                            return;
+                        }
+                    }
                     gimbalDriven = true;
                 }
 
