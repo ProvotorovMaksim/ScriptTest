@@ -1696,40 +1696,61 @@ namespace SpaceEngineers.Apps.Platform
 
             _surveyWaypoints.Clear();
             remote.GetWaypointInfo(_surveyWaypoints);
-            if (_surveyWaypoints.Count != 1 ||
-                !CheckMiningLane(x, y, z, _surveyWaypoints[0].Coords + Me.CubeGrid.GetPosition() - remote.GetPosition()))
+            bool hasGeneratedWaypoint = _surveyWaypoints.Count == 1 && _surveyWaypoints[0].Name == MiningEndpointName;
+            bool generateWaypoint = automatic && (_surveyWaypoints.Count == 0 || hasGeneratedWaypoint);
+            if (!generateWaypoint && _surveyWaypoints.Count != 1)
             {
                 Echo("Load one reviewed mining endpoint inside the assigned lane.");
                 return;
             }
 
-            if (automatic)
-            {
-                var offset = _surveyWaypoints[0].Coords - remote.GetPosition();
-                if (remote.Direction != Base6Directions.Direction.Forward || offset.LengthSquared() <= 4 ||
-                    Vector3D.Dot(Vector3D.Normalize(offset), remote.WorldMatrix.Forward) < 0.996)
-                {
-                    Echo("Automatic mining pass requires a Forward controller aligned to the reviewed endpoint.");
-                    return;
-                }
-            }
-
-            if (_surveyWaypoints[0].Name == MiningEndpointName)
+            var position = remote.GetPosition();
+            var controllerOffset = position - Me.CubeGrid.GetPosition();
+            var endpoint = generateWaypoint ? position : _surveyWaypoints[0].Coords;
+            if (generateWaypoint || hasGeneratedWaypoint)
             {
                 double oreX;
                 double oreY;
                 double oreZ;
-                var plannedGridPosition = _surveyWaypoints[0].Coords + Me.CubeGrid.GetPosition() - remote.GetPosition();
-                if (!_worker.TryGetMiningOrePosition(out oreX, out oreY, out oreZ) ||
-                    Vector3D.DistanceSquared(plannedGridPosition, new Vector3D(oreX, oreY, oreZ)) > 4)
+                if (!_worker.TryGetMiningOrePosition(out oreX, out oreY, out oreZ))
+                {
+                    Echo("The mining assignment has no verified ore endpoint.");
+                    return;
+                }
+
+                var assignedEndpoint = new Vector3D(oreX, oreY, oreZ) + controllerOffset;
+                if (generateWaypoint)
+                    endpoint = assignedEndpoint;
+                else if (Vector3D.DistanceSquared(endpoint, assignedEndpoint) > 4)
                 {
                     Echo("The generated endpoint no longer matches the assignment or ship alignment. Run mine plan again.");
                     return;
                 }
             }
 
+            if (!CheckMiningLane(x, y, z, endpoint - controllerOffset))
+            {
+                Echo("Load one reviewed mining endpoint inside the assigned lane.");
+                return;
+            }
+            if (automatic)
+            {
+                var offset = endpoint - position;
+                if (remote.Direction != Base6Directions.Direction.Forward || offset.LengthSquared() <= 4 ||
+                    Vector3D.Dot(Vector3D.Normalize(offset), remote.WorldMatrix.Forward) < 0.996)
+                {
+                    Echo("Automatic mining pass requires a Forward controller aligned to the endpoint.");
+                    return;
+                }
+            }
+
+            if (generateWaypoint)
+            {
+                remote.ClearWaypoints();
+                remote.AddWaypoint(endpoint, MiningEndpointName);
+            }
             _platformMiningPass = true;
-            _miningPassEndpoint = _surveyWaypoints[0].Coords;
+            _miningPassEndpoint = endpoint;
             _miningPassDistance = Vector3D.Distance(remote.GetPosition(), _miningPassEndpoint);
             try
             {

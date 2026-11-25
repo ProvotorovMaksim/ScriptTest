@@ -524,10 +524,13 @@ origin and preserves manually prepared waypoints. It leaves the autopilot
 and drills idle while the operator checks alignment and clearance.
 Run `mine pass` to start both the drills and the controller. With
 `MiningAutoPass=true`, arriving within 2 m of the assignment approach
-under the same lease enables a single attempt to start the preloaded
-pass. The ship must settle, and the pass controller must face Forward
-within about five degrees of its reviewed endpoint. The automatic
-handoff requires the endpoint to be prepared before the approach.
+under the same lease enables a single attempt to start the pass. If the
+pass controller is empty or holds one generated waypoint, the platform
+calculates the endpoint from the current assignment's ore GPS and the
+controller offset. It preserves manually loaded routes. The ship must
+settle, and the pass controller must face Forward within about five
+degrees of the endpoint. Enable this only for surveyed lanes with
+verified drill coverage and clearance.
 `ore stop` or `mine drills off` cancels a pending automatic start. The pass
 stops on completion, lease loss, lane or cargo limits, or speed above
 1.5 m/s. It also stops if it advances less than 0.5 m toward its endpoint
