@@ -964,6 +964,27 @@ namespace SpaceEngineers.Apps.ShipLink
                 withdrawnUntil >= expiry)
                 return false;
 
+            long measured = 0;
+            string motion = null;
+            long entityId;
+            if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
+            {
+                var gpsFields = gps.Split(':');
+                if (gpsFields.Length > 6 && gpsFields[5] == "RV1")
+                {
+                    if (gpsFields.Length != 11 || !long.TryParse(gpsFields[6], out measured) ||
+                        measured <= 0 || measured > now || now - measured > ContactLifetime ||
+                        !TryReadFiniteComponent(gpsFields[7]) || !TryReadFiniteComponent(gpsFields[8]) ||
+                        !TryReadFiniteComponent(gpsFields[9]))
+                        return false;
+
+                    expiry = Math.Min(expiry, measured + ContactLifetime);
+                    if (expiry <= now || withdrawnUntil >= expiry)
+                        return false;
+                    motion = " " + gpsFields[6] + " " + gpsFields[7] + " " + gpsFields[8] + " " + gpsFields[9];
+                }
+            }
+
             _contacts.RemoveAll(contact => contact.Expires <= now);
             var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
                 contact.Assistance == assistance && contact.Hazard == hazard && (assistance || contact.Name == name));
@@ -981,29 +1002,14 @@ namespace SpaceEngineers.Apps.ShipLink
                 existing = new FleetContact { Source = source, Name = name, Assistance = assistance, Hazard = hazard };
                 _contacts.Add(existing);
             }
-            else if (existing.Expires >= expiry)
+            else if (existing.MeasuredTicks > 0 ? measured <= existing.MeasuredTicks :
+                measured == 0 && existing.Expires >= expiry)
                 return false;
 
             existing.Expires = expiry;
             existing.Position = new Vector3D(x, y, z);
-            existing.RadarMotion = null;
-            existing.MeasuredTicks = 0;
-            long entityId;
-            if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
-            {
-                var gpsFields = gps.Split(':');
-                long measured;
-                if (gpsFields.Length == 11 && gpsFields[5] == "RV1" &&
-                    long.TryParse(gpsFields[6], out measured) && measured > 0 && measured <= now &&
-                    now - measured <= ContactLifetime + 2 * TimeSpan.TicksPerSecond &&
-                    TryReadFiniteComponent(gpsFields[7]) && TryReadFiniteComponent(gpsFields[8]) &&
-                    TryReadFiniteComponent(gpsFields[9]))
-                {
-                    existing.MeasuredTicks = measured;
-                    existing.RadarMotion = " " + gpsFields[6] + " " + gpsFields[7] + " " +
-                        gpsFields[8] + " " + gpsFields[9];
-                }
-            }
+            existing.RadarMotion = motion;
+            existing.MeasuredTicks = measured;
             _displayTick = DisplayUpdateIntervalTicks;
             return true;
         }
