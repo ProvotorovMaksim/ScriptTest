@@ -81,6 +81,11 @@ ship at the object and run `contact cockpit <recipient relay ID> <range>`
 on ShipLink. Range must be between 1 and 5000 metres. The camera must
 have enough raycast charge. Select the report as `Cockpit <entity ID>`.
 
+Set `CockpitScanRange=<metres>` in ShipLink Custom Data to add sightings
+automatically. ShipLink attempts at most one raycast per second while
+the cockpit is occupied. At longer ranges, charge can take more than
+one second. Local sightings go to the journal and the configured fleet peers.
+
 ## Sharing an AI detection
 
 Name a local offensive AI block `[SHIPLINK AI]`. Configure the other

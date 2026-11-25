@@ -81,6 +81,8 @@ namespace SpaceEngineers.Apps.ShipLink
         private bool _autoTurret;
         private bool _autoAi;
         private long _nextAiSample;
+        private long _nextCockpitSample;
+        private double _cockpitScanRange;
         private const long AiDetectionLifetime = 5 * TimeSpan.TicksPerSecond;
         private long _nextTurretSample;
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
@@ -134,6 +136,11 @@ namespace SpaceEngineers.Apps.ShipLink
                     _autoTurret = true;
                 if (string.Equals(line.Trim(), "ShareAiDetections=true", StringComparison.OrdinalIgnoreCase))
                     _autoAi = true;
+                const string cockpitSetting = "CockpitScanRange=";
+                double range;
+                if (line.StartsWith(cockpitSetting, StringComparison.OrdinalIgnoreCase) &&
+                    TryReadCockpitScanRange(line.Substring(cockpitSetting.Length), out range))
+                    _cockpitScanRange = range;
                 long peer;
                 if (_heartbeatRelays.Count < 4 && line.StartsWith(heartbeatSetting, StringComparison.OrdinalIgnoreCase) &&
                     long.TryParse(line.Substring(heartbeatSetting.Length), out peer) && peer != 0)
@@ -287,6 +294,8 @@ namespace SpaceEngineers.Apps.ShipLink
             _cockpits.Clear();
             _surfaces.Clear();
             GridTerminalSystem.GetBlocksOfType(_cockpits, cockpit => cockpit.IsFunctional);
+            if (command.Length == 0)
+                SampleCockpit();
             foreach (var cockpit in _cockpits)
             {
                 for (int i = 0; i < cockpit.SurfaceCount; i++)
@@ -630,12 +639,10 @@ namespace SpaceEngineers.Apps.ShipLink
         private void ShareCockpitContact(string argument)
         {
             var fields = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            var culture = System.Globalization.CultureInfo.InvariantCulture;
             long relay;
             double range;
             if (fields.Length != 2 || !long.TryParse(fields[0], out relay) || relay == 0 ||
-                !double.TryParse(fields[1], System.Globalization.NumberStyles.Float, culture, out range) ||
-                !(range >= 1 && range <= 5000))
+                !TryReadCockpitScanRange(fields[1], out range))
             {
                 Echo("Use contact cockpit <relay ID> <1 to 5000 metres>.");
                 return;
@@ -643,10 +650,8 @@ namespace SpaceEngineers.Apps.ShipLink
 
             _cockpits.Clear();
             GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.CubeGrid == Me.CubeGrid);
-            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl);
-            var camera = GridTerminalSystem.GetBlockWithName("[SHIPLINK COCKPIT CAM]") as IMyCameraBlock;
-            if (cockpit == null || camera == null || !camera.IsWorking || camera.CubeGrid != Me.CubeGrid ||
-                Vector3D.Dot(cockpit.WorldMatrix.Forward, camera.WorldMatrix.Forward) < 0.999)
+            var camera = FindCockpitCamera();
+            if (camera == null)
             {
                 Echo("Use an occupied cockpit and a working [SHIPLINK COCKPIT CAM] facing the same way.");
                 return;
@@ -660,6 +665,38 @@ namespace SpaceEngineers.Apps.ShipLink
             }
 
             ShareObservation(relay, "Cockpit", camera.Raycast(range));
+        }
+
+        private static bool TryReadCockpitScanRange(string text, out double range) =>
+            double.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out range) && range >= 1 && range <= 5000;
+
+        private IMyCameraBlock FindCockpitCamera()
+        {
+            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl && block.CubeGrid == Me.CubeGrid);
+            var camera = GridTerminalSystem.GetBlockWithName("[SHIPLINK COCKPIT CAM]") as IMyCameraBlock;
+            return cockpit != null && camera != null && camera.IsWorking && camera.CubeGrid == Me.CubeGrid &&
+                Vector3D.Dot(cockpit.WorldMatrix.Forward, camera.WorldMatrix.Forward) >= 0.999 ? camera : null;
+        }
+
+        private void SampleCockpit()
+        {
+            if (_cockpitScanRange <= 0)
+                return;
+            long now = DateTime.UtcNow.Ticks;
+            if (now < _nextCockpitSample)
+                return;
+            _nextCockpitSample = now + TimeSpan.TicksPerSecond;
+
+            var camera = FindCockpitCamera();
+            if (camera == null)
+                return;
+            camera.EnableRaycast = true;
+            if (!camera.CanScan(_cockpitScanRange))
+                return;
+            var hit = camera.Raycast(_cockpitScanRange);
+            if (!hit.IsEmpty() && hit.EntityId != 0)
+                PublishLocalObservation("Cockpit", FormatObservation("Cockpit", hit, now));
         }
 
         private void ShareObservation(long relay, string source, MyDetectedEntityInfo hit)
