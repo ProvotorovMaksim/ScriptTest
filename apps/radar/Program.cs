@@ -20,6 +20,7 @@ namespace SpaceEngineers.Apps.Radar
         private readonly GimbalController _gimbal;
         private IMyTextPanel _lcd;
         private bool _scanning;
+        private string _scanProblem;
         private RadarState _state = RadarState.IDLE;
 
         public Program()
@@ -56,6 +57,7 @@ namespace SpaceEngineers.Apps.Radar
                 case "on":
                 case "scan":
                     Discover();
+                    _scanProblem = null;
                     _scanning = true;
                     _state = RadarState.ACQUIRING;
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
@@ -67,6 +69,7 @@ namespace SpaceEngineers.Apps.Radar
                     break;
                 case "off":
                     _scanning = false;
+                    _scanProblem = null;
                     _contact.Clear();
                     _gimbal.Stop();
                     Runtime.UpdateFrequency = UpdateFrequency.None;
@@ -75,6 +78,7 @@ namespace SpaceEngineers.Apps.Radar
                 case "mode fixed":
                 case "mode gimbal":
                     _gimbal.Unbind();
+                    _scanProblem = null;
                     _contact.Clear();
                     _config.Mode = command.EndsWith("gimbal", StringComparison.OrdinalIgnoreCase) ? "Gimbal" : "Fixed";
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
@@ -107,14 +111,16 @@ namespace SpaceEngineers.Apps.Radar
             }
 
             bool gimbal = IsGimbal;
-            if (gimbal && !_gimbal.IsReady)
+            _scanProblem = gimbal ? _gimbal.GetUnavailableReason() : null;
+            if (_scanProblem != null)
             {
                 _gimbal.Stop();
-                _state = RadarState.OUT_OF_FOV;
+                _state = RadarState.UNAVAILABLE;
                 return;
             }
 
             Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : Vector3D.Zero;
+            bool eligibleCamera = false;
             bool gimbalDriven = false;
             bool gimbalReadyToScan = true;
             int rays = 0;
@@ -124,6 +130,7 @@ namespace SpaceEngineers.Apps.Radar
                 if (!camera.IsWorking || (gimbal && !_gimbal.HasCamera(camera)))
                     continue;
 
+                eligibleCamera = true;
                 if (gimbal && !gimbalDriven)
                 {
                     if (tracking)
@@ -153,8 +160,14 @@ namespace SpaceEngineers.Apps.Radar
                 return;
             }
 
-            if (gimbal && !gimbalDriven)
+            if (!eligibleCamera)
+            {
                 _gimbal.Stop();
+                _scanProblem = gimbal ? "A working radar camera must be on the hinge head." :
+                    "No working camera in the radar group or with the configured name prefix.";
+                _state = RadarState.UNAVAILABLE;
+                return;
+            }
             if (gimbal && !tracking && rays > 0)
                 _gimbal.AdvanceSweep();
             _state = tracking ? RadarState.COASTING :
@@ -166,8 +179,9 @@ namespace SpaceEngineers.Apps.Radar
         private void Render(DateTime now)
         {
             var status = "Radar " + _config.Mode + " | " + _state + "\nCameras: " + _cameras.Count();
-            if (IsGimbal && !_gimbal.IsReady)
-                status += "\nAzimuth rotor and elevation hinge required.";
+            string problem = _scanProblem ?? (IsGimbal ? _gimbal.GetUnavailableReason() : null);
+            if (problem != null)
+                status += "\n" + problem;
             if (_contact.EntityId != 0)
             {
                 status += (_contact.IsActive ? "\nContact: " : "\nLast seen: ") +

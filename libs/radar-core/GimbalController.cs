@@ -16,9 +16,20 @@ namespace SpaceEngineers.Libs.RadarCore
             _config = config;
         }
 
-        public bool IsReady => _azimuth != null && _elevation != null &&
-            _azimuth.IsWorking && _elevation.IsWorking && _azimuth.TopGrid != null &&
-            _azimuth.TopGrid == _elevation.CubeGrid && _elevation.TopGrid != null;
+        private bool HasConnectedAxes => _azimuth != null && _elevation != null &&
+            _azimuth.TopGrid != null && _azimuth.TopGrid == _elevation.CubeGrid && _elevation.TopGrid != null;
+
+        public string GetUnavailableReason()
+        {
+            if (!HasConnectedAxes)
+                return "Expected rotor on the radar grid, hinge on the rotor head, and a hinge head.";
+            if (!_azimuth.IsWorking || !_elevation.IsWorking || _azimuth.RotorLock || _elevation.RotorLock)
+                return "Both gimbal axes must be powered, enabled and unlocked.";
+            if (LowerLimit(_azimuth, _config.PlatformAzimuthMin) > UpperLimit(_azimuth, _config.PlatformAzimuthMax) ||
+                LowerLimit(_elevation, _config.PlatformElevationMin) > UpperLimit(_elevation, _config.PlatformElevationMax))
+                return "Gimbal hardware and configured travel limits do not overlap.";
+            return null;
+        }
 
         public void Bind(IMyGridTerminalSystem terminal, IMyTerminalBlock owner)
         {
@@ -32,11 +43,11 @@ namespace SpaceEngineers.Libs.RadarCore
                 _elevation = null;
                 return;
             }
-            if (IsReady)
+            if (HasConnectedAxes)
                 Stop();
         }
 
-        public bool HasCamera(IMyCameraBlock camera) => IsReady && camera.CubeGrid == _elevation.TopGrid;
+        public bool HasCamera(IMyCameraBlock camera) => _elevation != null && camera.CubeGrid == _elevation.TopGrid;
 
         public void Aim(IMyCameraBlock camera, Vector3D target)
         {

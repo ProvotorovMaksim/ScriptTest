@@ -11,6 +11,7 @@ namespace SpaceEngineers.Libs.RadarCore
     /// LOST — объект утерян, предсказание больше не достоверно.
     /// OUT_OF_FOV — объект выходит за доступное поле сканирования камер.
     /// CHARGING — камеры заряжаются, сканирование приостановлено.
+    /// UNAVAILABLE — камеры или приводы недоступны.
     /// </summary>
     public enum RadarState
     {
@@ -20,6 +21,7 @@ namespace SpaceEngineers.Libs.RadarCore
         COASTING,
         LOST,
         OUT_OF_FOV,
-        CHARGING
+        CHARGING,
+        UNAVAILABLE
     }
 }
