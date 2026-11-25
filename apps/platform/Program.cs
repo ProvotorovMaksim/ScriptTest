@@ -205,14 +205,14 @@ namespace SpaceEngineers.Apps.Platform
             var unload = ReadStorageHeader(ref savedStorage, MiningUnloadPrefix);
             if (unload != null)
             {
-                var fields = unload.Split('|');
+                int separator = unload.LastIndexOf('|');
                 double deposit;
-                if (fields.Length == 2 && fields[0].Length != 0 &&
-                    double.TryParse(fields[1], System.Globalization.NumberStyles.Float,
+                if (separator > 0 &&
+                    double.TryParse(unload.Substring(separator + 1), System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out deposit) &&
                     deposit >= 0 && !double.IsInfinity(deposit))
                 {
-                    _autoMiningUnloadLease = fields[0];
+                    _autoMiningUnloadLease = unload.Substring(0, separator);
                     _miningUnloadStartDeposit = deposit;
                 }
             }
@@ -519,8 +519,8 @@ namespace SpaceEngineers.Apps.Platform
             long grid;
             string resource;
             double amount;
-            if (_drillingLease != null || !_worker.TryGetMiningPoint(out grid) ||
-                !_worker.TryGetMiningCargoTarget(out resource, out amount))
+            if (_drillingLease != null || _worker.SupervisedCruiseRemote != 0 ||
+                !_worker.TryGetMiningPoint(out grid) || !_worker.TryGetMiningCargoTarget(out resource, out amount))
             {
                 Echo("Stop the drills and confirm the mining assignment before unloading.");
                 return false;
@@ -1659,6 +1659,9 @@ namespace SpaceEngineers.Apps.Platform
                 _lastProbe = "Armed mining cruise cancelled: the lease or flight state changed.";
                 return;
             }
+
+            if (_autoMiningUnloadLease != null)
+                return;
 
             var remote = GridTerminalSystem.GetBlockWithId(_armedMiningCruiseRemote) as IMyRemoteControl;
             if (remote == null || remote.CubeGrid != Me.CubeGrid || !remote.IsWorking)

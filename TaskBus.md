@@ -636,6 +636,8 @@ wait or stops an ongoing unload. Configure both cargo container names.
 The wait for docking does not survive a PB restart. Once unloading is
 active, the platform saves its lease and resumes after the same lease
 is reconfirmed, provided it is still connected to the assigned point.
+An armed mining cruise waits while automatic unloading is active or
+waiting for lease confirmation.
 
 Set `MiningAutoRepeat=true` alongside `MiningAutoDepart=true` to have
 automatic unloading arm another trip if it recorded a partial deposit,
