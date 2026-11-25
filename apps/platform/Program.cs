@@ -2720,6 +2720,9 @@ namespace SpaceEngineers.Apps.Platform
                 }
 
                 bool hit = false;
+                var observationPosition = Me.CubeGrid.GetPosition();
+                double bestDistanceSquared = _reportOre.HasValue && _reportView.HasValue
+                    ? Vector3D.DistanceSquared(_reportOre.Value, _reportView.Value) : double.PositiveInfinity;
                 var reports = property.GetValue(_sampleDetector);
                 foreach (var report in (reports ?? "").Split('\n'))
                 {
@@ -2733,10 +2736,12 @@ namespace SpaceEngineers.Apps.Platform
                         hit = true;
                         var orePosition = new Vector3D(x, y, z);
                         if (_oreHits.Count < MaxOreHits) _oreHits.Add(orePosition);
-                        if (!_reportOre.HasValue || !_reportView.HasValue)
+                        double distanceSquared = Vector3D.DistanceSquared(orePosition, observationPosition);
+                        if (distanceSquared < bestDistanceSquared)
                         {
+                            bestDistanceSquared = distanceSquared;
                             _reportOre = orePosition;
-                            _reportView = Me.CubeGrid.GetPosition();
+                            _reportView = observationPosition;
                         }
                     }
                 }
