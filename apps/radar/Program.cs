@@ -277,12 +277,16 @@ namespace SpaceEngineers.Apps.Radar
                 status += "\n" + problem;
             if (_contact.EntityId != 0)
             {
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                var position = _contact.Position;
                 status += (_contact.IsActive ? "\nContact: " : "\nLast seen: ") +
-                    _contact.Name + " [" + _contact.EntityId + "]\nAge: " +
-                    _contact.AgeSecondsAt(now).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s | Range: " +
-                    _contact.Range.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " m";
-                if (!_contact.IsActive)
-                    status += "\nLast position: " + _contact.Position.ToString();
+                    _contact.Name + " [" + _contact.EntityId + "]\n" +
+                    _contact.Type + " | " + _contact.Relationship + "\n" +
+                    "Last measurement: " + _contact.AgeSecondsAt(now).ToString("0.0", culture) +
+                    " s ago | " + _contact.Range.ToString("0", culture) + " m | " +
+                    _contact.Velocity.Length().ToString("0.0", culture) + " m/s\n" +
+                    "GPS:Radar last fix:" + position.X.ToString("0.00", culture) + ":" +
+                    position.Y.ToString("0.00", culture) + ":" + position.Z.ToString("0.00", culture) + ":";
             }
             Echo(status);
             if (_lcd != null && _lcd.IsSameConstructAs(Me))

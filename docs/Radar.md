@@ -23,8 +23,10 @@ choose the startup mode. Configure names, travel limits, maximum speed
 and axis inversion under `[Gimbal]`. Set a search range that allows
 the cameras to recharge between rays. Use `status` to distinguish a
 measured lock from a predicted contact during a missed measurement. The
-display shows the age of the last measurement and preserves the last
-known coordinates after tracking times out. Use `unlock` to clear them.
+display shows the entity ID, type, relationship, age, range and speed
+from the last raycast. The `GPS:Radar last fix:` line shows the measured
+coordinates and remains available after tracking times out. Use
+`unlock` to clear the observation.
 
 To calibrate the park position, run `off` in Gimbal mode, position the
 two axes manually, stop their manual movement, then run `gimbal calibrate`.
