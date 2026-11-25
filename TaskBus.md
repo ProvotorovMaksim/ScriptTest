@@ -1057,4 +1057,6 @@ Set `Mode=Fixed` or `Mode=Gimbal` under `[Radar]` in Custom Data to
 choose the startup mode. Configure names, travel limits, maximum speed
 and axis inversion under `[Gimbal]`. Set a search range that allows
 the cameras to recharge between rays. Use `status` to distinguish a
-measured lock from a predicted contact during a missed measurement.
+measured lock from a predicted contact during a missed measurement. The
+display shows the age of the last measurement and preserves the last
+known coordinates after tracking times out. Use `unlock` to clear them.

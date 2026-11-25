@@ -11,7 +11,7 @@ namespace Tests.Radar.Tests
     public class ContactTrackerTests
     {
         [Test]
-        public void TrackerRecordsAndClearsARealRaycastObservation()
+        public void TrackerAgesAndRetainsLastMeasurementUntilExplicitlyCleared()
         {
             var tracker = new ContactTracker();
             var now = DateTime.UtcNow;
@@ -27,7 +27,17 @@ namespace Tests.Radar.Tests
             Assert.That(tracker.LastSeen, Is.EqualTo(now));
             Assert.That(tracker.IsActive, Is.True);
 
+            Assert.That(tracker.AgeSecondsAt(now.AddSeconds(-1)), Is.Zero);
+            Assert.That(tracker.AgeSecondsAt(now.AddSeconds(3)), Is.EqualTo(3));
+
             tracker.Lose();
+            Assert.That(tracker.EntityId, Is.EqualTo(12345L));
+            Assert.That(tracker.Position, Is.EqualTo(position));
+            Assert.That(tracker.IsActive, Is.False);
+            Assert.That(tracker.AgeSecondsAt(now.AddSeconds(6)), Is.EqualTo(6));
+
+            tracker.Clear();
+            Assert.That(tracker.AgeSecondsAt(now), Is.Zero);
             Assert.That(tracker.EntityId, Is.Zero);
             Assert.That(tracker.IsActive, Is.False);
             Assert.That(tracker.HitPosition, Is.Null);

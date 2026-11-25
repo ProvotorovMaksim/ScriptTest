@@ -33,11 +33,12 @@ namespace SpaceEngineers.Apps.Radar
 
         public void Main(string argument, UpdateType updateSource)
         {
+            var now = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(argument))
                 Command(argument.Trim());
             else if (_scanning)
-                Scan(DateTime.UtcNow);
-            Render();
+                Scan(now);
+            Render(now);
         }
 
         private void Discover()
@@ -60,13 +61,13 @@ namespace SpaceEngineers.Apps.Radar
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
                     break;
                 case "unlock":
-                    _contact.Lose();
+                    _contact.Clear();
                     _gimbal.Stop();
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
                     break;
                 case "off":
                     _scanning = false;
-                    _contact.Lose();
+                    _contact.Clear();
                     _gimbal.Stop();
                     Runtime.UpdateFrequency = UpdateFrequency.None;
                     _state = RadarState.IDLE;
@@ -74,7 +75,7 @@ namespace SpaceEngineers.Apps.Radar
                 case "mode fixed":
                 case "mode gimbal":
                     _gimbal.Unbind();
-                    _contact.Lose();
+                    _contact.Clear();
                     _config.Mode = command.EndsWith("gimbal", StringComparison.OrdinalIgnoreCase) ? "Gimbal" : "Fixed";
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
                     Discover();
@@ -96,7 +97,7 @@ namespace SpaceEngineers.Apps.Radar
         private void Scan(DateTime now)
         {
             bool tracking = _contact.IsActive;
-            double age = tracking ? (now - _contact.LastSeen).TotalSeconds : 0;
+            double age = _contact.AgeSecondsAt(now);
             if (tracking && age >= ContactTimeoutSeconds + _contact.Range / 2000)
             {
                 _contact.Lose();
@@ -113,7 +114,7 @@ namespace SpaceEngineers.Apps.Radar
                 return;
             }
 
-            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, Math.Max(0, age)) : Vector3D.Zero;
+            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : Vector3D.Zero;
             bool gimbalDriven = false;
             bool gimbalReadyToScan = true;
             int rays = 0;
@@ -162,14 +163,20 @@ namespace SpaceEngineers.Apps.Radar
 
         private bool IsGimbal => string.Equals(_config.Mode, "Gimbal", StringComparison.OrdinalIgnoreCase);
 
-        private void Render()
+        private void Render(DateTime now)
         {
             var status = "Radar " + _config.Mode + " | " + _state + "\nCameras: " + _cameras.Count();
             if (IsGimbal && !_gimbal.IsReady)
                 status += "\nAzimuth rotor and elevation hinge required.";
-            if (_contact.IsActive)
-                status += "\n" + _contact.Name + " [" + _contact.EntityId + "]\nLast range: " +
+            if (_contact.EntityId != 0)
+            {
+                status += (_contact.IsActive ? "\nContact: " : "\nLast seen: ") +
+                    _contact.Name + " [" + _contact.EntityId + "]\nAge: " +
+                    _contact.AgeSecondsAt(now).ToString("0.0", CultureInfo.InvariantCulture) + " s | Range: " +
                     _contact.Range.ToString("0", CultureInfo.InvariantCulture) + " m";
+                if (!_contact.IsActive)
+                    status += "\nLast position: " + _contact.Position.ToString();
+            }
             Echo(status);
             if (_lcd != null && _lcd.IsSameConstructAs(Me))
             {

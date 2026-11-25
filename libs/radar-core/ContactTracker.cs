@@ -15,7 +15,6 @@ namespace SpaceEngineers.Libs.RadarCore
         public BoundingBoxD? BoundingBox { get; private set; }
         public Vector3D? HitPosition { get; private set; }
         public double Range { get; private set; }
-        public double AgeSeconds { get; private set; }
         public DateTime LastSeen { get; private set; }
         public bool IsActive { get; private set; }
 
@@ -31,11 +30,18 @@ namespace SpaceEngineers.Libs.RadarCore
             HitPosition = info.HitPosition;
             Range = range;
             LastSeen = now;
-            AgeSeconds = (now - LastSeen).TotalSeconds;
             IsActive = EntityId != 0;
         }
 
+        public double AgeSecondsAt(DateTime now) =>
+            EntityId == 0 ? 0 : Math.Max(0, (now - LastSeen).TotalSeconds);
+
         public void Lose()
+        {
+            IsActive = false;
+        }
+
+        public void Clear()
         {
             EntityId = 0;
             Name = "";
@@ -46,7 +52,8 @@ namespace SpaceEngineers.Libs.RadarCore
             BoundingBox = null;
             HitPosition = null;
             Range = 0.0;
-            IsActive = false;
+            LastSeen = default(DateTime);
+            Lose();
         }
     }
 }
