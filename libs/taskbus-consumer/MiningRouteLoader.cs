@@ -90,7 +90,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             try
             {
-                if (prepare && !PrepareAssignedApproach(waypoint, position))
+                if (prepare && !PrepareAssignedApproach(RouteControllerName, waypoint, position, allowNewPosition: true))
                     return;
 
                 var remote = FindPreparedCruise(RouteControllerName, waypoint, position);
@@ -103,13 +103,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             }
         }
 
-        private bool PrepareAssignedApproach(string name, Vector3D position)
+        private bool PrepareAssignedApproach(string controller, string name, Vector3D position, bool allowNewPosition)
         {
-            var remote = _findBlock(RouteControllerName) as IMyRemoteControl;
+            var remote = _findBlock(controller) as IMyRemoteControl;
             if (remote == null || remote.CubeGrid != _grid || !remote.IsWorking ||
                 remote.IsAutoPilotEnabled || remote.FlightMode != FlightMode.OneWay)
             {
-                _echo("Use a working local " + RouteControllerName + " in One Way mode with autopilot off.");
+                _echo("Use a working local " + controller + " in One Way mode with autopilot off.");
                 return false;
             }
 
@@ -120,7 +120,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 fixedCount--;
             if (fixedCount == 0)
             {
-                _echo("Automatic mining needs a reviewed outbound corridor before the ore approach.");
+                if (!allowNewPosition && _routeWaypoints.Count == 1 &&
+                    _routeWaypoints[0].Name == name && _routeWaypoints[0].Coords == position)
+                    return true;
+
+                _echo("Automatic cruise needs a reviewed corridor before the final approach.");
                 return false;
             }
             for (int i = 0; i < fixedCount; i++)
@@ -137,6 +141,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 var last = _routeWaypoints[fixedCount];
                 if (last.Name == name && last.Coords == position)
                     return true;
+                if (!allowNewPosition && last.Coords != position)
+                {
+                    _echo("The prepared corridor ends at a different station approach. Review this route before using it.");
+                    return false;
+                }
 
                 remote.ClearWaypoints();
                 for (int i = 0; i < fixedCount; i++)
@@ -146,7 +155,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             return true;
         }
 
-        private void LoadStationApproach(bool startCruise)
+        public void LoadStationApproach(bool startCruise, bool prepare = false)
         {
             string taskId;
             bool pickup;
@@ -171,12 +180,13 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string waypoint = RouteWaypointPrefix + taskId;
             var position = new Vector3D(x, y, z);
             if (startCruise)
-                StartPreparedCruise(controller, waypoint, position, pickup, grid);
+                StartPreparedCruise(controller, waypoint, position, pickup, grid, prepare);
             else
                 AppendApproach(controller, waypoint, position);
         }
 
-        private void StartPreparedCruise(string controller, string waypoint, Vector3D position, bool pickup, long grid)
+        private void StartPreparedCruise(string controller, string waypoint, Vector3D position, bool pickup, long grid,
+            bool prepare)
         {
             try
             {
@@ -185,6 +195,9 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     _echo("Cruise requires an undocked ship and no active pilot or autopilot.");
                     return;
                 }
+                if (prepare && !PrepareAssignedApproach(controller, waypoint, position, allowNewPosition: false))
+                    return;
+
                 var remote = FindPreparedCruise(controller, waypoint, position);
                 if (remote == null)
                     return;

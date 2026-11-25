@@ -498,8 +498,11 @@ so the ship arrives inside the FCS final approach envelope. Use
 
 Set `HaulerAutoCruise=true` to start each prepared pickup or delivery
 leg automatically once the hauler is undocked, flight controls are idle,
-and the broker has confirmed the lease. Prepare both station routes and
-their final approach waypoints in advance. The hauler checks readiness
+and the broker has confirmed the lease. Configure the station approach
+GPS and at least one reviewed corridor waypoint on each controller.
+The hauler appends the final waypoint or updates its task ID when its
+coordinates already match the assigned station approach. A corridor
+ending at a different station requires review. The hauler checks readiness
 about every two seconds and launches at most once per leg and lease in a
 PB session. `route stop` disables automatic cruise for the session.
 `route cruise auto` enables it again, and `route cruise` can retry a leg

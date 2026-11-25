@@ -172,7 +172,7 @@ namespace SpaceEngineers.Services.Consumer
                 !CanStartHaulerCruise()))
                 return;
 
-            _routes.TryHandle("route cruise");
+            _routes.LoadStationApproach(startCruise: true, prepare: automatic);
             if (_consumer.SupervisedCruiseRemote != 0)
             {
                 _startedCruiseLease = lease;
