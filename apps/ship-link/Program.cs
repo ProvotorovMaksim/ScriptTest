@@ -1328,8 +1328,99 @@ namespace SpaceEngineers.Apps.ShipLink
             _activeLeaseEpoch = 0;
         }
 
+        private void DrawPilotDisplay(IMyTextSurface surface, long now)
+        {
+            surface.ContentType = ContentType.SCRIPT;
+            if (surface.Script != "")
+                surface.Script = "";
+            var size = surface.SurfaceSize;
+            var scale = Math.Min(size.X / 512f, size.Y / 320f);
+            var origin = surface.TextureSize * 0.5f - new Vector2(256, 160) * scale;
+            var white = new Color(229, 243, 247);
+            var muted = new Color(140, 173, 184);
+            var accent = new Color(68, 220, 203);
+            var warning = new Color(255, 190, 106);
+            var active = FindLiveTrackedMark(now);
+            var chosen = _trackedContact;
+            var profile = _weaponSelected >= 0 ? _weaponProfiles[_weaponSelected].Name : "Choose a profile";
+            var frame = surface.DrawFrame();
+            try
+            {
+                var background = MySprite.CreateSprite("SquareSimple", surface.TextureSize * 0.5f, size);
+                background.Color = new Color(9, 18, 25);
+                frame.Add(background);
+
+                var header = MySprite.CreateSprite("SquareSimple", origin + new Vector2(256, 25) * scale,
+                    new Vector2(512, 50) * scale);
+                header.Color = new Color(21, 42, 53);
+                frame.Add(header);
+                PilotText(ref frame, origin, scale, _showWeaponSettings ? "WEAPON PROFILES" : "CONTACT JOURNAL",
+                    20, 11, 1.05f, white);
+                PilotText(ref frame, origin, scale, string.IsNullOrEmpty(_fleetName) ? "LOCAL" : ClipPilotLabel(_fleetName, 15),
+                    489, 14, 0.76f, accent, TextAlignment.RIGHT);
+
+                string target = chosen == null ? "No active contact" : ClipPilotLabel((active ?? chosen).Name, 30);
+                bool fresh = active != null && active.MeasuredTicks > 0 &&
+                    now - active.MeasuredTicks <= 2 * TimeSpan.TicksPerSecond;
+                PilotText(ref frame, origin, scale, target, 20, 61, 0.86f, white);
+                PilotText(ref frame, origin, scale, chosen == null ? "SELECT A CONTACT" : fresh ? "FRESH" : "NO FRESH FIX",
+                    489, 64, 0.68f, fresh ? accent : warning, TextAlignment.RIGHT);
+                PilotText(ref frame, origin, scale, "Profile: " + ClipPilotLabel(profile, 32), 20, 88, 0.7f, muted);
+
+                var entries = _showWeaponSettings ? null : JournalEntries(now);
+                int count = _showWeaponSettings ? _weaponProfiles.Count : entries.Length;
+                int cursor = _showWeaponSettings ? _weaponCursor :
+                    Array.FindIndex(entries, mark => JournalKey(mark) == _journalSelection);
+                int first = Math.Max(0, Math.Min(cursor - 2, count - 5));
+                int end = Math.Min(count, first + 5);
+                for (int index = first; index < end; index++)
+                {
+                    float y = 120 + (index - first) * 31;
+                    bool selected = index == cursor;
+                    var row = MySprite.CreateSprite("SquareSimple", origin + new Vector2(256, y + 12) * scale,
+                        new Vector2(480, 27) * scale);
+                    row.Color = selected ? new Color(25, 76, 81) : new Color(15, 31, 40);
+                    frame.Add(row);
+                    string name = _showWeaponSettings ? _weaponProfiles[index].Name : entries[index].Name;
+                    string detail = _showWeaponSettings ? _weaponProfiles[index].Speed.ToString("0.#",
+                        System.Globalization.CultureInfo.InvariantCulture) + " m/s" :
+                        entries[index].Source == Me.EntityId ? "LOCAL" : "GALNET";
+                    PilotText(ref frame, origin, scale, (selected ? "> " : "  ") + ClipPilotLabel(name, 30),
+                        24, y + 4, 0.75f, selected ? accent : white);
+                    PilotText(ref frame, origin, scale, detail, 484, y + 5, 0.66f, muted, TextAlignment.RIGHT);
+                }
+
+                if (count == 0)
+                    PilotText(ref frame, origin, scale, _showWeaponSettings ? "No configured profiles" : "Waiting for observations",
+                        24, 128, 0.8f, muted);
+                PilotText(ref frame, origin, scale, "UP / DOWN    APPLY    SETTINGS", 20, 287, 0.68f, muted);
+                if (count > 0)
+                    PilotText(ref frame, origin, scale, (first + 1) + "-" + end + " / " + count,
+                        489, 287, 0.68f, muted, TextAlignment.RIGHT);
+            }
+            finally
+            {
+                frame.Dispose();
+            }
+        }
+
+        private static void PilotText(ref MySpriteDrawFrame frame, Vector2 origin, float scale,
+            string text, float x, float y, float size, Color color, TextAlignment alignment = TextAlignment.LEFT)
+        {
+            var sprite = MySprite.CreateText(text, "Monospace", color, size * scale, alignment);
+            sprite.Position = origin + new Vector2(x, y) * scale;
+            frame.Add(sprite);
+        }
+
+        private static string ClipPilotLabel(string value, int max) =>
+            value.Length <= max ? value : value.Substring(0, max - 3) + "...";
+
         private void UpdateCockpitDisplay()
         {
+            var panel = GridTerminalSystem.GetBlockWithName("[SHIPLINK PILOT]") as IMyTextPanel;
+            if (panel != null && panel.IsWorking && panel.CubeGrid == Me.CubeGrid)
+                DrawPilotDisplay(panel, DateTime.UtcNow.Ticks);
+
             if (_surfaces.Count == 0)
                 return;
 

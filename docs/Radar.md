@@ -53,6 +53,14 @@ measurement. ShipLink sends a contact named `Radar <entity ID>` through
 the existing fleet channel. Check ShipLink output and the recipient's
 display to confirm delivery.
 
+## Pilot LCD
+
+Name a local text panel `[SHIPLINK PILOT]`. ShipLink uses a sprite frame
+to draw the contact journal, freshness of the active mark and the weapon
+profile menu. Bind the programmable block's `up`, `down`, `apply` and
+`settings` commands to cockpit toolbar slots. The highlighted row is
+the pending selection. The header shows the applied contact and profile.
+
 ## Contact journal
 
 Set `ShareContacts=true` under `[Radar]` to publish new measurements
