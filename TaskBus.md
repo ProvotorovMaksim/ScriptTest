@@ -1048,8 +1048,9 @@ raycast range for the current session.
 - **Gimbal** expects an azimuth rotor on the programmable block grid, an
   elevation hinge on the rotor head grid and a camera on the hinge head
   grid. Default block names are `[RADAR AZIMUTH]` and `[RADAR ELEVATION]`.
-  The radar searches in azimuth at the current elevation. On acquisition
-  it follows the contact with both motors. `off` stops both motors.
+  The radar searches in five-degree azimuth steps at the current elevation
+  and waits at each step until a camera can raycast. After acquisition it
+  follows the contact with both motors. `off` stops both motors.
 
 Use `mode fixed` or `mode gimbal` to switch in the current session.
 Set `Mode=Fixed` or `Mode=Gimbal` under `[Radar]` in Custom Data to

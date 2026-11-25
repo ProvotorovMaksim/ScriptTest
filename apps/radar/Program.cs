@@ -115,6 +115,7 @@ namespace SpaceEngineers.Apps.Radar
 
             Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, Math.Max(0, age)) : Vector3D.Zero;
             bool gimbalDriven = false;
+            bool gimbalReadyToScan = true;
             int rays = 0;
             for (int i = 0; i < _cameras.Count() && rays < Math.Max(1, _config.MaxRaycastsPerUpdate); i++)
             {
@@ -127,9 +128,12 @@ namespace SpaceEngineers.Apps.Radar
                     if (tracking)
                         _gimbal.Aim(camera, target);
                     else
-                        _gimbal.Sweep();
+                        gimbalReadyToScan = _gimbal.HoldSweepPosition();
                     gimbalDriven = true;
                 }
+
+                if (!gimbalReadyToScan)
+                    break;
 
                 double maxRange = camera.RaycastDistanceLimit > 0
                     ? Math.Min(_config.MaxRange, camera.RaycastDistanceLimit) : _config.MaxRange;
@@ -150,7 +154,10 @@ namespace SpaceEngineers.Apps.Radar
 
             if (gimbal && !gimbalDriven)
                 _gimbal.Stop();
-            _state = tracking ? RadarState.COASTING : rays == 0 ? RadarState.CHARGING : RadarState.ACQUIRING;
+            if (gimbal && !tracking && rays > 0)
+                _gimbal.AdvanceSweep();
+            _state = tracking ? RadarState.COASTING :
+                rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
         }
 
         private bool IsGimbal => string.Equals(_config.Mode, "Gimbal", StringComparison.OrdinalIgnoreCase);
