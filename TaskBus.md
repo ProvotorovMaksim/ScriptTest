@@ -27,6 +27,8 @@ tests/                # Unit tests for TaskBusProtocol
 
 ## Build and Install
 
+For a CI build, see the [installation and acceptance guide](docs/Release-Setup.md).
+
 ### Prerequisites
 
 - .NET 8 SDK (from `global.json`)
