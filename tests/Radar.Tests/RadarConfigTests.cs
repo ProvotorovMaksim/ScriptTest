@@ -63,5 +63,19 @@ namespace Tests.Radar.Tests
             Assert.AreEqual("[RADAR ELEVATION]", config.ElevationBlock);
             Assert.IsTrue(config.InvertAzimuth);
         }
+
+        [Test]
+        public void ParkingAnglesAcceptFiniteValuesAndKeepDefaultsForInvalidInput()
+        {
+            Assert.IsTrue(RadarConfig.TryParse("[Gimbal]\nParkAzimuthDegrees=135.5\nParkElevationDegrees=-12.25",
+                out var config, out _));
+            Assert.That(config.ParkAzimuthDegrees, Is.EqualTo(135.5));
+            Assert.That(config.ParkElevationDegrees, Is.EqualTo(-12.25));
+
+            Assert.IsTrue(RadarConfig.TryParse("[Gimbal]\nParkAzimuthDegrees=NaN\nParkElevationDegrees=Infinity",
+                out config, out _));
+            Assert.That(config.ParkAzimuthDegrees, Is.Zero);
+            Assert.That(config.ParkElevationDegrees, Is.Zero);
+        }
     }
 }

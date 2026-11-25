@@ -15,6 +15,8 @@ namespace SpaceEngineers.Libs.RadarCore
         public bool ShareContacts = false;
         public string AzimuthBlock = "[RADAR AZIMUTH]";
         public string ElevationBlock = "[RADAR ELEVATION]";
+        public double ParkAzimuthDegrees;
+        public double ParkElevationDegrees;
         public bool InvertAzimuth = false;
         public bool InvertElevation = false;
         public double PlatformSpeedLimitDegreesPerSecond = 10.0;
@@ -116,6 +118,14 @@ namespace SpaceEngineers.Libs.RadarCore
             {
                 config.ElevationBlock = value;
             }
+            else if (string.Equals(key, "ParkAzimuthDegrees", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseParkAngle(value, ref config.ParkAzimuthDegrees);
+            }
+            else if (string.Equals(key, "ParkElevationDegrees", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseParkAngle(value, ref config.ParkElevationDegrees);
+            }
             else if (string.Equals(key, "InvertAzimuth", StringComparison.OrdinalIgnoreCase))
             {
                 config.InvertAzimuth = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
@@ -164,6 +174,15 @@ namespace SpaceEngineers.Libs.RadarCore
                     config.PlatformElevationMax = parsed;
                 }
             }
+        }
+
+        private static void ParseParkAngle(string value, ref double angle)
+        {
+            double parsed;
+            if (double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out parsed) &&
+                !double.IsNaN(parsed) && !double.IsInfinity(parsed))
+                angle = parsed;
         }
     }
 }

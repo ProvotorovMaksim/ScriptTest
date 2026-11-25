@@ -26,9 +26,15 @@ measured lock from a predicted contact during a missed measurement. The
 display shows the age of the last measurement and preserves the last
 known coordinates after tracking times out. Use `unlock` to clear them.
 
-Run `gimbal park` to stop scanning and move both axes toward their hardware
-zero angles. If zero is outside an axis's allowed travel, it parks at the
-nearest allowed angle. The display shows `PARKING` during movement and
+To calibrate the park position, run `off` in Gimbal mode, position the
+two axes manually, stop their manual movement, then run `gimbal calibrate`.
+The command records both angles for the current session and prints
+`ParkAzimuthDegrees` and `ParkElevationDegrees`. Copy those settings to
+`[Gimbal]` in Custom Data to retain them across reloads.
+
+Run `gimbal park` to stop scanning and move both axes to their park
+positions. The default for each axis is its hardware zero. A setpoint
+outside the allowed travel is clamped to the nearest limit. The display shows `PARKING` during movement and
 `PARKED` once both axes reach their setpoints. Use `off` to stop movement
 or `scan` to resume scanning. Parking stops both drives if either axis
 fails to make progress for five seconds. The same timeout stops Gimbal

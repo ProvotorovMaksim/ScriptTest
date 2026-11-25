@@ -116,10 +116,24 @@ namespace SpaceEngineers.Libs.RadarCore
             _sweep.Advance(GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper), lower, upper);
         }
 
-        public bool ParkAtZero(DateTime now, out bool stalled)
+        public void CaptureParkPosition()
         {
-            double azimuthError = ParkAxis(_azimuth, _config.PlatformAzimuthMin, _config.PlatformAzimuthMax);
-            double elevationError = ParkAxis(_elevation, _config.PlatformElevationMin, _config.PlatformElevationMax);
+            _config.ParkAzimuthDegrees = ReadParkDegrees(_azimuth, _config.PlatformAzimuthMin, _config.PlatformAzimuthMax);
+            _config.ParkElevationDegrees = ReadParkDegrees(_elevation, _config.PlatformElevationMin, _config.PlatformElevationMax);
+        }
+
+        private static double ReadParkDegrees(IMyMotorStator motor, double minimum, double maximum)
+        {
+            double lower = LowerLimit(motor, minimum);
+            double upper = UpperLimit(motor, maximum);
+            double angle = GimbalAngles.InTravelFrame(motor.Angle, lower, upper);
+            return Math.Max(lower, Math.Min(angle, upper)) * (180 / Math.PI);
+        }
+
+        public bool Park(DateTime now, out bool stalled)
+        {
+            double azimuthError = ParkAxis(_azimuth, _config.PlatformAzimuthMin, _config.PlatformAzimuthMax, _config.ParkAzimuthDegrees);
+            double elevationError = ParkAxis(_elevation, _config.PlatformElevationMin, _config.PlatformElevationMax, _config.ParkElevationDegrees);
             bool azimuthStalled = _azimuthPark.IsStalled(azimuthError, now, ProgressStep);
             bool elevationStalled = _elevationPark.IsStalled(elevationError, now, ProgressStep);
             stalled = azimuthStalled || elevationStalled;
@@ -127,12 +141,12 @@ namespace SpaceEngineers.Libs.RadarCore
                 elevationError <= GimbalAxisProgress.AngleTolerance;
         }
 
-        private double ParkAxis(IMyMotorStator motor, double minimum, double maximum)
+        private double ParkAxis(IMyMotorStator motor, double minimum, double maximum, double parkDegrees)
         {
             double lower = LowerLimit(motor, minimum);
             double upper = UpperLimit(motor, maximum);
             double angle = GimbalAngles.InTravelFrame(motor.Angle, lower, upper);
-            double goal = Math.Max(lower, Math.Min(0, upper));
+            double goal = Math.Max(lower, Math.Min(parkDegrees * (Math.PI / 180), upper));
             DriveTo(motor, angle, goal, lower, upper);
             return Math.Abs(goal - angle);
         }

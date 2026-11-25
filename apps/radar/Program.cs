@@ -92,6 +92,9 @@ namespace SpaceEngineers.Apps.Radar
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
                     Discover();
                     break;
+                case "gimbal calibrate":
+                    Calibrate();
+                    break;
                 case "gimbal park":
                     if (!IsGimbal)
                     {
@@ -114,9 +117,33 @@ namespace SpaceEngineers.Apps.Radar
                         range > 0 && !double.IsInfinity(range))
                         _config.MaxRange = range;
                     else
-                        Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, gimbal park, range <meters>");
+                        Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, gimbal calibrate, gimbal park, range <meters>");
                     break;
             }
+        }
+
+        private void Calibrate()
+        {
+            if (!IsGimbal || _scanning || _parking)
+            {
+                Echo("Stop Radar and select gimbal mode before calibrating.");
+                return;
+            }
+
+            Discover();
+            _scanProblem = _gimbal.GetUnavailableReason();
+            if (_scanProblem != null)
+            {
+                _state = RadarState.UNAVAILABLE;
+                return;
+            }
+
+            _gimbal.CaptureParkPosition();
+            _state = RadarState.IDLE;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            Echo("Park position captured. To retain it across reloads, add under [Gimbal]:");
+            Echo("ParkAzimuthDegrees=" + _config.ParkAzimuthDegrees.ToString("0.###", culture));
+            Echo("ParkElevationDegrees=" + _config.ParkElevationDegrees.ToString("0.###", culture));
         }
 
         private void Park(DateTime now)
@@ -129,7 +156,7 @@ namespace SpaceEngineers.Apps.Radar
             }
 
             bool stalled;
-            if (_gimbal.ParkAtZero(now, out stalled))
+            if (_gimbal.Park(now, out stalled))
                 StopMotion(RadarState.PARKED);
             else if (stalled)
             {
