@@ -81,15 +81,13 @@ output=auto
 interactive=DoNothing
 ```
 
-### What changed vs the old build.sh
+### Verified release bundle
 
-The old `build.sh` manually concatenated `.pb.cs` files with `awk` and
-produced DLLs under `build/output/`. That approach has been replaced by
-MDK²: each PB `.csproj` now references `Mal.Mdk2.PbPackager` version `2.3.1`,
-includes shared library sources via wildcard (`../../libs/igc-core/**/*.cs`,
-etc.), and the packager generates `script.cs` on every build. The
-`build.sh` script is retained for the compile-check / test step but no
-longer performs manual script concatenation.
+On a host supported by the MDK² packager, run `bash build.sh` with
+`SPACE_ENGINEERS_BIN64` set to the game assemblies. The build writes
+ten files under `build/mdk-scripts/<project>/script.cs`, checks the
+programmable block size limit, compiles the files as C# 6 and runs
+TaskBus.Tests. Windows CI also runs Radar.Tests against the game assemblies.
 
 ### Libraries (`libs/`)
 
@@ -194,7 +192,7 @@ A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
 up to 128 node versions and accepts up to 32 neighbors per node. When
 the table is full, an unfamiliar node can displace the oldest expired
-record. Current records remain eligible for routing. Install `GalnetRelay.pb.cs` on each test relay. Configure both ends with
+record. Current records remain eligible for routing. Install `galnet/script.cs` on each test relay. Configure both ends with
 `peer add <PB ID>`, using the ID displayed by each relay. `route <ID>`
 shows the current next hop. The relay's default peer list reports direct
 heartbeat status. Run `network status` for each queued delivery's current
@@ -496,7 +494,7 @@ a separate command.
 
 ### AMN platform worker
 
-Install `AmnPlatform.pb.cs` on a drilling platform. It accepts both
+Install `platform/script.cs` on a drilling platform. It accepts both
 `Scouts` and `MiningFleet` assignments, one lease at a time. Use
 `broker <ID>` if the world has multiple brokers. Name a local flight
 controller `[AMN PLATFORM]` and a forward camera `[AMN SCOUT]`.
@@ -732,8 +730,8 @@ reports is unknown, and the bounds do not establish a flight corridor.
 ### Mining dispatch acceptance test
 
 Use a test world with in-game scripts enabled and two grids in radio range.
-Install `AMN.Base.pb.cs` and `TaskBroker.pb.cs` on the base and
-`TaskConsumer.pb.cs` on the worker. Power a functional radio antenna on each
+Install `amn/script.cs` and `broker/script.cs` on the base and
+`consumer/script.cs` on the worker. Power a functional radio antenna on each
 grid. On the worker, run `group MiningFleet`. Use a resource such as
 `Ore/Iron` in the base cargo and set a threshold with `set Ore/Iron 100`
 on AMN.
@@ -787,7 +785,7 @@ the actual stage checkpoint.
 
 ### Fleet display for Space Engineers combat
 
-Install `ShipLink.pb.cs` on each wingmate's grid with a working radio antenna
+Install `ship-link/script.cs` on each wingmate's grid with a working radio antenna
 and a cockpit text surface set to Text and Images. Run `fleet Alpha` on each
 block to enable the roster. It shows each reporting ship's speed and whether
 its cockpit is occupied. Reports expire after about five seconds without an
@@ -863,7 +861,7 @@ existing `assist on` and `assist off` commands control the radio heartbeat.
 ### Flight control PB
 
 `apps/fcs` is an opt-in cockpit flight controller. Copy the contents of
-`build/output/apps/fcs/fcs/FlightControl.pb.cs` into a Programmable Block on the
+`build/mdk-scripts/fcs/script.cs` into a Programmable Block on the
 same grid as the ship's thrusters and gyros. Name the occupied cockpit with
 `[FCS]`. Disable competing remote autopilots and clear existing overrides before
 engaging. The controller starts off after compilation or reload.

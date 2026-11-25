@@ -31,7 +31,7 @@ for %%P in (%PB_PROJECTS%) do (
 
 echo.
 echo ================================================================
-echo All 9 Programmable Block projects built successfully.
+echo All 10 Programmable Block projects built successfully.
 echo MDK² has generated script.cs for each PB and (on Windows with the
 echo game installed) deployed them to the Space Engineers IngameScripts
 echo local folder as configured in each project's mdk.local.ini.

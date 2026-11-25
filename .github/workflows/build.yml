@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet --info | tee build/logs/dotnet.log
-          bash build.sh --mdk-release 2>&1 | tee build/logs/build.log
+          bash build.sh 2>&1 | tee build/logs/build.log
 
       - name: Upload validated build and results
         uses: actions/upload-artifact@v4
