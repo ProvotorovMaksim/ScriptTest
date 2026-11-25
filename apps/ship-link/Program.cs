@@ -183,6 +183,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (command.StartsWith("contact turret ", StringComparison.OrdinalIgnoreCase))
+                ShareTurretContact(command.Substring(15).Trim());
             else if (string.Equals(command, "contact acquire", StringComparison.OrdinalIgnoreCase))
                 CueLocalRadar();
             else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
@@ -294,10 +296,9 @@ namespace SpaceEngineers.Apps.ShipLink
             var mark = _trackedContact;
             long entityId;
             if (mark == null || mark.Assistance || mark.Hazard || mark.Expires <= DateTime.UtcNow.Ticks ||
-                !mark.Name.StartsWith("Radar ", StringComparison.Ordinal) ||
-                !long.TryParse(mark.Name.Substring(6), out entityId) || entityId == 0)
+                !TryReadSensedEntityId(mark.Name, out entityId))
             {
-                Echo("Select a current Radar mark with contact track first.");
+                Echo("Select a current Radar or Turret mark with contact track first.");
                 return;
             }
 
@@ -308,6 +309,47 @@ namespace SpaceEngineers.Apps.ShipLink
                     " " + mark.Position.X.ToString("R", culture) + " " + mark.Position.Y.ToString("R", culture) +
                     " " + mark.Position.Z.ToString("R", culture) + mark.RadarMotion))
                 Echo("A working local [RADAR] programmable block is required.");
+        }
+
+        private static bool TryReadSensedEntityId(string name, out long entityId)
+        {
+            entityId = 0;
+            int prefixLength = name.StartsWith("Radar ", StringComparison.Ordinal) ? 6 :
+                name.StartsWith("Turret ", StringComparison.Ordinal) ? 7 : 0;
+            return prefixLength > 0 && long.TryParse(name.Substring(prefixLength), out entityId) && entityId != 0;
+        }
+
+        private void ShareTurretContact(string argument)
+        {
+            long relay;
+            if (!long.TryParse(argument, out relay) || relay == 0)
+            {
+                Echo("Use contact turret <relay ID>.");
+                return;
+            }
+
+            var turret = GridTerminalSystem.GetBlockWithName("[SHIPLINK TURRET]") as IMyLargeTurretBase;
+            if (turret == null || !turret.IsWorking || turret.CubeGrid != Me.CubeGrid)
+            {
+                Echo("A working local [SHIPLINK TURRET] is required.");
+                return;
+            }
+
+            var hit = turret.GetTargetedEntity();
+            if (hit.IsEmpty() || hit.EntityId == 0)
+            {
+                Echo("The turret has no current contact.");
+                return;
+            }
+
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            var position = hit.Position;
+            var velocity = hit.Velocity;
+            SendContact(relay.ToString(culture) + " GPS:Turret " + hit.EntityId.ToString(culture) + ":" +
+                position.X.ToString("0.00", culture) + ":" + position.Y.ToString("0.00", culture) + ":" +
+                position.Z.ToString("0.00", culture) + ":RV1:" + DateTime.UtcNow.Ticks.ToString(culture) + ":" +
+                velocity.X.ToString("R", culture) + ":" + velocity.Y.ToString("R", culture) + ":" +
+                velocity.Z.ToString("R", culture) + ":");
         }
 
         private void SendContact(string argument)
@@ -536,7 +578,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 existing.Expires = expiry;
                 existing.Position = new Vector3D(x, y, z);
                 existing.RadarMotion = null;
-                if (!assistance && !hazard && name.StartsWith("Radar ", StringComparison.Ordinal) && gps.Length <= 200)
+                long entityId;
+                if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
                 {
                     var gpsFields = gps.Split(':');
                     if (gpsFields.Length == 11 && gpsFields[5] == "RV1")

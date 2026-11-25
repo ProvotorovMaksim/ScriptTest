@@ -53,10 +53,18 @@ measurement. ShipLink sends a contact named `Radar <entity ID>` through
 the existing fleet channel. Check ShipLink output and the recipient's
 display to confirm delivery.
 
+## Sharing a turret observation
+
+Name a local large turret `[SHIPLINK TURRET]`. With a contact already
+selected by the turret, run `contact turret <recipient relay ID>` on
+ShipLink. The report includes its entity ID, position, velocity and
+observation time. Select it at the receiver as `Turret <entity ID>`.
+
 ## Acquiring a fleet mark
 
-Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh Radar
-mark with `contact track <sender relay ID> Radar <entity ID>` and run
+Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh
+mark with `contact track <sender relay ID> Radar <entity ID>` (or use
+`Turret <entity ID>` for a turret observation) and run
 `contact acquire`. Fixed Radar attempts a raycast when the mark is within
 a camera's field of view. Gimbal also points toward the reported position. New Radar marks include
 velocity and measurement time, so the acquisition ray follows the
