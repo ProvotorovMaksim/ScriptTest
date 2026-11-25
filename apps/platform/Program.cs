@@ -653,7 +653,8 @@ namespace SpaceEngineers.Apps.Platform
                 return false;
             }
 
-            if (!CheckMiningLane(x, y, z) || !CheckMiningCargo())
+            bool cargoLimitReached;
+            if (!CheckMiningLane(x, y, z) || !CheckMiningCargo(out cargoLimitReached))
             {
                 Echo(_lastProbe);
                 return false;
@@ -684,8 +685,18 @@ namespace SpaceEngineers.Apps.Platform
                 StopManagedDrills();
                 _lastProbe = "Managed drills stopped: the mining lease or stage changed.";
             }
-            else if (!CheckMiningLane(x, y, z) || !CheckMiningCargo())
+            else if (!CheckMiningLane(x, y, z))
                 StopManagedDrills();
+            else
+            {
+                bool cargoLimitReached;
+                if (CheckMiningCargo(out cargoLimitReached))
+                    return;
+
+                StopManagedDrills();
+                if (cargoLimitReached && _platformMiningPass)
+                    CheckPlatformFlight(retreatAfterCargoStop: true);
+            }
         }
 
         private bool CheckMiningLane(double approachX, double approachY, double approachZ, Vector3D? position = null)
@@ -724,8 +735,9 @@ namespace SpaceEngineers.Apps.Platform
             return false;
         }
 
-        private bool CheckMiningCargo()
+        private bool CheckMiningCargo(out bool limitReached)
         {
+            limitReached = false;
             if (_miningCargoName == null)
                 return true;
 
@@ -744,11 +756,13 @@ namespace SpaceEngineers.Apps.Platform
                 " deposited / " + target.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
             if (collected + deposited >= target)
             {
+                limitReached = true;
                 _lastProbe += ". Target reached; drills halted.";
                 return false;
             }
             if ((double)inventory.CurrentVolume >= 0.95 * (double)inventory.MaxVolume)
             {
+                limitReached = true;
                 _lastProbe += ". Container at least 95% full; drills halted.";
                 return false;
             }
@@ -1904,7 +1918,7 @@ namespace SpaceEngineers.Apps.Platform
             Echo(remote.IsAutoPilotEnabled ? leg + " started." : leg + " autopilot did not engage.");
         }
 
-        private void CheckPlatformFlight()
+        private void CheckPlatformFlight(bool retreatAfterCargoStop = false)
         {
             long id = _worker.SupervisedCruiseRemote;
             if (id == 0)
@@ -1954,10 +1968,20 @@ namespace SpaceEngineers.Apps.Platform
             }
             if (_platformMiningPass && (_drillingLease == null || remote.GetShipSpeed() > 1.5))
             {
-                _platformFlightLease = null;
+                bool queueRetreat = retreatAfterCargoStop && _autoMiningRetreat && remote.IsWorking &&
+                    remote.GetShipSpeed() <= 1.5 && _platformFlightLease != null &&
+                    _platformFlightLease == _worker.ConfirmedLeaseIdentity;
                 remote.SetAutoPilotEnabled(false);
                 if (!remote.IsAutoPilotEnabled)
+                {
                     _worker.SetSupervisedCruiseRemote(0);
+                    if (queueRetreat)
+                    {
+                        _pendingRetreatLease = _platformFlightLease;
+                        _retreatSettleUpdates = 0;
+                    }
+                }
+                _platformFlightLease = null;
                 FinishMiningPass();
                 return;
             }
