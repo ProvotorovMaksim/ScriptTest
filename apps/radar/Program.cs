@@ -5,6 +5,26 @@ using Sandbox.ModAPI.Ingame;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.RadarCore;
+using SpaceEngineers.Libs.RadarCore;
+
+namespace SpaceEngineers.Apps.Radar
+{
+    public sealed class Program : MyGridProgram
+    {
+        #endregion
+
+        #region Fields
+
+        private RadarConfig _config = new RadarConfig();
+        private RadarState _state = RadarState.IDLE;
+        private ContactObservation _currentContact = new ContactObservation();
+        private ContactTracker _contactTracker = new ContactTracker();
+        private CameraManager _cameraManager = new CameraManager();
+        private GimbalController _gimbalController;
+        private IMyTextPanel _lcdPanel;
+        private StringBuilder _lcdText = new StringBuilder();
+
+        #endregion
 
 namespace SpaceEngineers.Apps.Radar
 {
@@ -55,6 +75,15 @@ namespace SpaceEngineers.Apps.Radar
 
         private void DiscoverCameras()
         {
+private void LoadConfig()
+        {
+            var cd = Me.CustomData;
+            if (!string.IsNullOrEmpty(cd))
+            {
+                TryParseCustomData(cd, out _config, out _);
+            }
+            _gimbalController = new GimbalController(_config);
+        }
             if (GridTerminalSystem != null)
             {
 #endregion
@@ -63,6 +92,71 @@ namespace SpaceEngineers.Apps.Radar
 
         private void ProcessCommand(string command)
         {
+case "mode":
+                    if (args.Length > 1)
+                    {
+                        var mode = args[1].ToLowerInvariant();
+                        if (mode == "fixed")
+                        {
+                            _config.Mode = "Fixed";
+                            _gimbalController.Disable();
+                            Echo($"Mode set to Fixed.");
+                        }
+                        else if (mode == "gimbal")
+                        {
+                            _config.Mode = "Gimbal";
+                            _gimbalController.Enable();
+                            Echo($"Mode set to Gimbal.");
+                        }
+                        else
+                        {
+                            Echo($"Unknown mode: {mode}. Use 'fixed' or 'gimbal'.");
+                        }
+case "gimbal home":
+                    _gimbalController.Calibrate();
+                    Echo("Gimbal calibrated to home position.");
+                    break;
+
+                case "gimbal stop":
+                    _gimbalController.Disable();
+                    Echo("Gimbal stopped and parked.");
+                    break;
+
+                case "gimbal calibrate":
+                    _gimbalController.Calibrate();
+                    Echo("Gimbal calibrated.");
+                    break;
+
+                case "gimbal azimuth":
+                    if (args.Length > 1 && double.TryParse(args[1], out var az))
+                    {
+                        _gimbalController.SetAzimuth(az);
+                        Echo($"Gimbal azimuth set to {az:0.##}°");
+                    }
+                    else
+                    {
+                        Echo($"Current gimbal azimuth: {_gimbalController.GetAzimuth():0.##}°");
+                    }
+                    break;
+
+                case "gimbal elevation":
+                    if (args.Length > 1 && double.TryParse(args[1], out var el))
+                    {
+                        _gimbalController.SetElevation(el);
+                        Echo($"Gimbal elevation set to {el:0.##}°");
+                    }
+                    else
+                    {
+                        Echo($"Current gimbal elevation: {_gimbalController.GetElevation():0.##}°");
+                    }
+                    break;
+                    }
+                    else
+                    {
+                        Echo($"Current mode: {_config.Mode}");
+                        Echo($"Gimbal enabled: {_gimbalController.IsEnabled()}");
+                    }
+                    break;
             var args = command.Split(' ');
             var cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "";
 
