@@ -183,6 +183,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (command.StartsWith("contact cockpit ", StringComparison.OrdinalIgnoreCase))
+                ShareCockpitContact(command.Substring(16).Trim());
             else if (command.StartsWith("contact turret ", StringComparison.OrdinalIgnoreCase))
                 ShareTurretContact(command.Substring(15).Trim());
             else if (string.Equals(command, "contact acquire", StringComparison.OrdinalIgnoreCase))
@@ -298,7 +300,7 @@ namespace SpaceEngineers.Apps.ShipLink
             if (mark == null || mark.Assistance || mark.Hazard || mark.Expires <= DateTime.UtcNow.Ticks ||
                 !TryReadSensedEntityId(mark.Name, out entityId))
             {
-                Echo("Select a current Radar or Turret mark with contact track first.");
+                Echo("Select a current Radar, Turret or Cockpit mark with contact track first.");
                 return;
             }
 
@@ -315,7 +317,8 @@ namespace SpaceEngineers.Apps.ShipLink
         {
             entityId = 0;
             int prefixLength = name.StartsWith("Radar ", StringComparison.Ordinal) ? 6 :
-                name.StartsWith("Turret ", StringComparison.Ordinal) ? 7 : 0;
+                name.StartsWith("Turret ", StringComparison.Ordinal) ? 7 :
+                name.StartsWith("Cockpit ", StringComparison.Ordinal) ? 8 : 0;
             return prefixLength > 0 && long.TryParse(name.Substring(prefixLength), out entityId) && entityId != 0;
         }
 
@@ -335,17 +338,56 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
-            var hit = turret.GetTargetedEntity();
+            ShareObservation(relay, "Turret", turret.GetTargetedEntity());
+        }
+
+        private void ShareCockpitContact(string argument)
+        {
+            var fields = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            long relay;
+            double range;
+            if (fields.Length != 2 || !long.TryParse(fields[0], out relay) || relay == 0 ||
+                !double.TryParse(fields[1], System.Globalization.NumberStyles.Float, culture, out range) ||
+                !(range >= 1 && range <= 5000))
+            {
+                Echo("Use contact cockpit <relay ID> <1 to 5000 metres>.");
+                return;
+            }
+
+            _cockpits.Clear();
+            GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.CubeGrid == Me.CubeGrid);
+            var cockpit = _cockpits.FirstOrDefault(block => block.IsUnderControl);
+            var camera = GridTerminalSystem.GetBlockWithName("[SHIPLINK COCKPIT CAM]") as IMyCameraBlock;
+            if (cockpit == null || camera == null || !camera.IsWorking || camera.CubeGrid != Me.CubeGrid ||
+                Vector3D.Dot(cockpit.WorldMatrix.Forward, camera.WorldMatrix.Forward) < 0.999)
+            {
+                Echo("Use an occupied cockpit and a working [SHIPLINK COCKPIT CAM] facing the same way.");
+                return;
+            }
+
+            camera.EnableRaycast = true;
+            if (!camera.CanScan(range))
+            {
+                Echo("The cockpit camera cannot scan that distance yet.");
+                return;
+            }
+
+            ShareObservation(relay, "Cockpit", camera.Raycast(range));
+        }
+
+        private void ShareObservation(long relay, string source, MyDetectedEntityInfo hit)
+        {
             if (hit.IsEmpty() || hit.EntityId == 0)
             {
-                Echo("The turret has no current contact.");
+                Echo("No current contact from " + source + ".");
                 return;
             }
 
             var culture = System.Globalization.CultureInfo.InvariantCulture;
             var position = hit.Position;
             var velocity = hit.Velocity;
-            SendContact(relay.ToString(culture) + " GPS:Turret " + hit.EntityId.ToString(culture) + ":" +
+            SendContact(relay.ToString(culture) + " GPS:" + source + " " + hit.EntityId.ToString(culture) + ":" +
                 position.X.ToString("0.00", culture) + ":" + position.Y.ToString("0.00", culture) + ":" +
                 position.Z.ToString("0.00", culture) + ":RV1:" + DateTime.UtcNow.Ticks.ToString(culture) + ":" +
                 velocity.X.ToString("R", culture) + ":" + velocity.Y.ToString("R", culture) + ":" +

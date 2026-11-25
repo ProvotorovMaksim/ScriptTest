@@ -60,11 +60,19 @@ selected by the turret, run `contact turret <recipient relay ID>` on
 ShipLink. The report includes its entity ID, position, velocity and
 observation time. Select it at the receiver as `Turret <entity ID>`.
 
+## Sharing a cockpit sighting
+
+Install a forward camera named `[SHIPLINK COCKPIT CAM]` on the cockpit
+grid and align it with the cockpit. With the cockpit occupied, point the
+ship at the object and run `contact cockpit <recipient relay ID> <range>`
+on ShipLink. Range must be between 1 and 5000 metres. The camera must
+have enough raycast charge. Select the report as `Cockpit <entity ID>`.
+
 ## Acquiring a fleet mark
 
 Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh
 mark with `contact track <sender relay ID> Radar <entity ID>` (or use
-`Turret <entity ID>` for a turret observation) and run
+`Turret <entity ID>` or `Cockpit <entity ID>` for those observations) and run
 `contact acquire`. Fixed Radar attempts a raycast when the mark is within
 a camera's field of view. Gimbal also points toward the reported position. New Radar marks include
 velocity and measurement time, so the acquisition ray follows the
