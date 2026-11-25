@@ -36,6 +36,25 @@ namespace SpaceEngineers.Libs.RadarCore
         public double AgeSecondsAt(DateTime now) =>
             EntityId == 0 ? 0 : Math.Max(0, (now - LastSeen).TotalSeconds);
 
+        public bool TryFormatShareCommand(long relay, DateTime now, out string command)
+        {
+            command = null;
+            if (relay == 0 || !IsActive || now < LastSeen || AgeSecondsAt(now) > 2)
+                return false;
+
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            command = "contact " + relay.ToString(culture) + " " +
+                FormatGps("Radar " + EntityId.ToString(culture));
+            return true;
+        }
+
+        public string FormatGps(string name)
+        {
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            return "GPS:" + name + ":" + Position.X.ToString("0.00", culture) + ":" +
+                Position.Y.ToString("0.00", culture) + ":" + Position.Z.ToString("0.00", culture) + ":";
+        }
+
         public void Lose()
         {
             IsActive = false;

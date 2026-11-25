@@ -132,7 +132,8 @@ namespace SpaceEngineers.Apps.Radar
                 Echo("Use share <relay ID>.");
                 return;
             }
-            if (!_contact.IsActive || _contact.AgeSecondsAt(now) > 2)
+            string shareCommand;
+            if (!_contact.TryFormatShareCommand(target, now, out shareCommand))
             {
                 Echo("Sharing requires a radar measurement within the last two seconds.");
                 return;
@@ -145,18 +146,8 @@ namespace SpaceEngineers.Apps.Radar
                 return;
             }
 
-            var culture = System.Globalization.CultureInfo.InvariantCulture;
-            var name = "Radar " + _contact.EntityId.ToString(culture);
-            if (!shipLink.TryRun("contact " + target.ToString(culture) + " " + ContactGps(name)))
+            if (!shipLink.TryRun(shareCommand))
                 Echo("ShipLink did not accept the command. Retry share.");
-        }
-
-        private string ContactGps(string name)
-        {
-            var culture = System.Globalization.CultureInfo.InvariantCulture;
-            var position = _contact.Position;
-            return "GPS:" + name + ":" + position.X.ToString("0.00", culture) + ":" +
-                position.Y.ToString("0.00", culture) + ":" + position.Z.ToString("0.00", culture) + ":";
         }
 
         private void Calibrate()
@@ -321,7 +312,7 @@ namespace SpaceEngineers.Apps.Radar
                     "Last measurement: " + _contact.AgeSecondsAt(now).ToString("0.0", culture) +
                     " s ago | " + _contact.Range.ToString("0", culture) + " m | " +
                     _contact.Velocity.Length().ToString("0.0", culture) + " m/s\n" +
-                    ContactGps("Radar last fix");
+                    _contact.FormatGps("Radar last fix");
             }
             Echo(status);
             if (_lcd != null && _lcd.IsSameConstructAs(Me))
