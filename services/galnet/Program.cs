@@ -37,6 +37,9 @@ namespace SpaceEngineers.Services.Galnet
         private readonly Dictionary<string, long> _leaseReceipts = new Dictionary<string, long>();
         private string _lastDelivery = "No message received.";
 
+        private string _lastOutbound = "No outbound hop accepted yet.";
+        private string _lastOutboundAck = "No outbound delivery acknowledged yet.";
+
         public Program()
         {
             var settings = Storage.Split('\n');
@@ -190,6 +193,8 @@ namespace SpaceEngineers.Services.Galnet
 
         private void ShowNetworkStatus()
         {
+            Echo(_lastOutbound);
+            Echo(_lastOutboundAck);
             foreach (var packet in _outbox)
             {
                 var fields = packet.Split('|');
@@ -459,7 +464,10 @@ namespace SpaceEngineers.Services.Galnet
                     var address = "|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
                     if (_outbox.RemoveAll(item => item.StartsWith("DATA" + address, StringComparison.Ordinal) ||
                         item.StartsWith("APP" + address, StringComparison.Ordinal)) > 0)
+                    {
+                        _lastOutboundAck = "Last ACK: " + fields[3] + " from " + origin;
                         SaveConfiguration();
+                    }
                 }
                 return;
             }
@@ -474,7 +482,7 @@ namespace SpaceEngineers.Services.Galnet
                 fields[4] = availableHops.ToString();
                 packet = string.Join("|", fields);
             }
-            if (IGC.SendUnicastMessage(nextHop, Channel, packet))
+            if (TrySendHop(nextHop, packet, fields, origin, destination))
                 return;
 
             // A failed send can precede expiry of the direct peer heartbeat.
@@ -485,10 +493,19 @@ namespace SpaceEngineers.Services.Galnet
                 if (!_topology.TryGetNextHop(Me.EntityId, destination, _tick, out reserveHop, previousHop,
                     peer => !rejected.Contains(peer) && IsLive(peer), availableHops))
                     return;
-                if (IGC.SendUnicastMessage(reserveHop, Channel, packet))
+                if (TrySendHop(reserveHop, packet, fields, origin, destination))
                     return;
                 rejected.Add(reserveHop);
             }
+        }
+
+        private bool TrySendHop(long hop, string packet, string[] fields, long origin, long destination)
+        {
+            if (!IGC.SendUnicastMessage(hop, Channel, packet))
+                return false;
+            if (origin == Me.EntityId && (fields[0] == "DATA" || fields[0] == "APP"))
+                _lastOutbound = "Last accepted hop: " + hop + " for " + fields[3] + " to " + destination;
+            return true;
         }
 
         private static bool IsCurrentPacket(string packet, long now)

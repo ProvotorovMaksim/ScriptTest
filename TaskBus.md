@@ -252,6 +252,10 @@ block ID on its next retry update. If any `App=` entries are configured,
 include every local TaskBus recipient on that relay. Non-TaskBus packets
 still go to `[GALNET APP]`. Direct ore catalog transfers
 and radio diagnostics continue to use radio.
+`network status` shows the most recent hop that accepted a local outbound
+packet and the most recent matching destination ACK for this PB session.
+The two lines include packet IDs. A hop accepting a packet is only a
+local send result. The ACK confirms end-to-end delivery.
 
 To check failover in a world, connect the worker and broker relays
 through two independent satellite relays. Verify that `route <broker relay ID>`
