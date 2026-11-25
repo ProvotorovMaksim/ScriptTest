@@ -633,7 +633,9 @@ updates for its connector to report a physical connection to the
 assigned mining point under the same lease. It then uses the existing
 automatic unloading and completion checks. `mine unload stop` cancels the
 wait or stops an ongoing unload. Configure both cargo container names.
-The pending wait does not survive a PB restart.
+The wait for docking does not survive a PB restart. Once unloading is
+active, the platform saves its lease and resumes after the same lease
+is reconfirmed, provided it is still connected to the assigned point.
 
 Set `MiningAutoRepeat=true` alongside `MiningAutoDepart=true` to have
 automatic unloading arm another trip if it recorded a partial deposit,

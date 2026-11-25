@@ -97,6 +97,7 @@ namespace SpaceEngineers.Apps.Platform
         private const int MaxSurveyViews = 64;
         private const int MaxOreHits = 256;
         private const string SurveyStorageMarker = "\nAMN_SURVEY_V1\n";
+        private const string MiningUnloadPrefix = "AMN_MINING_UNLOAD|";
         private const string MiningStopPrefix = "AMN_MINING_STOP|";
         private string _workerStorage;
         private string _surveyStorage = "";
@@ -200,21 +201,19 @@ namespace SpaceEngineers.Apps.Platform
                 (envelope, _) => IGC.SendBroadcastMessage(Channel, envelope, TransmissionDistance.TransmissionDistanceMax),
                 message => Echo(message));
             string savedStorage = Storage;
-            if (savedStorage.StartsWith(MiningStopPrefix, StringComparison.Ordinal))
+            _stoppedMiningStartLease = ReadStorageHeader(ref savedStorage, MiningStopPrefix);
+            var unload = ReadStorageHeader(ref savedStorage, MiningUnloadPrefix);
+            if (unload != null)
             {
-                int end = savedStorage.IndexOf('\n');
-                if (end >= 0)
+                var fields = unload.Split('|');
+                double deposit;
+                if (fields.Length == 2 && fields[0].Length != 0 &&
+                    double.TryParse(fields[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out deposit) &&
+                    deposit >= 0 && !double.IsInfinity(deposit))
                 {
-                    try
-                    {
-                        _stoppedMiningStartLease = TaskBusIgcHelper.DecodeStorage(
-                            savedStorage.Substring(MiningStopPrefix.Length, end - MiningStopPrefix.Length));
-                    }
-                    catch (FormatException)
-                    {
-                        Echo("Saved mining stop lease could not be read.");
-                    }
-                    savedStorage = savedStorage.Substring(end + 1);
+                    _autoMiningUnloadLease = fields[0];
+                    _miningUnloadStartDeposit = deposit;
                 }
             }
             int surveyStart = savedStorage.IndexOf(SurveyStorageMarker, StringComparison.Ordinal);
@@ -318,7 +317,7 @@ namespace SpaceEngineers.Apps.Platform
                 _pendingReturnLease = null;
                 _pendingMiningDockLease = null;
                 _pendingUnloadDockLease = null;
-                _autoMiningUnload = false;
+                StopAutomaticMiningUnload();
                 var lease = _worker.ConfirmedLeaseIdentity;
                 if (lease != null)
                 {
@@ -374,7 +373,7 @@ namespace SpaceEngineers.Apps.Platform
             }
             else if (string.Equals(command, "mine unload stop", StringComparison.OrdinalIgnoreCase))
             {
-                _autoMiningUnload = false;
+                StopAutomaticMiningUnload();
                 _pendingUnloadDockLease = null;
                 Echo("Automatic mining unload stopped.");
             }
@@ -395,16 +394,6 @@ namespace SpaceEngineers.Apps.Platform
             else if (!_routes.TryHandle(command))
                 _worker.ProcessCommand(command);
 
-            if (_autoMiningUnload && _autoMiningUnloadLease != _worker.ConfirmedLeaseIdentity)
-            {
-                _autoMiningUnload = false;
-                Echo("Automatic mining unload stopped: the lease changed.");
-            }
-            if (_autoMiningUnload && (updateSource & UpdateType.Update10) != 0 && ++_miningUnloadTicks >= 6)
-            {
-                _miningUnloadTicks = 0;
-                _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
-            }
             if ((updateSource & UpdateType.Update10) != 0)
             {
                 UpdateArmedMiningCruise();
@@ -413,6 +402,7 @@ namespace SpaceEngineers.Apps.Platform
                 UpdateAutomaticMiningReturn();
                 CheckLeasedMiningDock();
                 UpdateAutomaticMiningDock();
+                UpdateAutomaticMiningUnload();
                 UpdateUnloadAfterMiningDock();
                 if (command.Length == 0)
                 {
@@ -465,6 +455,40 @@ namespace SpaceEngineers.Apps.Platform
             _autoMiningUnloadLease = _worker.ConfirmedLeaseIdentity;
             _miningUnloadStartDeposit = _worker.MiningDeposited;
             _autoMiningUnload = UnloadMiningCargo(completeWhenReady: true);
+            if (!_autoMiningUnload)
+                _autoMiningUnloadLease = null;
+            SavePlatformStorage();
+        }
+
+        private void StopAutomaticMiningUnload()
+        {
+            if (_autoMiningUnloadLease == null)
+                return;
+            _autoMiningUnload = false;
+            _autoMiningUnloadLease = null;
+            SavePlatformStorage();
+        }
+
+        private void UpdateAutomaticMiningUnload()
+        {
+            if (_autoMiningUnloadLease == null)
+                return;
+            var lease = _worker.ConfirmedLeaseIdentity;
+            if (!_autoMiningUnload && lease == null)
+                return;
+            if (_autoMiningUnloadLease != lease)
+            {
+                StopAutomaticMiningUnload();
+                Echo("Automatic mining unload stopped: the lease changed.");
+                return;
+            }
+
+            _autoMiningUnload = true;
+            if (++_miningUnloadTicks < 6)
+                return;
+            _miningUnloadTicks = 0;
+            if (!UnloadMiningCargo(completeWhenReady: true))
+                StopAutomaticMiningUnload();
         }
 
         private void UpdateUnloadAfterMiningDock()
@@ -975,11 +999,31 @@ namespace SpaceEngineers.Apps.Platform
             SavePlatformStorage();
         }
 
+        private string ReadStorageHeader(ref string savedStorage, string prefix)
+        {
+            if (!savedStorage.StartsWith(prefix, StringComparison.Ordinal))
+                return null;
+            int end = savedStorage.IndexOf('\n');
+            if (end < 0)
+                return null;
+            var value = savedStorage.Substring(prefix.Length, end - prefix.Length);
+            savedStorage = savedStorage.Substring(end + 1);
+            try { return TaskBusIgcHelper.DecodeStorage(value); }
+            catch (FormatException)
+            {
+                Echo("Invalid platform storage header: " + prefix);
+                return null;
+            }
+        }
+
         private void SavePlatformStorage()
         {
             var stoppedLease = _stoppedMiningStartLease == null ? "" :
                 MiningStopPrefix + TaskBusIgcHelper.EncodeStorage(_stoppedMiningStartLease) + "\n";
-            Storage = stoppedLease + _workerStorage + _surveyStorage;
+            var unload = _autoMiningUnloadLease == null ? "" :
+                MiningUnloadPrefix + TaskBusIgcHelper.EncodeStorage(_autoMiningUnloadLease + "|" +
+                    _miningUnloadStartDeposit.ToString("R", System.Globalization.CultureInfo.InvariantCulture)) + "\n";
+            Storage = stoppedLease + unload + _workerStorage + _surveyStorage;
         }
 
         private void ShowSurveySamples()
