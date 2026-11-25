@@ -24,6 +24,11 @@ TaskBus assignments and relay settings can recover.
 | `radar/script.cs` | Radar. Use configured cameras and an optional `[RADAR LCD]`. Gimbal also uses an azimuth rotor and an elevation hinge. See [Radar setup and acceptance](Radar.md). |
 | `sample/script.cs` | Diagnostic sample. Use a working antenna, a remote control named `RemCon` and the programmable block named `Prog`. |
 
+AMN.Base is packaged with readable identifiers. Paste the packaged
+`amn/script.cs` from the archive into the base PB. It includes the
+required shared code. The [AMN.Base project source](../apps/amn/Program.cs)
+is useful when reviewing the base logic alongside the packaged script.
+
 Start with direct TaskBus radio communication using the
 [mining dispatch acceptance test](../TaskBus.md#mining-dispatch-acceptance-test).
 Then exercise Galnet with a primary route and an alternate route.
