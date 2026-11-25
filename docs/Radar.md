@@ -61,6 +61,9 @@ adds them to its contact journal and sends them to its configured
 `GalnetFleetPeer` relays. The pilot can use `up` and `down` on ShipLink to
 highlight a contact and `apply` to select it for tracking. The highlight
 survives updates and reordering while that contact remains in the journal.
+Radar, turret and cockpit observations of the same entity appear as
+one entry. FCS uses the latest measured sample for the chosen entity,
+including when another source supplies it.
 
 ## Sharing a turret observation
 

@@ -49,6 +49,7 @@ namespace SpaceEngineers.Apps.ShipLink
             public bool Hazard;
             public Vector3D Position;
             public string RadarMotion;
+            public long MeasuredTicks;
         }
         private sealed class AiDetection
         {
@@ -408,10 +409,7 @@ namespace SpaceEngineers.Apps.ShipLink
         private void UpdateFcsTarget()
         {
             long now = DateTime.UtcNow.Ticks;
-            var selected = _trackedContact;
-            var mark = selected == null ? null : _contacts.FirstOrDefault(candidate =>
-                candidate.Expires > now && !candidate.Assistance && !candidate.Hazard &&
-                candidate.Source == selected.Source && candidate.Name == selected.Name);
+            var mark = FindLiveTrackedMark(now);
             string command = null;
             long entityId;
             if (_weaponSelected >= 0 && mark != null && mark.RadarMotion != null &&
@@ -439,9 +437,30 @@ namespace SpaceEngineers.Apps.ShipLink
 
         private FleetContact[] JournalEntries(long now) =>
             _contacts.Where(mark => !mark.Assistance && !mark.Hazard && mark.Expires > now)
-                .OrderBy(mark => mark.Source).ThenBy(mark => mark.Name, StringComparer.Ordinal).ToArray();
+                .GroupBy(JournalKey)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => group.OrderByDescending(mark => mark.MeasuredTicks)
+                    .ThenByDescending(mark => mark.Expires).ThenBy(mark => mark.Source).First()).ToArray();
 
-        private static string JournalKey(FleetContact mark) => MarkKey(mark.Source, "contact", mark.Name);
+        private static string JournalKey(FleetContact mark)
+        {
+            long id;
+            return TryReadSensedEntityId(mark.Name, out id) ?
+                "entity:" + id.ToString(System.Globalization.CultureInfo.InvariantCulture) :
+                MarkKey(mark.Source, "contact", mark.Name);
+        }
+
+        private FleetContact FindLiveTrackedMark(long now)
+        {
+            var selected = _trackedContact;
+            if (selected == null || selected.Assistance || selected.Hazard)
+                return null;
+
+            var key = JournalKey(selected);
+            return _contacts.Where(mark => !mark.Assistance && !mark.Hazard && mark.Expires > now &&
+                JournalKey(mark) == key).OrderByDescending(mark => mark.MeasuredTicks)
+                .ThenByDescending(mark => mark.Expires).ThenBy(mark => mark.Source).FirstOrDefault();
+        }
 
         private void SelectJournalEntry(int step)
         {
@@ -538,7 +557,7 @@ namespace SpaceEngineers.Apps.ShipLink
 
         private void CueLocalRadar()
         {
-            var mark = _trackedContact;
+            var mark = FindLiveTrackedMark(DateTime.UtcNow.Ticks);
             long entityId;
             if (mark == null || mark.Assistance || mark.Hazard || mark.Expires <= DateTime.UtcNow.Ticks ||
                 !TryReadSensedEntityId(mark.Name, out entityId))
@@ -854,7 +873,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 (kind == "assist" || mark.Name == name) && mark.Expires <= expires);
             if (_trackedContact != null && _trackedContact.Source == source && MarkKind(_trackedContact) == kind &&
                 (kind == "assist" || _trackedContact.Name == name) && _trackedContact.Expires <= expires)
-                _trackedContact = null;
+                _trackedContact = FindLiveTrackedMark(now);
 
             _displayTick = DisplayUpdateIntervalTicks;
         }
@@ -968,16 +987,33 @@ namespace SpaceEngineers.Apps.ShipLink
             existing.Expires = expiry;
             existing.Position = new Vector3D(x, y, z);
             existing.RadarMotion = null;
+            existing.MeasuredTicks = 0;
             long entityId;
             if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
             {
                 var gpsFields = gps.Split(':');
-                if (gpsFields.Length == 11 && gpsFields[5] == "RV1")
+                long measured;
+                if (gpsFields.Length == 11 && gpsFields[5] == "RV1" &&
+                    long.TryParse(gpsFields[6], out measured) && measured > 0 && measured <= now &&
+                    now - measured <= ContactLifetime + 2 * TimeSpan.TicksPerSecond &&
+                    TryReadFiniteComponent(gpsFields[7]) && TryReadFiniteComponent(gpsFields[8]) &&
+                    TryReadFiniteComponent(gpsFields[9]))
+                {
+                    existing.MeasuredTicks = measured;
                     existing.RadarMotion = " " + gpsFields[6] + " " + gpsFields[7] + " " +
                         gpsFields[8] + " " + gpsFields[9];
+                }
             }
             _displayTick = DisplayUpdateIntervalTicks;
             return true;
+        }
+
+        private static bool TryReadFiniteComponent(string value)
+        {
+            double component;
+            return double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out component) &&
+                !double.IsNaN(component) && !double.IsInfinity(component);
         }
 
         private void UpdateFleetStatus()
@@ -1115,10 +1151,8 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_trackedContact == null)
                 return;
 
-            var fresh = _contacts.FirstOrDefault(contact => contact.Source == _trackedContact.Source &&
-                contact.Name == _trackedContact.Name && contact.Assistance == _trackedContact.Assistance &&
-                contact.Hazard == _trackedContact.Hazard);
-            if (fresh != null && fresh.Expires >= _trackedContact.Expires)
+            var fresh = FindLiveTrackedMark(now);
+            if (fresh != null)
                 _trackedContact = fresh;
 
             var mark = _trackedContact;
