@@ -478,6 +478,21 @@ namespace SpaceEngineers.Services.Consumer
                     continue;
 
                 var quantity = (VRage.MyFixedPoint)Math.Min(amount, (double)item.Amount);
+                if (!destination.CanItemsBeAdded(quantity, item.Type))
+                {
+                    // Find a partial stack that fits without probing by transferring cargo.
+                    double lower = 0;
+                    double upper = (double)quantity;
+                    for (int i = 0; i < 32 && upper - lower > 0.000001; i++)
+                    {
+                        double middle = lower + (upper - lower) * 0.5;
+                        if (destination.CanItemsBeAdded((VRage.MyFixedPoint)middle, item.Type))
+                            lower = middle;
+                        else
+                            upper = middle;
+                    }
+                    quantity = (VRage.MyFixedPoint)lower;
+                }
                 return (double)quantity > 0 && source.TransferItemTo(destination, item, quantity)
                     ? (double)quantity : 0;
             }
