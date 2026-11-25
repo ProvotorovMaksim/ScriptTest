@@ -536,7 +536,7 @@ namespace TaskBus.Tests
             for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
                 Tick();
             Assert.Contains(baseReplies, envelope => envelope.Contains("\"request_id\":\"replenish\""));
-            Assert.EndsWith("|0", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))));
+            Assert.EndsWith("|0", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))).TrimEnd('\r'));
 
             baseReplies.Clear();
             baseBridge.Send(TaskBusProtocol.CreateEnvelope("TASK_QUERY",
@@ -544,7 +544,7 @@ namespace TaskBus.Tests
             for (int tick = 0; tick < 150 && baseReplies.Count == 0; tick++)
                 Tick();
             Assert.Contains(baseReplies, envelope => envelope.Contains("\"request_id\":\"replenish\""));
-            Assert.EndsWith("|1", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))));
+            Assert.EndsWith("|1", Assert.Single(broker.Storage.Split('\n').Where(line => line.StartsWith("TASK|"))).TrimEnd('\r'));
             Assert.Empty(broker.IGC.Outbox);
         }
 

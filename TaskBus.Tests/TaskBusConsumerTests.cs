@@ -405,7 +405,7 @@ namespace TaskBus.Tests
             var oldCompletion = TaskBusProtocol.CreateEnvelope("TASK_PUBLISHED_ACK",
                 "{\"request_id\":\"parent:7:0\",\"state\":\"DONE\"}", targetId: 42);
             point.ProcessCommand("survey retry");
-            Assert.Contains("Child request: parent:7:0\n", point.GetStatus());
+            Assert.Contains("Child request: parent:7:0" + System.Environment.NewLine, point.GetStatus());
             Assert.True(point.ProcessIncomingMessage(1, oldCompletion));
             point.ProcessCommand("survey retry");
             Assert.Contains("\"request_id\":\"parent:7:0:retry:1\"", sent[sent.Count - 1]);
