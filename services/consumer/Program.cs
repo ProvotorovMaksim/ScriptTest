@@ -130,10 +130,7 @@ namespace SpaceEngineers.Services.Consumer
             if (_autoDepart && (updateSource & UpdateType.Update10) != 0 && ++_departureTicks >= 12)
             {
                 _departureTicks = 0;
-                if (_consumer.CanDepartHaulerPickup() ||
-                    (_autoCruise && _consumer.SupervisedCruiseRemote == 0 && _fcsDockLease == null &&
-                        _consumer.CanDepartHaulerBase() && _routes.LoadStationApproach(startCruise: false, prepare: true)))
-                    RequestFcs("dock depart ready");
+                TryAutomaticHaulerDeparture();
             }
             CheckLeasedHaulerDock();
             _routes.CheckCruiseLease((updateSource & UpdateType.Update10) != 0);
@@ -248,6 +245,23 @@ namespace SpaceEngineers.Services.Consumer
                 _fcsDockDeadlineUtc = deadline;
         }
 
+        private void TryAutomaticHaulerDeparture()
+        {
+            if (_consumer.SupervisedCruiseRemote != 0 || _fcsDockLease != null)
+                return;
+
+            bool atPickup = _consumer.CanDepartHaulerPickup();
+            if (!atPickup && (!_autoCruise || !_consumer.CanDepartHaulerBase()))
+                return;
+
+            if (!HaulerFlightControlsIdle())
+                return;
+            if (_autoCruise && !_routes.LoadStationApproach(startCruise: false, prepare: true))
+                return;
+
+            RequestFcs("dock depart ready");
+        }
+
         private void DepartHaulerPickup()
         {
             if (!_consumer.CanDepartHaulerPickup())
@@ -304,6 +318,11 @@ namespace SpaceEngineers.Services.Consumer
                 connector.Status == MyShipConnectorStatus.Connected)
                 return false;
 
+            return HaulerFlightControlsIdle();
+        }
+
+        private bool HaulerFlightControlsIdle()
+        {
             _cruiseControllers.Clear();
             GridTerminalSystem.GetBlocksOfType(_cruiseControllers, controller => controller.CubeGrid == Me.CubeGrid);
             foreach (var controller in _cruiseControllers)
