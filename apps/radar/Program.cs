@@ -20,6 +20,7 @@ namespace SpaceEngineers.Apps.Radar
         private IMyTextPanel _lcd;
         private bool _scanning;
         private bool _parking;
+        private RadarCue _cue;
         private string _scanProblem;
         private RadarState _state = RadarState.IDLE;
 
@@ -61,6 +62,7 @@ namespace SpaceEngineers.Apps.Radar
                     Discover();
                     _scanProblem = null;
                     _parking = false;
+                    _cue = null;
                     _scanning = true;
                     _state = RadarState.ACQUIRING;
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
@@ -68,6 +70,7 @@ namespace SpaceEngineers.Apps.Radar
                 case "unlock":
                     if (_parking)
                         StopMotion(RadarState.IDLE);
+                    _cue = null;
                     _contact.Clear();
                     _gimbal.Stop();
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
@@ -76,6 +79,7 @@ namespace SpaceEngineers.Apps.Radar
                     _scanning = false;
                     _parking = false;
                     _scanProblem = null;
+                    _cue = null;
                     _contact.Clear();
                     _gimbal.Stop();
                     Runtime.UpdateFrequency = UpdateFrequency.None;
@@ -87,6 +91,7 @@ namespace SpaceEngineers.Apps.Radar
                         StopMotion(RadarState.IDLE);
                     _gimbal.Unbind();
                     _scanProblem = null;
+                    _cue = null;
                     _contact.Clear();
                     _config.Mode = command.EndsWith("gimbal", StringComparison.OrdinalIgnoreCase) ? "Gimbal" : "Fixed";
                     _state = _scanning ? RadarState.ACQUIRING : RadarState.IDLE;
@@ -104,6 +109,7 @@ namespace SpaceEngineers.Apps.Radar
                     Discover();
                     _scanning = false;
                     _parking = true;
+                    _cue = null;
                     _contact.Clear();
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
                     Park(now);
@@ -116,12 +122,33 @@ namespace SpaceEngineers.Apps.Radar
                         double.TryParse(command.Substring(6), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out range) &&
                         range > 0 && !double.IsInfinity(range))
                         _config.MaxRange = range;
+                    else if (command.StartsWith("acquire ", StringComparison.OrdinalIgnoreCase))
+                        Acquire(command.Substring(8), now);
                     else if (command.StartsWith("share ", StringComparison.OrdinalIgnoreCase))
                         ShareContact(command.Substring(6), now);
                     else
                         Echo("Radar commands: on, off, scan, unlock, status, mode fixed, mode gimbal, gimbal calibrate, gimbal park, range <meters>, share <relay ID>");
                     break;
             }
+        }
+
+        private void Acquire(string argument, DateTime now)
+        {
+            RadarCue cue;
+            if (!RadarCue.TryParse(argument, now.Ticks, out cue))
+            {
+                Echo("Invalid or expired acquisition cue.");
+                return;
+            }
+
+            Discover();
+            _contact.Lose();
+            _scanProblem = null;
+            _parking = false;
+            _scanning = true;
+            _cue = cue;
+            _state = RadarState.ACQUIRING;
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
         }
 
         private void ShareContact(string argument, DateTime now)
@@ -206,7 +233,17 @@ namespace SpaceEngineers.Apps.Radar
 
         private void Scan(DateTime now)
         {
+            var cue = _cue;
+            if (cue != null && cue.Expires <= now.Ticks)
+            {
+                _cue = null;
+                _scanProblem = "Network cue expired before local confirmation.";
+                StopMotion(RadarState.LOST);
+                return;
+            }
+
             bool tracking = _contact.IsActive;
+            bool pointed = tracking || cue != null;
             double age = _contact.AgeSecondsAt(now);
             if (tracking && age >= ContactTimeoutSeconds + _contact.Range / 2000)
             {
@@ -224,7 +261,7 @@ namespace SpaceEngineers.Apps.Radar
                 return;
             }
 
-            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : Vector3D.Zero;
+            Vector3D target = tracking ? _predictor.Predict(_contact.Position, _contact.Velocity, age) : cue != null ? cue.Position : Vector3D.Zero;
             bool eligibleCamera = false;
             bool gimbalDriven = false;
             bool gimbalReadyToScan = true;
@@ -239,7 +276,7 @@ namespace SpaceEngineers.Apps.Radar
                 eligibleCamera = true;
                 if (gimbal && !gimbalDriven)
                 {
-                    if (tracking)
+                    if (pointed)
                         _gimbal.Aim(camera, target);
                     else
                     {
@@ -260,15 +297,17 @@ namespace SpaceEngineers.Apps.Radar
 
                 double maxRange = camera.RaycastDistanceLimit > 0
                     ? Math.Min(_config.MaxRange, camera.RaycastDistanceLimit) : _config.MaxRange;
-                double range = tracking ? Vector3D.Distance(camera.GetPosition(), target) : maxRange;
-                if (range <= 0 || range > maxRange || (tracking ? !camera.CanScan(target) : !camera.CanScan(range)))
+                double range = pointed ? Vector3D.Distance(camera.GetPosition(), target) : maxRange;
+                if (range <= 0 || range > maxRange || (pointed ? !camera.CanScan(target) : !camera.CanScan(range)))
                     continue;
 
                 rays++;
-                var hit = tracking ? camera.Raycast(target) : camera.Raycast(range);
-                if (hit.IsEmpty() || (tracking && hit.EntityId != _contact.EntityId))
+                var hit = pointed ? camera.Raycast(target) : camera.Raycast(range);
+                if (hit.IsEmpty() || (tracking && hit.EntityId != _contact.EntityId) ||
+                    (cue != null && !cue.Matches(hit.EntityId)))
                     continue;
 
+                _cue = null;
                 _contact.Update(hit, Vector3D.Distance(Me.GetPosition(), hit.Position), now);
                 _predictor.UpdateState(_contact.Position, _contact.Velocity);
                 _state = RadarState.LOCKED;
@@ -281,7 +320,7 @@ namespace SpaceEngineers.Apps.Radar
                     "No working, raycast-enabled camera in the radar group or with the configured name prefix.");
                 return;
             }
-            if (gimbal && !tracking && rays > 0)
+            if (gimbal && !pointed && rays > 0)
                 _gimbal.AdvanceSweep();
             _state = tracking ? RadarState.COASTING :
                 rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
@@ -303,6 +342,8 @@ namespace SpaceEngineers.Apps.Radar
             string problem = _scanProblem ?? (IsGimbal ? _gimbal.GetUnavailableReason() : null);
             if (problem != null)
                 status += "\n" + problem;
+            if (_cue != null)
+                status += "\nAwaiting local confirmation: " + _cue.EntityId;
             if (_contact.EntityId != 0)
             {
                 var culture = System.Globalization.CultureInfo.InvariantCulture;

@@ -53,6 +53,15 @@ measurement. ShipLink sends a contact named `Radar <entity ID>` through
 the existing fleet channel. Check ShipLink output and the recipient's
 display to confirm delivery.
 
+## Acquiring a fleet mark
+
+Name the receiving Radar PB `[RADAR]`. In ShipLink, select a fresh Radar
+mark with `contact track <sender relay ID> Radar <entity ID>` and run
+`contact acquire`. Fixed Radar attempts a raycast when the mark is within
+a camera's field of view. Gimbal also points toward the reported position.
+The radar starts tracking only after a local raycast confirms the same
+entity ID. An expired cue stops the attempt.
+
 ## Diagnostics and acceptance
 
 If the status is `UNAVAILABLE`, follow the message about camera placement,

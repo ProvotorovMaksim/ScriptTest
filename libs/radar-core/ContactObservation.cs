@@ -23,4 +23,34 @@ namespace SpaceEngineers.Libs.RadarCore
         public double Range;
         public Vector3D Direction;
     }
+
+    public sealed class RadarCue
+    {
+        public long EntityId { get; private set; }
+        public long Expires { get; private set; }
+        public Vector3D Position { get; private set; }
+
+        public bool Matches(long entityId) => entityId == EntityId;
+
+        public static bool TryParse(string argument, long now, out RadarCue cue)
+        {
+            cue = null;
+            var fields = argument.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            long id, expires;
+            double x, y, z;
+            if (fields.Length != 5 || !long.TryParse(fields[0], out id) || id == 0 ||
+                !long.TryParse(fields[1], out expires) || expires <= now ||
+                expires - now > TimeSpan.FromSeconds(30).Ticks ||
+                !TryReadCoordinate(fields[2], out x) || !TryReadCoordinate(fields[3], out y) ||
+                !TryReadCoordinate(fields[4], out z))
+                return false;
+            cue = new RadarCue { EntityId = id, Expires = expires, Position = new Vector3D(x, y, z) };
+            return true;
+        }
+
+        private static bool TryReadCoordinate(string text, out double coordinate) =>
+            double.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out coordinate) &&
+                !double.IsInfinity(coordinate) && !double.IsNaN(coordinate);
+    }
 }

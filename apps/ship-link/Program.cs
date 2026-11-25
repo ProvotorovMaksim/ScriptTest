@@ -182,6 +182,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (string.Equals(command, "contact acquire", StringComparison.OrdinalIgnoreCase))
+                CueLocalRadar();
             else if (command.StartsWith("contact track ", StringComparison.OrdinalIgnoreCase))
                 TrackFleetContact(command.Substring(14).Trim());
             else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase) ||
@@ -284,6 +286,27 @@ namespace SpaceEngineers.Apps.ShipLink
             _trackedContact = mark;
             _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private void CueLocalRadar()
+        {
+            var mark = _trackedContact;
+            long entityId;
+            if (mark == null || mark.Assistance || mark.Hazard || mark.Expires <= DateTime.UtcNow.Ticks ||
+                !mark.Name.StartsWith("Radar ", StringComparison.Ordinal) ||
+                !long.TryParse(mark.Name.Substring(6), out entityId) || entityId == 0)
+            {
+                Echo("Select a current Radar mark with contact track first.");
+                return;
+            }
+
+            var radar = GridTerminalSystem.GetBlockWithName("[RADAR]") as IMyProgrammableBlock;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            if (radar == null || radar.CubeGrid != Me.CubeGrid || !radar.IsWorking || radar.EntityId == Me.EntityId ||
+                !radar.TryRun("acquire " + entityId.ToString(culture) + " " + mark.Expires.ToString(culture) +
+                    " " + mark.Position.X.ToString("R", culture) + " " + mark.Position.Y.ToString("R", culture) +
+                    " " + mark.Position.Z.ToString("R", culture)))
+                Echo("A working local [RADAR] programmable block is required.");
         }
 
         private void SendContact(string argument)

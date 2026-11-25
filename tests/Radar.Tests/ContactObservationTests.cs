@@ -8,6 +8,17 @@ namespace Tests.Radar.Tests
     public class ContactObservationTests
     {
         [Test]
+        public void NetworkCueRequiresFreshFiniteCoordinatesAndMatchingEntity()
+        {
+            Assert.That(RadarCue.TryParse("42 110 20.5 -3 9", 100, out var cue), Is.True);
+            Assert.That(cue.Position, Is.EqualTo(new Vector3D(20.5, -3, 9)));
+            Assert.That(cue.Matches(42), Is.True);
+            Assert.That(cue.Matches(43), Is.False);
+            Assert.That(RadarCue.TryParse("42 100 20.5 -3 9", 100, out _), Is.False);
+            Assert.That(RadarCue.TryParse("42 110 Infinity -3 9", 100, out _), Is.False);
+        }
+
+        [Test]
         public void ContactObservation_Default_Values()
         {
             var obs = new ContactObservation();
