@@ -43,11 +43,16 @@ namespace SpaceEngineers.Libs.RadarCore
                 return false;
 
             var culture = System.Globalization.CultureInfo.InvariantCulture;
-            command = "contact " + relay.ToString(culture) + " " +
-                FormatGps("Radar " + EntityId.ToString(culture)) + "RV1:" + LastSeen.Ticks.ToString(culture) +
+            command = "contact " + relay.ToString(culture) + " " + FormatObservation();
+            return true;
+        }
+
+        public string FormatObservation()
+        {
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            return FormatGps("Radar " + EntityId.ToString(culture)) + "RV1:" + LastSeen.Ticks.ToString(culture) +
                 ":" + Velocity.X.ToString("R", culture) + ":" + Velocity.Y.ToString("R", culture) +
                 ":" + Velocity.Z.ToString("R", culture) + ":";
-            return true;
         }
 
         public string FormatGps(string name)

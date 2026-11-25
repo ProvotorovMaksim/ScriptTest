@@ -57,6 +57,10 @@ namespace SpaceEngineers.Apps.ShipLink
         }
 
         private readonly Dictionary<long, AiDetection> _aiDetections = new Dictionary<long, AiDetection>();
+        private string _journalSelection;
+        private string _pendingObservation;
+        private long _pendingObservationExpires;
+        private readonly HashSet<long> _pendingObservationPeers = new HashSet<long>();
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
@@ -119,6 +123,13 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
+            if (command.StartsWith("contact publish ", StringComparison.Ordinal))
+            {
+                PublishLocalObservation(command.Substring(16));
+                return;
+            }
+
+            FlushObservation();
             _tick++;
             _displayTick++;
             if (command.StartsWith("base ", StringComparison.OrdinalIgnoreCase))
@@ -135,6 +146,9 @@ namespace SpaceEngineers.Apps.ShipLink
                 _galnetPeers.Clear();
                 _lastHeartbeatTick = _tick - HeartbeatIntervalTicks;
                 _contacts.Clear();
+                _journalSelection = null;
+                _pendingObservation = null;
+                _pendingObservationPeers.Clear();
                 _aiDetections.Clear();
                 _trackedContact = null;
                 _trackedAssistanceRelay = 0;
@@ -191,6 +205,12 @@ namespace SpaceEngineers.Apps.ShipLink
                 SendFleetWithdrawal(command.Substring(13).Trim(), "hazard");
             else if (command.StartsWith("hazard scan ", StringComparison.OrdinalIgnoreCase))
                 ScanAndShareHazard(command.Substring(12).Trim());
+            else if (string.Equals(command, "up", StringComparison.OrdinalIgnoreCase))
+                SelectJournalEntry(-1);
+            else if (string.Equals(command, "down", StringComparison.OrdinalIgnoreCase))
+                SelectJournalEntry(1);
+            else if (string.Equals(command, "apply", StringComparison.OrdinalIgnoreCase))
+                ApplyJournalEntry();
             else if (command.StartsWith("contact ai ", StringComparison.OrdinalIgnoreCase))
                 ShareAiDetection(command.Substring(11).Trim());
             else if (command.StartsWith("contact cockpit ", StringComparison.OrdinalIgnoreCase))
@@ -301,6 +321,72 @@ namespace SpaceEngineers.Apps.ShipLink
             _trackedContact = mark;
             _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private FleetContact[] JournalEntries(long now) =>
+            _contacts.Where(mark => !mark.Assistance && !mark.Hazard && mark.Expires > now)
+                .OrderBy(mark => mark.Source).ThenBy(mark => mark.Name, StringComparer.Ordinal).ToArray();
+
+        private static string JournalKey(FleetContact mark) => MarkKey(mark.Source, "contact", mark.Name);
+
+        private void SelectJournalEntry(int step)
+        {
+            var entries = JournalEntries(DateTime.UtcNow.Ticks);
+            if (entries.Length == 0)
+                return;
+            int current = Array.FindIndex(entries, mark => JournalKey(mark) == _journalSelection);
+            int next = current < 0 ? (step > 0 ? 0 : entries.Length - 1) :
+                (current + step + entries.Length) % entries.Length;
+            _journalSelection = JournalKey(entries[next]);
+            _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private void ApplyJournalEntry()
+        {
+            var entries = JournalEntries(DateTime.UtcNow.Ticks);
+            var selected = entries.FirstOrDefault(mark => JournalKey(mark) == _journalSelection);
+            if (selected == null)
+            {
+                Echo("Select a current contact with up or down first.");
+                return;
+            }
+            _trackedContact = selected;
+            _trackedAssistanceRelay = 0;
+            _displayTick = DisplayUpdateIntervalTicks;
+        }
+
+        private void PublishLocalObservation(string gps)
+        {
+            if (gps.Length > 200)
+                return;
+            long now = DateTime.UtcNow.Ticks;
+            if (!RecordFleetMark(Me.EntityId, "contact", gps, now + ContactLifetime, now) ||
+                string.IsNullOrEmpty(_fleetName) || _fleetName.Length > 64 || _heartbeatRelays.Count == 0)
+                return;
+            _pendingObservation = gps;
+            _pendingObservationExpires = now + 2 * TimeSpan.TicksPerSecond;
+            _pendingObservationPeers.Clear();
+            _pendingObservationPeers.UnionWith(_heartbeatRelays);
+        }
+
+        private void FlushObservation()
+        {
+            if (_pendingObservation == null)
+                return;
+            if (DateTime.UtcNow.Ticks >= _pendingObservationExpires)
+            {
+                _pendingObservation = null;
+                _pendingObservationPeers.Clear();
+                return;
+            }
+            var relay = FindGalnetRelay();
+            if (relay == null)
+                return;
+            foreach (long peer in _pendingObservationPeers.ToArray())
+                if (peer == relay.EntityId || SendFleetPacket(relay, peer, "contact", _pendingObservation, ContactLifetime))
+                    _pendingObservationPeers.Remove(peer);
+            if (_pendingObservationPeers.Count == 0)
+                _pendingObservation = null;
         }
 
         private void CueLocalRadar()
@@ -632,55 +718,61 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (hazard ? !_heartbeatRelays.Contains(source) : fields[0] != "contact" && fields[0] != "assist")
                     return;
 
-                string name;
-                double x;
-                double y;
-                double z;
-                var gps = TaskBusIgcHelper.DecodeStorage(fields[3]);
-                if (!TaskBusIgcHelper.TryReadOreGps(gps,
-                    out name, out x, out y, out z) || name.Length > 64)
-                    return;
-
-                bool assistance = fields[0] == "assist";
-                long withdrawnUntil;
-                if (_withdrawnMarks.TryGetValue(MarkKey(source, fields[0], name), out withdrawnUntil) &&
-                    withdrawnUntil >= expiry)
-                    return;
-
-                _contacts.RemoveAll(contact => contact.Expires <= now);
-                var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
-                    contact.Assistance == assistance && contact.Hazard == hazard && (assistance || contact.Name == name));
-                if (existing == null)
-                {
-                    if (_contacts.Count >= MaxContacts)
-                    {
-                        var oldestContact = assistance
-                            ? _contacts.Where(contact => !contact.Assistance).OrderBy(contact => contact.Expires).FirstOrDefault()
-                            : null;
-                        if (oldestContact == null)
-                            return;
-                        _contacts.Remove(oldestContact);
-                    }
-                    existing = new FleetContact { Source = source, Name = name, Assistance = assistance, Hazard = hazard };
-                    _contacts.Add(existing);
-                }
-                else if (existing.Expires >= expiry)
-                    return;
-
-                existing.Expires = expiry;
-                existing.Position = new Vector3D(x, y, z);
-                existing.RadarMotion = null;
-                long entityId;
-                if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
-                {
-                    var gpsFields = gps.Split(':');
-                    if (gpsFields.Length == 11 && gpsFields[5] == "RV1")
-                        existing.RadarMotion = " " + gpsFields[6] + " " + gpsFields[7] + " " +
-                            gpsFields[8] + " " + gpsFields[9];
-                }
-                _displayTick = DisplayUpdateIntervalTicks;
+                RecordFleetMark(source, fields[0], TaskBusIgcHelper.DecodeStorage(fields[3]), expiry, now);
             }
             catch (FormatException) { }
+        }
+
+        private bool RecordFleetMark(long source, string kind, string gps, long expiry, long now)
+        {
+            bool hazard = kind == "hazard";
+            string name;
+            double x;
+            double y;
+            double z;
+            if (!TaskBusIgcHelper.TryReadOreGps(gps,
+                out name, out x, out y, out z) || name.Length > 64)
+                return false;
+
+            bool assistance = kind == "assist";
+            long withdrawnUntil;
+            if (_withdrawnMarks.TryGetValue(MarkKey(source, kind, name), out withdrawnUntil) &&
+                withdrawnUntil >= expiry)
+                return false;
+
+            _contacts.RemoveAll(contact => contact.Expires <= now);
+            var existing = _contacts.FirstOrDefault(contact => contact.Source == source &&
+                contact.Assistance == assistance && contact.Hazard == hazard && (assistance || contact.Name == name));
+            if (existing == null)
+            {
+                if (_contacts.Count >= MaxContacts)
+                {
+                    var oldestContact = assistance
+                        ? _contacts.Where(contact => !contact.Assistance).OrderBy(contact => contact.Expires).FirstOrDefault()
+                        : null;
+                    if (oldestContact == null)
+                        return false;
+                    _contacts.Remove(oldestContact);
+                }
+                existing = new FleetContact { Source = source, Name = name, Assistance = assistance, Hazard = hazard };
+                _contacts.Add(existing);
+            }
+            else if (existing.Expires >= expiry)
+                return false;
+
+            existing.Expires = expiry;
+            existing.Position = new Vector3D(x, y, z);
+            existing.RadarMotion = null;
+            long entityId;
+            if (!assistance && !hazard && gps.Length <= 200 && TryReadSensedEntityId(name, out entityId))
+            {
+                var gpsFields = gps.Split(':');
+                if (gpsFields.Length == 11 && gpsFields[5] == "RV1")
+                    existing.RadarMotion = " " + gpsFields[6] + " " + gpsFields[7] + " " +
+                        gpsFields[8] + " " + gpsFields[9];
+            }
+            _displayTick = DisplayUpdateIntervalTicks;
+            return true;
         }
 
         private void UpdateFleetStatus()
@@ -1108,6 +1200,17 @@ namespace SpaceEngineers.Apps.ShipLink
                 _aiDetections.Remove(detection);
             foreach (var detection in _aiDetections.OrderBy(pair => pair.Key))
                 display.AppendLine("AI detection from " + detection.Key + ": " + detection.Value.EntityId + " (ID only)");
+
+            var journal = JournalEntries(now);
+            if (journal.Length > 0)
+            {
+                display.AppendLine("=== CONTACT JOURNAL | UP / DOWN / APPLY ===");
+                int selected = Array.FindIndex(journal, mark => JournalKey(mark) == _journalSelection);
+                int first = Math.Max(0, selected - 3);
+                foreach (var entry in journal.Skip(first).Take(8))
+                    display.AppendLine((JournalKey(entry) == _journalSelection ? "> " : "  ") +
+                        entry.Name + " | " + (entry.Source == Me.EntityId ? "local" : entry.Source.ToString()));
+            }
 
             AppendTrackedContact(display, now);
             if (_contacts.Count > 0)

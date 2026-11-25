@@ -21,6 +21,7 @@ namespace SpaceEngineers.Apps.Radar
         private bool _scanning;
         private bool _parking;
         private RadarCue _cue;
+        private long _nextJournalPublish;
         private string _scanProblem;
         private RadarState _state = RadarState.IDLE;
 
@@ -310,6 +311,8 @@ namespace SpaceEngineers.Apps.Radar
                 _cue = null;
                 _contact.Update(hit, Vector3D.Distance(Me.GetPosition(), hit.Position), now);
                 _predictor.UpdateState(_contact.Position, _contact.Velocity);
+                if (_config.ShareContacts && now.Ticks >= _nextJournalPublish)
+                    PublishJournalObservation(now.Ticks);
                 _state = RadarState.LOCKED;
                 return;
             }
@@ -324,6 +327,14 @@ namespace SpaceEngineers.Apps.Radar
                 _gimbal.AdvanceSweep();
             _state = tracking ? RadarState.COASTING :
                 rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
+        }
+
+        private void PublishJournalObservation(long now)
+        {
+            _nextJournalPublish = now + TimeSpan.TicksPerSecond;
+            var shipLink = GridTerminalSystem.GetBlockWithName(_config.ShipLinkBlock) as IMyProgrammableBlock;
+            if (shipLink != null && shipLink.CubeGrid == Me.CubeGrid && shipLink.IsWorking && shipLink.EntityId != Me.EntityId)
+                shipLink.TryRun("contact publish " + _contact.FormatObservation());
         }
 
         private void LoseTrackingHardware(string problem)

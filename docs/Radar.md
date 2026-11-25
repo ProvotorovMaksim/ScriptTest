@@ -53,6 +53,15 @@ measurement. ShipLink sends a contact named `Radar <entity ID>` through
 the existing fleet channel. Check ShipLink output and the recipient's
 display to confirm delivery.
 
+## Contact journal
+
+Set `ShareContacts=true` under `[Radar]` to publish new measurements
+automatically to the local ShipLink PB, at most once per second. ShipLink
+adds them to its contact journal and sends them to its configured
+`GalnetFleetPeer` relays. The pilot can use `up` and `down` on ShipLink to
+highlight a contact and `apply` to select it for tracking. The highlight
+survives updates and reordering while that contact remains in the journal.
+
 ## Sharing a turret observation
 
 Name a local large turret `[SHIPLINK TURRET]`. With a contact already
