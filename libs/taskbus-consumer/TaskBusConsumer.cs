@@ -82,10 +82,11 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly bool _autoAcceptSurvey;
         private readonly Func<string, double?> _readHaulerCargo;
         private double? _pickupCargo;
+        private double _haulerDelivered;
         private readonly long _gridId;
         private readonly Func<long> _readDockedGrid;
         private readonly bool _autoHauler;
-        private readonly Action<long, string, double> _unloadHaulerCargo;
+        private readonly Func<long, string, double, double> _unloadHaulerCargo;
         private readonly Action<long, string, double> _loadHaulerCargo;
         private readonly Func<string, double?> _readMiningBuffer;
 
@@ -98,7 +99,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string gridName,
             int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
             Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
-            Action<long, string, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
+            Func<long, string, double, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
             Func<string, double?> readMiningBuffer = null, double? knownSiteRadius = null, bool autoAcceptSurvey = false)
         {
             if (send == null) throw new ArgumentNullException(nameof(send));
@@ -519,6 +520,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 _childSurveyReport = null;
                 _childState = null;
                 _pickupCargo = null;
+                _haulerDelivered = 0;
                 _oreSite = null;
                 _oreApproach = null;
                 _activeTaskJson = taskJson;
@@ -1159,6 +1161,25 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return false;
             }
 
+            if (!pickup && _autoHauler && _unloadHaulerCargo != null)
+            {
+                double remaining = amount - _haulerDelivered;
+                if (remaining <= 0.0000001)
+                    return true;
+                if (automatic)
+                {
+                    double received = _unloadHaulerCargo(_readDockedGrid(), resource, remaining);
+                    if (received > 0 && received <= remaining)
+                    {
+                        _haulerDelivered += received;
+                        SaveState();
+                    }
+                }
+                else
+                    _echo("Wait for the automatic unload to confirm delivery at the assigned base.");
+                return false;
+            }
+
             double? loaded = _readHaulerCargo == null ? null : _readHaulerCargo(resource);
             if (!loaded.HasValue || !(loaded.Value >= 0) || double.IsInfinity(loaded.Value))
             {
@@ -1184,9 +1205,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 double unloaded = _pickupCargo.Value - loaded.Value;
                 if (unloaded + 0.0000001 < amount)
                 {
-                    if (automatic && _unloadHaulerCargo != null)
-                        _unloadHaulerCargo(_readDockedGrid(), resource, Math.Min(loaded.Value, amount - unloaded));
-                    else if (!automatic)
+                    if (!automatic)
                         _echo("Unload at least " + amount.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + " of " + resource +
                             ". Measured decrease: " + unloaded.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
                     return false;
@@ -1431,6 +1450,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                             cargo >= 0 && !double.IsInfinity(cargo))
                             _pickupCargo = cargo;
                     }
+                    else if (key == "HAULER_DELIVERED")
+                    {
+                        double delivered;
+                        if (double.TryParse(value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out delivered) &&
+                            delivered > 0 && !double.IsInfinity(delivered))
+                            _haulerDelivered = delivered;
+                    }
                     else if (key == "MINING_DEPOSIT")
                     {
                         var fields = value.Split('|');
@@ -1500,6 +1527,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 if (_childSurveyReport != null) storage.AppendLine("CHILD_SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_childSurveyReport));
                 if (_pickupCargo.HasValue)
                     storage.AppendLine("PICKUP_CARGO|" + _pickupCargo.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                if (_haulerDelivered > 0)
+                    storage.AppendLine("HAULER_DELIVERED|" + _haulerDelivered.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
                 if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
                 if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
                 storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));

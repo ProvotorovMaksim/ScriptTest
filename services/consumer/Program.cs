@@ -94,7 +94,7 @@ namespace SpaceEngineers.Services.Consumer
                 readDockedGrid: _haulerDock == null ? null : (Func<long>)ReadDockedGrid,
                 autoHauler: string.Equals(ReadSetting("HaulerAuto="), "true", StringComparison.OrdinalIgnoreCase),
                 unloadHaulerCargo: string.IsNullOrEmpty(_haulerUnloadTo)
-                    ? null : (Action<long, string, double>)UnloadHaulerCargo,
+                    ? null : (Func<long, string, double, double>)UnloadHaulerCargo,
                 loadHaulerCargo: string.IsNullOrEmpty(_haulerLoadFrom)
                     ? null : (Action<long, string, double>)LoadHaulerCargo,
                 readMiningBuffer: _miningBuffer == null ? null : (Func<string, double?>)ReadMiningBuffer,
@@ -435,10 +435,22 @@ namespace SpaceEngineers.Services.Consumer
             TransferHaulerCargo(source, FindHaulerInventory(), resource, amount);
         }
 
-        private void UnloadHaulerCargo(long gridId, string resource, double amount)
+        private double UnloadHaulerCargo(long gridId, string resource, double amount)
         {
+            var source = FindHaulerInventory();
             var destination = FindDockedStationInventory(gridId, _haulerUnloadTo);
-            TransferHaulerCargo(FindHaulerInventory(), destination, resource, amount);
+            var before = ReadCargo(source, resource);
+            var bufferBefore = ReadCargo(destination, resource);
+            if (!before.HasValue || !bufferBefore.HasValue)
+                return 0;
+
+            double attempted = TransferHaulerCargo(source, destination, resource, amount);
+            if (attempted <= 0)
+                return 0;
+
+            double removed = before.Value - ReadCargo(source, resource).Value;
+            double added = ReadCargo(destination, resource).Value - bufferBefore.Value;
+            return Math.Max(0, Math.Min(amount, Math.Min(attempted, Math.Min(removed, added))));
         }
 
         private IMyInventory FindDockedStationInventory(long gridId, string containerName)
@@ -453,10 +465,10 @@ namespace SpaceEngineers.Services.Consumer
             return _stationContainers.Count == 1 ? _stationContainers[0].GetInventory() : null;
         }
 
-        private void TransferHaulerCargo(IMyInventory source, IMyInventory destination, string resource, double amount)
+        private double TransferHaulerCargo(IMyInventory source, IMyInventory destination, string resource, double amount)
         {
             if (amount <= 0 || source == null || destination == null || !source.IsConnectedTo(destination))
-                return;
+                return 0;
 
             _cargoItems.Clear();
             source.GetItems(_cargoItems);
@@ -466,10 +478,10 @@ namespace SpaceEngineers.Services.Consumer
                     continue;
 
                 var quantity = (VRage.MyFixedPoint)Math.Min(amount, (double)item.Amount);
-                if ((double)quantity > 0)
-                    source.TransferItemTo(destination, item, quantity);
-                return;
+                return (double)quantity > 0 && source.TransferItemTo(destination, item, quantity)
+                    ? (double)quantity : 0;
             }
+            return 0;
         }
 
         private string ReadGridPositionJson()

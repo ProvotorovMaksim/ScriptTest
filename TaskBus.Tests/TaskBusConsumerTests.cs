@@ -290,15 +290,19 @@ namespace TaskBus.Tests
             long dock = 600;
             int unloadCalls = 0;
             int loadCalls = 0;
-            var hauler = new TaskBusConsumer((message, _) => sent.Add(message), () => "", _ => { },
+            string storage = "";
+            TaskBusConsumer Start() => new TaskBusConsumer((message, _) => sent.Add(message),
+                () => storage, value => storage = value,
                 _ => { }, 42, "Hauler", 1, readHaulerCargo: _ => cargo, readDockedGrid: () => dock,
                 autoHauler: true, unloadHaulerCargo: (grid, resource, remaining) =>
                 {
                     Assert.Equal(600, grid);
                     Assert.Equal("Ore/Iron", resource);
-                    Assert.Equal(50, remaining);
-                    unloadCalls++;
-                    cargo -= remaining;
+                    bool first = unloadCalls++ == 0;
+                    Assert.Equal(first ? 50 : 30, remaining);
+                    double transferred = System.Math.Min(cargo, first ? 20 : remaining);
+                    cargo -= transferred;
+                    return transferred;
                 }, loadHaulerCargo: (grid, resource, remaining) =>
                 {
                     Assert.Equal(500, grid);
@@ -307,6 +311,7 @@ namespace TaskBus.Tests
                     loadCalls++;
                     cargo += remaining;
                 });
+            var hauler = Start();
             hauler.ProcessCommand("group Haulers");
             var assignment = TaskBusProtocol.CreateEnvelope("TASK_ASSIGN",
                 "{\"task_id\":\"haul\",\"lease_epoch\":1,\"details\":{\"resource\":\"Ore/Iron\",\"amount\":50," +
@@ -328,6 +333,17 @@ namespace TaskBus.Tests
             Assert.Contains("Pending completion: none", hauler.GetStatus());
 
             Assert.Equal(1, unloadCalls);
+            Assert.Contains("HAULER_DELIVERED|20", storage);
+            cargo = 0; // Cargo disappeared without reaching the base buffer.
+            hauler = Start();
+            hauler.Tick();
+            Assert.Equal(1, unloadCalls);
+            hauler.ProcessIncomingMessage(1, assignment);
+            hauler.Tick();
+            Assert.Contains("Pending completion: none", hauler.GetStatus());
+            Assert.Equal(2, unloadCalls);
+            cargo = 30;
+            hauler.Tick();
             hauler.Tick();
             Assert.Contains("Pending completion: haul", hauler.GetStatus());
             Assert.Contains("TASK_DONE", sent[sent.Count - 1]);

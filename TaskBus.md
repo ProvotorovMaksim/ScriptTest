@@ -461,6 +461,13 @@ assigned base grid and connected through the conveyor system. Transfers
 are bounded by the remaining delivery quantity and cargo is measured again
 before the delivery stage completes.
 
+When automatic unloading is configured, completion counts confirmed
+transfers into the assigned base buffer, bounded by the matching
+decrease aboard and the attempted quantity. The hauler saves confirmed
+partial transfers across PB restarts. Cargo removed separately does
+not count. Finish any in-progress legacy unloading before upgrading:
+earlier automatic transfers have no saved base-buffer confirmation.
+
 Transport assignments list the mining point and its position at dispatch
 alongside the delivery base and its position at request time. These positions
 are grid references for route planning. Configure docking approach waypoints
