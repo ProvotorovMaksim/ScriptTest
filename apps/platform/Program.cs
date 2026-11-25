@@ -143,6 +143,8 @@ namespace SpaceEngineers.Apps.Platform
         private int _sweepSettleTicks;
         private int _sweepScanTicks;
         private readonly double _surveyClearanceRadius;
+        private readonly double _surveyTerrainStep;
+        private int _sweepTerrainAttempts;
         private int _sweepClearanceIndex;
         private Vector3D _sweepClearanceOrigin;
         private Vector3D _sweepClearanceRight;
@@ -170,6 +172,16 @@ namespace SpaceEngineers.Apps.Platform
                     _surveyClearanceRadius = radius;
                 else
                     Echo("SurveyClearanceRadius must be between 0 and 100 m.");
+            }
+            var terrainStep = ReadSetting("SurveyTerrainStep=");
+            if (terrainStep != null)
+            {
+                double step;
+                if (double.TryParse(terrainStep, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out step) && step >= 5 && step <= 100)
+                    _surveyTerrainStep = step;
+                else
+                    Echo("SurveyTerrainStep must be between 5 and 100 m.");
             }
             var candidateSurvey = ReadSetting("SurveyAutoCandidate=");
             if (candidateSurvey != null &&
@@ -2328,6 +2340,7 @@ namespace SpaceEngineers.Apps.Platform
             _sweepSettleTicks = 0;
             _sweepScanTicks = 0;
             _sweepClearanceIndex = 0;
+            _sweepTerrainAttempts = 0;
             _reportOnSweepCompletion = reportOnCompletion;
             _bracketOnSweepCompletion = bracketOnCompletion;
             _surveySweep = true;
@@ -2462,6 +2475,9 @@ namespace SpaceEngineers.Apps.Platform
                     break;
                 }
 
+                if (hit.Type == MyDetectedEntityType.Planet && TryRaiseSurveyWaypoint(remote, target))
+                    return false;
+
                 _surveySweep = false;
                 _lastProbe = "Survey sweep halted: camera detected " + hit.Type + " before the next waypoint.";
                 return false;
@@ -2478,6 +2494,23 @@ namespace SpaceEngineers.Apps.Platform
             return false;
         }
 
+        private bool TryRaiseSurveyWaypoint(IMyRemoteControl remote, Vector3D target)
+        {
+            if (_surveyTerrainStep == 0 || _sweepTerrainAttempts >= 3 || remote.GetShipSpeed() > 0.25)
+                return false;
+            var gravity = remote.GetNaturalGravity();
+            if (gravity.LengthSquared() <= 0.0001)
+                return false;
+
+            _surveyPlan[0] = target - Vector3D.Normalize(gravity) * _surveyTerrainStep;
+            _sweepTerrainAttempts++;
+            _sweepScanTicks = 0;
+            _sweepClearanceIndex = 0;
+            SaveSurvey();
+            _lastProbe = "Survey waypoint raised above terrain. Rechecking clearance (" + _sweepTerrainAttempts + "/3).";
+            return true;
+        }
+
         private void CompletePlannedSurveyPosition()
         {
             if (_surveyPlan.Count == 0)
@@ -2492,6 +2525,7 @@ namespace SpaceEngineers.Apps.Platform
                 _sweepSettleTicks = 0;
                 _sweepScanTicks = 0;
                 _sweepClearanceIndex = 0;
+                _sweepTerrainAttempts = 0;
             }
         }
 

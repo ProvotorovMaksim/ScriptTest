@@ -710,7 +710,7 @@ After reviewing all legs for clearance, run `ore sweep` to fly and sample
 the remaining points in order. Before each flight the platform looks for
 a working local camera whose name starts with `[AMN SCOUT]` and can scan
 the next waypoint. Include cameras covering the sweep directions. The
-sweep waits briefly for a usable scan and halts on a hit. A clear ray
+sweep waits briefly for a usable scan and halts on a hit by default. A clear ray
 checks one line and the operator still reviews clearance for the hull.
 Set `SurveyClearanceRadius=5` to scan the waypoint and four targets
 offset by 5 m in the plane across the flight direction. The platform
@@ -719,6 +719,11 @@ again if it drifts by more than 0.5 m. Set the radius to match the hull
 and provide cameras with enough field of view and charge. These rays
 sample the corridor and leave gaps between them. The default radius is
 zero, which keeps the single-ray check.
+Set `SurveyTerrainStep=25` (5 to 100 m) to retry a planet-blocked
+waypoint by raising it opposite natural gravity. The platform makes up
+to three adjustments per waypoint during a sweep and reruns all
+configured clearance scans before flight. Other obstructions still
+halt the sweep.
 It advances only after a completed sample
 at the planned waypoint. Lease loss, stopping outside the waypoint tolerance
 or a sample failure stops the sweep. It stays stopped after a restart.
