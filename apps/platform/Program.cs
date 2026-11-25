@@ -1840,8 +1840,18 @@ namespace SpaceEngineers.Apps.Platform
                 return;
             }
             var toApproach = endpoint - remote.GetPosition();
-            if (toApproach.LengthSquared() <= 4 ||
-                Vector3D.Dot(Vector3D.Normalize(toApproach), remote.WorldMatrix.Backward) < 0.996)
+            if (toApproach.LengthSquared() <= 4)
+            {
+                if (automatic && _autoMiningReturn)
+                {
+                    _miningPassEndpoint = endpoint;
+                    _pendingReturnLease = _worker.ConfirmedLeaseIdentity;
+                    _returnSettleUpdates = 0;
+                }
+                Echo("The platform is already within 2 m of the retreat waypoint.");
+                return;
+            }
+            if (Vector3D.Dot(Vector3D.Normalize(toApproach), remote.WorldMatrix.Backward) < 0.996)
             {
                 Echo("Align the rear of the retreat controller with the retreat waypoint before starting.");
                 return;

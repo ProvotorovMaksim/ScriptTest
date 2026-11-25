@@ -556,6 +556,9 @@ stops and PB restarts require a manual decision. Use `ore stop` or
 
 Set `MiningAutoReturn=true` to attempt the prepared return route once
 after a supervised retreat reaches its waypoint under the same lease.
+With automatic retreat also enabled, a settled platform already within
+2 m of the validated retreat waypoint can start return without a separate
+backward leg.
 The platform must settle within 2 m of that waypoint. The usual
 `mine return` checks still apply, including an exact match to the
 reviewed reverse route. A failed start requires operator intervention.
