@@ -17,6 +17,11 @@ namespace SpaceEngineers.Services.Consumer
         private int _monitorTicks;
         private int _departureTicks;
         private bool _autoDepart;
+        private bool _autoCruise;
+        private int _autoCruiseTicks;
+        private string _startedCruiseLease;
+        private long _startedCruiseGrid;
+        private bool _startedCruisePickup;
         private string _fcsDockLease;
         private long _fcsDockDeadlineUtc;
         private long _fcsDockRequestId;
@@ -52,6 +57,7 @@ namespace SpaceEngineers.Services.Consumer
             _haulerUnloadTo = ReadSetting("HaulerUnloadTo=");
             _haulerLoadFrom = ReadSetting("HaulerLoadFrom=");
             _autoDepart = string.Equals(ReadSetting("HaulerAutoDepart="), "true", StringComparison.OrdinalIgnoreCase);
+            _autoCruise = string.Equals(ReadSetting("HaulerAutoCruise="), "true", StringComparison.OrdinalIgnoreCase);
             _consumer = new TaskBusConsumer(
                 send: _galnet.Send,
                 getStorage: () => Storage,
@@ -106,11 +112,16 @@ namespace SpaceEngineers.Services.Consumer
                 DepartHaulerPickup();
             else if (string.Equals(command, "route depart auto", StringComparison.OrdinalIgnoreCase))
                 _autoDepart = true;
+            else if (string.Equals(command, "route cruise auto", StringComparison.OrdinalIgnoreCase))
+                _autoCruise = true;
+            else if (string.Equals(command, "route cruise", StringComparison.OrdinalIgnoreCase))
+                StartHaulerCruise(automatic: false);
             else
             {
                 if (string.Equals(command, "route stop", StringComparison.OrdinalIgnoreCase))
                 {
                     _autoDepart = false;
+                    _autoCruise = false;
                     _cancelFcsDock = true;
                 }
                 if (!_routes.TryHandle(command))
@@ -124,18 +135,49 @@ namespace SpaceEngineers.Services.Consumer
             }
             CheckLeasedHaulerDock();
             _routes.CheckCruiseLease((updateSource & UpdateType.Update10) != 0);
+            if (_autoCruise && (updateSource & UpdateType.Update10) != 0 && ++_autoCruiseTicks >= 12)
+            {
+                _autoCruiseTicks = 0;
+                StartHaulerCruise(automatic: true);
+            }
             _galnet.Flush();
             string status = "Worker block ID: " + Me.EntityId + "\n" + _consumer.GetStatus();
             if (!connected)
                 status = (viaGalnet ? "Galnet relay unavailable or misconfigured.\n" : "Radio unavailable.\n") + status;
             if (_autoDepart)
                 status += "\nAutomatic pickup departure enabled.";
+            if (_autoCruise)
+                status += "\nAutomatic hauler cruise enabled.";
             Echo(status);
 
             if (++_monitorTicks >= 6 || !string.IsNullOrWhiteSpace(argument))
             {
                 _monitorTicks = 0;
                 UpdateMonitor(status);
+            }
+        }
+
+        private void StartHaulerCruise(bool automatic)
+        {
+            var lease = _consumer.ConfirmedLeaseIdentity;
+            if (_consumer.SupervisedCruiseRemote != 0)
+                return;
+
+            string taskId;
+            bool pickup;
+            long grid;
+            bool hasDestination = _consumer.TryGetHaulerDestination(out taskId, out pickup, out grid);
+            if (automatic && (lease == null || !hasDestination || _fcsDockLease != null ||
+                (lease == _startedCruiseLease && grid == _startedCruiseGrid && pickup == _startedCruisePickup) ||
+                !CanStartHaulerCruise()))
+                return;
+
+            _routes.TryHandle("route cruise");
+            if (_consumer.SupervisedCruiseRemote != 0)
+            {
+                _startedCruiseLease = lease;
+                _startedCruiseGrid = grid;
+                _startedCruisePickup = pickup;
             }
         }
 

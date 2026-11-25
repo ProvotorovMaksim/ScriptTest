@@ -478,8 +478,9 @@ active controller. Use `route stop` or the Remote Control to stop cruise. The ha
 checks the lease and leg while supervising a cruise it started and
 switches that autopilot off if confirmation is lost. It also stops a
 cruise that moves less than 0.5 m in 60 scheduled updates. A stopped
-cruise does not hand off to docking. On restart, the hauler stops its previously supervised local autopilot
-and requires a new `route cruise` command after lease confirmation.
+cruise does not hand off to docking. On restart, the hauler stops its
+previously supervised local autopilot before a new cruise can start
+under a confirmed lease.
 
 Name the hauler FCS programmable block `[AMN FCS]` and record each station
 berth with FCS while connected. At the final approach, run `route dock`
@@ -495,14 +496,23 @@ to 0.35 m/s or less, and the lease is still confirmed. Place the endpoint
 so the ship arrives inside the FCS final approach envelope. Use
 `route stop` to cancel a supervised leg or the matching leased FCS approach.
 
+Set `HaulerAutoCruise=true` to start each prepared pickup or delivery
+leg automatically once the hauler is undocked, flight controls are idle,
+and the broker has confirmed the lease. Prepare both station routes and
+their final approach waypoints in advance. The hauler checks readiness
+about every two seconds and launches at most once per leg and lease in a
+PB session. `route stop` disables automatic cruise for the session.
+`route cruise auto` enables it again, and `route cruise` can retry a leg
+that already launched.
+
 With `HaulerDock` configured, use `route depart` after pickup while still
 connected to the assigned mining point. FCS checks the selected berth and
 the departure charge before disconnecting. If charge is low, repeat the
 command after charging. For automatic retries, set `HaulerAutoDepart=true` or run
 `route depart auto`. The hauler rechecks the lease and the pickup
 connection before each request. Use `route stop` to suspend automatic
-departure for the current session. Starting the delivery cruise remains
-a separate command.
+departure for the current session. Enable `HaulerAutoCruise=true` to
+continue into the prepared delivery leg after departure.
 
 ### AMN platform worker
 
