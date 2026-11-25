@@ -37,11 +37,11 @@ namespace SpaceEngineers.Apps.Amn
         private readonly List<IMyRefinery> _refineries = new List<IMyRefinery>();
         private readonly List<IMyCockpit> _cockpits = new List<IMyCockpit>();
         private readonly List<IMyRemoteControl> _remoteControls = new List<IMyRemoteControl>();
-        private readonly Dictionary<string, double> _minimums = new Dictionary<string, double>();
-        private readonly Dictionary<string, string> _requestIds = new Dictionary<string, string>();
-        private readonly Dictionary<string, string> _requestStates = new Dictionary<string, string>();
-        private readonly HashSet<string> _lowResources = new HashSet<string>();
-        private readonly HashSet<string> _pendingResourceClears = new HashSet<string>();
+        private readonly Dictionary<string, double> _minimums = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _requestIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _requestStates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _lowResources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _pendingResourceClears = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private IMyBroadcastListener _listener;
         private TaskBusProducer _taskBusProducer;
         private readonly GalnetWorkerBridge _galnet;
@@ -175,7 +175,7 @@ namespace SpaceEngineers.Apps.Amn
             GridTerminalSystem.GetBlocksOfType(_cockpits, block => block.IsFunctional && block.IsSameConstructAs(Me));
             GridTerminalSystem.GetBlocksOfType(_remoteControls, rc => rc.IsFunctional && rc.IsSameConstructAs(Me));
 
-            var resources = new Dictionary<string, double>();
+            var resources = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             var items = new List<MyInventoryItem>();
 
             Action<IMyTerminalBlock> scanInventories = block =>
@@ -564,9 +564,9 @@ namespace SpaceEngineers.Apps.Amn
         private void UpdateMinimumTasks(Dictionary<string, double> resources, bool retryBrokerRequests)
         {
             bool retryOutstanding = retryBrokerRequests || _tickCount % 60 == 1;
-            var currentLowResources = new HashSet<string>();
+            var currentLowResources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var stateChanged = false;
-            var newClears = new HashSet<string>();
+            var newClears = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var minimum in _minimums)
             {
                 double current;
