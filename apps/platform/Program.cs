@@ -122,6 +122,7 @@ namespace SpaceEngineers.Apps.Platform
         private Vector3D? _reportOre;
         private Vector3D? _reportView;
         private double _sampleWait;
+        private bool _sampleNeedsConfirmation;
         private int _positiveViews;
         private bool _autoSample;
         private bool _surveySweep;
@@ -2682,6 +2683,7 @@ namespace SpaceEngineers.Apps.Platform
             _sampleDetector = detector;
             _samplePosition = position;
             _sampleWait = 0;
+            _sampleNeedsConfirmation = true;
         }
 
         private void UpdateOreSample()
@@ -2710,15 +2712,15 @@ namespace SpaceEngineers.Apps.Platform
 
                 var property = _sampleDetector.GetProperty("Survey.DetectedOre")
                     as Sandbox.ModAPI.Interfaces.ITerminalProperty<string>;
-                var reports = property == null ? null : property.GetValue(_sampleDetector);
-                _sampleDetector = null;
                 if (property == null)
                 {
+                    _sampleDetector = null;
                     _lastProbe = "Ore detector survey API is unavailable.";
                     return;
                 }
 
                 bool hit = false;
+                var reports = property.GetValue(_sampleDetector);
                 foreach (var report in (reports ?? "").Split('\n'))
                 {
                     string ore;
@@ -2738,6 +2740,14 @@ namespace SpaceEngineers.Apps.Platform
                         }
                     }
                 }
+                if (!hit && _sampleNeedsConfirmation)
+                {
+                    _sampleNeedsConfirmation = false;
+                    _sampleWait = 0;
+                    _lastProbe = "No matching report yet. Waiting for another detector refresh.";
+                    return;
+                }
+                _sampleDetector = null;
                 _surveyViews.Add(new SurveyView(_samplePosition, hit));
                 CompletePlannedSurveyPosition();
                 if (hit)

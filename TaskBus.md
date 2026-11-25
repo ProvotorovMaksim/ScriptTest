@@ -794,7 +794,9 @@ to plan more samples. The area between reports is unverified and the
 vertices do not define a cleared flight route or a drill plan.
 
 For standalone surveys use `ore survey Iron`. Move to the first observation position and run
-`ore sample`. Hold position for four seconds. Repeat from positions at
+`ore sample`. Hold position for four seconds. If the first reading has
+no matching ore, keep position for a second four-second window before
+the platform records `no report`. Repeat from positions at
 least 10 m apart. The worker counts positive views and distinct GPS hits
 in persistent PB storage. A recompile restores completed samples and the
 spacing checks. A sample still waiting for detector refresh must be repeated.
