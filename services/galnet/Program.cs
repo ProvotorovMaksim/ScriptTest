@@ -43,9 +43,11 @@ namespace SpaceEngineers.Services.Galnet
         public Program()
         {
             var settings = Storage.Split('\n');
-            long.TryParse(settings[0], out _generation);
-            _generation++;
             long now = DateTime.UtcNow.Ticks;
+            long previousGeneration;
+            long.TryParse(settings[0], out previousGeneration);
+            _generation = previousGeneration < long.MaxValue
+                ? Math.Max(now, previousGeneration + 1) : now;
             for (int i = 1; i < settings.Length; i++)
             {
                 var line = settings[i].TrimEnd('\r');

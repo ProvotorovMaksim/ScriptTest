@@ -267,6 +267,10 @@ to zero after the acknowledgement. Compare task IDs and quantities at the
 broker before and after reconnecting to check for duplicate processing.
 Repeat with the primary path restored and a fresh test request.
 
+On startup, the relay seeds its generation from UTC ticks or advances
+its saved generation, whichever is newer. Clearing Storage therefore
+does not reuse legacy low-numbered route generations or packet IDs.
+
 For a stationary laser link, add a line such as
 `Laser=Laser A|GPS:Peer:1:2:3:` to the relay Custom Data and recompile.
 Use the exact local antenna name and the remote antenna coordinates.

@@ -177,6 +177,25 @@ namespace TaskBus.Tests
         }
 
         [Fact]
+        public void ResetRelayStorageSupersedesLegacyRoutesWithoutWaitingForExpiry()
+        {
+            const string channel = "SE1-GALNET-V1";
+            var receiver = Start(4, "0\n1");
+            receiver.IGC.UnicastListener.Inbox.Enqueue((1, channel, "HELLO"));
+            receiver.IGC.UnicastListener.Inbox.Enqueue((1, channel, "LINK|1|1200|99|8|"));
+            receiver.Main("route 1", UpdateType.Update10);
+            Assert.Contains("No current route.", receiver.Output);
+
+            var reset = Start(1, "0\n4");
+            reset.IGC.UnicastListener.Inbox.Enqueue((4, channel, "HELLO"));
+            reset.Main("", UpdateType.Update10);
+            var update = Assert.Single(reset.IGC.UnicastOutbox.Where(packet => packet.Data.StartsWith("LINK|1|")));
+            receiver.IGC.UnicastListener.Inbox.Enqueue((1, channel, update.Data));
+            receiver.Main("route 1", UpdateType.Terminal);
+            Assert.Contains("Next hop: 1", receiver.Output);
+        }
+
+        [Fact]
         public void RejectedSendsTrySecondReserveBeforeHeartbeatsExpire()
         {
             var relay = Start(1, "0\n2\n3\n5");
