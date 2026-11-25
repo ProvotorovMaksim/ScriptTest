@@ -2,7 +2,6 @@ using System;
 using System.Globalization;
 using System.Collections.Generic;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.IgcCore
 {

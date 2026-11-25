@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     /// <summary>
     /// Callback for sending a pre-built JSON IGC envelope from the consumer.
     /// </summary>

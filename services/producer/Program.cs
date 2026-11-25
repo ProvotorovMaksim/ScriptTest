@@ -1,15 +1,15 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
 using System.Globalization;
-using SpaceEngineers.Libs.TaskBusProducer;
 
 namespace SpaceEngineers.Services.Producer
 {
+    using SpaceEngineers.Libs.TaskBusProducer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
 
         private readonly TaskBusProducer _producer;
@@ -70,7 +70,6 @@ namespace SpaceEngineers.Services.Producer
             Echo("Messages published: " + _sequence);
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

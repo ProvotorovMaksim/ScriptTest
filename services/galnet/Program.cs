@@ -1,15 +1,15 @@
-#region Prelude
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Services.Galnet
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string Channel = "SE1-GALNET-V1";
         private const int AdvertiseEvery = 12;
         private const int LinkLifetime = 48;
@@ -618,7 +618,6 @@ namespace SpaceEngineers.Services.Galnet
             Storage = string.Join("\n", lines);
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

@@ -1,17 +1,17 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
 using System.Globalization;
 using VRage.Game.GUI.TextPanel;
 using VRage.Game.ModAPI.Ingame;
-using SpaceEngineers.Libs.TaskBusConsumer;
 
 namespace SpaceEngineers.Services.Consumer
 {
+    using SpaceEngineers.Libs.TaskBusConsumer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int PollIntervalTicks = 30;
         private const string MonitorName = "[AMN STATUS]";
@@ -398,7 +398,6 @@ namespace SpaceEngineers.Services.Consumer
             }
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

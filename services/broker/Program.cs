@@ -1,18 +1,18 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
-using SpaceEngineers.Libs.TaskBusProducer;
 
 namespace SpaceEngineers.Services.Broker
 {
+    using SpaceEngineers.Libs.IgcCore;
+    using SpaceEngineers.Libs.TaskBusProducer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string BackupPanelName = "[TASKBUS BACKUP]";
         private const string BackupVersion = "TASKBUS-BACKUP-1|";
         private const string HandoffVersion = "TASKBUS-BACKUP-2|";
@@ -1158,7 +1158,6 @@ namespace SpaceEngineers.Services.Broker
             Storage = storage.ToString();
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

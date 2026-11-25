@@ -1,4 +1,3 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
@@ -8,17 +7,18 @@ using VRageMath;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
-using SpaceEngineers.Libs.TaskBusProducer;
-using SpaceEngineers.Libs.TaskBusConsumer;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
 namespace SpaceEngineers.Apps.Amn
 {
+    using SpaceEngineers.Libs.IgcCore;
+    using SpaceEngineers.Libs.TaskBusProducer;
+    using SpaceEngineers.Libs.TaskBusConsumer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const string SurveyProperty = "Survey.DetectedOre";
         private const double OreCandidateRadius = 5000;
@@ -790,7 +790,6 @@ namespace SpaceEngineers.Apps.Amn
             Echo($"Sent: {envelope}");
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

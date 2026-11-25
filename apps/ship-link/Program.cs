@@ -1,4 +1,3 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
@@ -8,13 +7,14 @@ using System.Text;
 using VRageMath;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Apps.ShipLink
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const string FleetTag = "SE1-FLEET-STATUS";
         private const int DisplayUpdateIntervalTicks = 60;
@@ -964,7 +964,6 @@ namespace SpaceEngineers.Apps.ShipLink
             }
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

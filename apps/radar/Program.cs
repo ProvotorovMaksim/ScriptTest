@@ -1,16 +1,16 @@
-#region Prelude
 using System;
 using System.Globalization;
 using VRageMath;
 using Sandbox.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
-using SpaceEngineers.Libs.RadarCore;
 
 namespace SpaceEngineers.Apps.Radar
 {
+    using SpaceEngineers.Libs.RadarCore;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
 
         private const double ContactTimeoutSeconds = 5;
         private readonly ContactTracker _contact = new ContactTracker();
@@ -178,7 +178,6 @@ namespace SpaceEngineers.Apps.Radar
             }
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class GalnetWorkerBridge
     {
         private const string Setting = "GalnetBrokerRelay=";

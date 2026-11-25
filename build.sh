@@ -67,9 +67,9 @@ package_taskbus_pb() {
   local destination="$output_dir/$project/${project##*/}/$name.pb.cs"
   awk '
     { sub(/\r$/, "") }
-    /^[[:space:]]*#region PreludeFooter/ { footer = 1; exit }
+    /^[[:space:]]*\/\/ PB BODY END$/ { footer = 1; exit }
     in_body { sub(/^        /, ""); print }
-    /^[[:space:]]+#endregion[[:space:]]*$/ { in_body = 1 }
+    /^[[:space:]]*\/\/ PB BODY START$/ { in_body = 1 }
     END { if (!in_body || !footer) exit 1 }
   ' "$project/Program.cs" > "$destination"
 
@@ -82,6 +82,7 @@ package_taskbus_pb() {
     awk '
       { sub(/\r$/, "") }
       /^}$/ { closed = 1; exit }
+      /^[[:space:]]*using SpaceEngineers[.]Libs[.]/ { next }
       in_namespace { sub(/^    /, ""); print }
       /^{$/ { in_namespace = 1 }
       END { if (!in_namespace || !closed) exit 1 }

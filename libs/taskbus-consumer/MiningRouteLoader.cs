@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using VRageMath;
 using VRage.Game.ModAPI.Ingame;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class MiningRouteLoader
     {
         private const string RouteControllerName = "[AMN ROUTE]";

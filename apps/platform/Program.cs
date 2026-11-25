@@ -1,19 +1,19 @@
-#region Prelude
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Libs.TaskBusConsumer;
-using SpaceEngineers.Libs.IgcCore;
 using VRageMath;
 using VRage.Game.ModAPI.Ingame;
 
 namespace SpaceEngineers.Apps.Platform
 {
+    using SpaceEngineers.Libs.TaskBusConsumer;
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string Channel = "SE1-SHIP-LINK";
         private readonly GalnetWorkerBridge _galnet;
         private const string DrillPrefix = "[AMN DRILL]";
@@ -2573,7 +2573,6 @@ namespace SpaceEngineers.Apps.Platform
                 point.Z.ToString("0.00", CultureInfo.InvariantCulture);
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion
