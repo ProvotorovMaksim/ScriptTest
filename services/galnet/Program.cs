@@ -462,8 +462,16 @@ namespace SpaceEngineers.Services.Galnet
                 else
                 {
                     var address = "|" + Me.EntityId + "|" + origin + "|" + fields[3] + "|";
-                    if (_outbox.RemoveAll(item => item.StartsWith("DATA" + address, StringComparison.Ordinal) ||
-                        item.StartsWith("APP" + address, StringComparison.Ordinal)) > 0)
+                    if (_outbox.RemoveAll(item =>
+                    {
+                        if (!item.StartsWith("DATA" + address, StringComparison.Ordinal) &&
+                            !item.StartsWith("APP" + address, StringComparison.Ordinal))
+                            return false;
+                        var pending = item.Split('|');
+                        long pendingExpiry;
+                        return pending.Length == 7 && long.TryParse(pending[5], out pendingExpiry) &&
+                            pendingExpiry == expires;
+                    }) > 0)
                     {
                         _lastOutboundAck = "Last ACK: " + fields[3] + " from " + origin;
                         SaveConfiguration();

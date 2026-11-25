@@ -211,6 +211,12 @@ namespace TaskBus.Tests
             Assert.Contains("Last accepted hop: 5 for " + fields[3] + " to 4", relay.Output);
             Assert.Contains("No outbound delivery acknowledged yet.", relay.Output);
 
+            relay.IGC.UnicastListener.Inbox.Enqueue((5, channel, "ACK|4|1|" + fields[3] + "|7|" +
+                (long.Parse(fields[5]) - 1) + "|"));
+            relay.Main("network status", UpdateType.Terminal);
+            Assert.Contains("No outbound delivery acknowledged yet.", relay.Output);
+            Assert.Contains("SEND:", relay.Storage);
+
             relay.IGC.UnicastListener.Inbox.Enqueue((5, channel, "ACK|4|1|" + fields[3] + "|7|" + fields[5] + "|"));
             relay.Main("network status", UpdateType.Terminal);
             Assert.Contains("Last ACK: " + fields[3] + " from 4", relay.Output);
