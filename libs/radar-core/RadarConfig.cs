@@ -12,6 +12,7 @@ namespace SpaceEngineers.Libs.RadarCore
         public string CameraPrefix = "[RADAR CAM]";
         public double MaxRange = 30000.0;
         public int MaxRaycastsPerUpdate = 1;
+        public string ShipLinkBlock = "[GALNET APP]";
         public bool ShareContacts = false;
         public string AzimuthBlock = "[RADAR AZIMUTH]";
         public string ElevationBlock = "[RADAR ELEVATION]";
@@ -101,6 +102,10 @@ namespace SpaceEngineers.Libs.RadarCore
                 {
                     config.MaxRaycastsPerUpdate = parsed;
                 }
+            }
+            else if (string.Equals(key, "ShipLinkBlock", StringComparison.OrdinalIgnoreCase) && value.Length > 0)
+            {
+                config.ShipLinkBlock = value;
             }
             else if (string.Equals(key, "ShareContacts", StringComparison.OrdinalIgnoreCase))
             {

@@ -42,6 +42,17 @@ or `scan` to resume scanning. Parking stops both drives if either axis
 fails to make progress for five seconds. The same timeout stops Gimbal
 search when azimuth stalls between scan positions. Run `scan` to retry.
 
+## Sharing a measured contact
+
+Configure the local ShipLink PB and Galnet relay as described in
+[the fleet guide](../TaskBus.md#fleet-display-for-space-engineers-combat).
+Radar looks for a local PB named `[GALNET APP]` by default. Set
+`ShipLinkBlock` under `[Radar]` if the local ShipLink uses another name.
+Run `share <recipient relay ID>` on Radar within two seconds of a raycast
+measurement. ShipLink sends a contact named `Radar <entity ID>` through
+the existing fleet channel. Check ShipLink output and the recipient's
+display to confirm delivery.
+
 ## Diagnostics and acceptance
 
 If the status is `UNAVAILABLE`, follow the message about camera placement,

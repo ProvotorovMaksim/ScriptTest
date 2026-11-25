@@ -40,8 +40,9 @@ defines the system-level acceptance checks.
 - The mod-backed AMN ore survey requires a detector exposing
   `Survey.DetectedOre`. The configured routes, cargo transfer and docking
   still need acceptance in the intended world and physics setup.
-- Radar shares its status locally. ShipLink integration is pending.
-  Gimbal searches in azimuth at the current elevation.
+- Radar shows its status locally and can send an operator-requested
+  contact through ShipLink. Gimbal searches in azimuth at the current
+  elevation.
 - A successful build verifies compilation and automated tests. Record
   runtime acceptance separately for each scenario, including laser links,
   camera reacquisition and drive stop.
