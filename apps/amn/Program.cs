@@ -387,6 +387,7 @@ namespace SpaceEngineers.Apps.Amn
             if (string.IsNullOrWhiteSpace(Storage))
                 return;
 
+            var requestPrefix = Me.EntityId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-";
             var lines = Storage.Split('\n');
             foreach (var line in lines)
             {
@@ -425,7 +426,10 @@ namespace SpaceEngineers.Apps.Amn
                 }
                 if (line.StartsWith("REQSEQ|", StringComparison.Ordinal))
                 {
-                    int.TryParse(line.Substring(7), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _requestSequence);
+                    int sequence;
+                    if (int.TryParse(line.Substring(7), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out sequence))
+                        _requestSequence = Math.Max(_requestSequence, sequence);
                     continue;
                 }
                 if (line.StartsWith("REQUEST|", StringComparison.Ordinal))
@@ -438,6 +442,11 @@ namespace SpaceEngineers.Apps.Amn
                         var resource = TaskBusIgcHelper.DecodeStorage(fields[1]);
                         var requestId = TaskBusIgcHelper.DecodeStorage(fields[2]);
                         _requestIds[resource] = requestId;
+                        int sequence;
+                        if (requestId.StartsWith(requestPrefix, StringComparison.Ordinal) &&
+                            int.TryParse(requestId.Substring(requestPrefix.Length), System.Globalization.NumberStyles.None,
+                                System.Globalization.CultureInfo.InvariantCulture, out sequence))
+                            _requestSequence = Math.Max(_requestSequence, sequence);
                     }
                     catch (FormatException) { }
                     continue;
