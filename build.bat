@@ -10,7 +10,7 @@ rem ================================================================
 
 set ROOT=%~dp0
 
-set PB_PROJECTS=apps\amn apps\fcs apps\platform apps\sample apps\ship-link services\broker services\consumer services\galnet services\producer
+set PB_PROJECTS=apps\amn apps\fcs apps\platform apps\sample apps\ship-link apps\radar services\broker services\consumer services\galnet services\producer
 
 echo ================================================================
 echo MDK² Unified Build
