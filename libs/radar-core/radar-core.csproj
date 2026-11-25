@@ -9,4 +9,14 @@
     <AssemblyName>RadarCore</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="CameraManager.cs" />
+    <Compile Include="ContactObservation.cs" />
+    <Compile Include="ContactTracker.cs" />
+    <Compile Include="PositionPredictor.cs" />
+    <Compile Include="RadarConfig.cs" />
+    <Compile Include="RadarState.cs" />
+    <Compile Include="GimbalController.cs" />
+  </ItemGroup>
+
 </Project>
