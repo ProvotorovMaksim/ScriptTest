@@ -478,10 +478,17 @@ namespace SpaceEngineers.Services.Galnet
                 return;
 
             // A failed send can precede expiry of the direct peer heartbeat.
-            long reserveHop;
-            if (_topology.TryGetNextHop(Me.EntityId, destination, _tick, out reserveHop, previousHop,
-                peer => peer != nextHop && IsLive(peer), availableHops))
-                IGC.SendUnicastMessage(reserveHop, Channel, packet);
+            var rejected = new HashSet<long> { nextHop };
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                long reserveHop;
+                if (!_topology.TryGetNextHop(Me.EntityId, destination, _tick, out reserveHop, previousHop,
+                    peer => !rejected.Contains(peer) && IsLive(peer), availableHops))
+                    return;
+                if (IGC.SendUnicastMessage(reserveHop, Channel, packet))
+                    return;
+                rejected.Add(reserveHop);
+            }
         }
 
         private static bool IsCurrentPacket(string packet, long now)

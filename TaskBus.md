@@ -186,7 +186,7 @@ skips locally unavailable next hops and excludes the previous hop during
 forwarding, so it can use an alternative while link advertisements converge.
 Packets start with a budget of eight hops, and each relay searches only
 within the remaining budget. If IGC rejects a send to the chosen peer,
-the relay tries one reserve next hop immediately. The sender still
+the relay tries up to two distinct reserve next hops immediately. The sender still
 retains the packet until end-to-end acknowledgement or expiry.
 A node's generation and sequence reject repeated or reordered updates.
 Expiry values are in the receiving node's time domain. The core retains
