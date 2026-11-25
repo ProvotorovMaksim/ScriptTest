@@ -24,6 +24,9 @@ jobs:
       - name: Test TaskBus protocol and worker state
         run: dotnet test TaskBus.Tests/TaskBus.Tests.csproj -c Release --nologo
 
+      - name: Test Radar protocol
+        run: dotnet test tests/Radar.Tests/Radar.Tests.csproj -c Release --nologo
+
   build:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -105,7 +108,7 @@ jobs:
             build/output/apps/sample/sample/SampleMain.dll
             build/output/apps/ship-link/ship-link/ShipLink.dll
             build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll
-
+            build/output/apps/radar/radar/Radar.dll
 
       - name: Upload failed build diagnostics
         if: failure()

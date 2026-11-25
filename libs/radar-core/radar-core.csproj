@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>SpaceEngineers.Libs.RadarCore</RootNamespace>
+    <AssemblyName>RadarCore</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -5,7 +5,6 @@ using Sandbox.ModAPI.Ingame;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
 using SpaceEngineers.Libs.RadarCore;
-using SpaceEngineers.Libs.RadarCore;
 
 namespace SpaceEngineers.Apps.Radar
 {
@@ -23,25 +22,6 @@ namespace SpaceEngineers.Apps.Radar
         private GimbalController _gimbalController;
         private IMyTextPanel _lcdPanel;
         private StringBuilder _lcdText = new StringBuilder();
-
-        #endregion
-
-namespace SpaceEngineers.Apps.Radar
-{
-    public sealed class Program : MyGridProgram
-    {
-        #endregion
-
-        #region Fields
-
-        private RadarConfig _config = new RadarConfig();
-        private RadarState _state = RadarState.IDLE;
-        private ContactObservation _currentContact = new ContactObservation();
-        private ContactTracker _contactTracker = new ContactTracker();
-        private CameraManager _cameraManager = new CameraManager();
-        private IMyTextPanel _lcdPanel;
-        private StringBuilder _lcdText = new StringBuilder();
-
 #endregion
 
         #region Construction
@@ -62,6 +42,7 @@ namespace SpaceEngineers.Apps.Radar
             {
                 TryParseCustomData(cd, out _config, out _);
             }
+            _gimbalController = new GimbalController(_config);
         }
 
         private static bool TryParseCustomData(string customData, out RadarConfig config, out string error)
@@ -71,165 +52,12 @@ namespace SpaceEngineers.Apps.Radar
 
         #endregion
 
-        #region Camera Discovery
-
-        private void DiscoverCameras()
-        {
-private void LoadConfig()
-        {
-            var cd = Me.CustomData;
-            if (!string.IsNullOrEmpty(cd))
-            {
-                TryParseCustomData(cd, out _config, out _);
-            }
-            _gimbalController = new GimbalController(_config);
-        }
-            if (GridTerminalSystem != null)
-            {
 #endregion
 
         #region Command Processing
 
         private void ProcessCommand(string command)
         {
-case "mode":
-                    if (args.Length > 1)
-                    {
-                        var mode = args[1].ToLowerInvariant();
-                        if (mode == "fixed")
-                        {
-                            _config.Mode = "Fixed";
-                            _gimbalController.Disable();
-                            Echo($"Mode set to Fixed.");
-                        }
-                        else if (mode == "gimbal")
-                        {
-                            _config.Mode = "Gimbal";
-                            _gimbalController.Enable();
-                            Echo($"Mode set to Gimbal.");
-                        }
-                        else
-                        {
-                            Echo($"Unknown mode: {mode}. Use 'fixed' or 'gimbal'.");
-                        }
-case "gimbal home":
-                    _gimbalController.Calibrate();
-                    Echo("Gimbal calibrated to home position.");
-                    break;
-
-                case "gimbal stop":
-                    _gimbalController.Disable();
-                    Echo("Gimbal stopped and parked.");
-                    break;
-
-                case "gimbal calibrate":
-                    _gimbalController.Calibrate();
-                    Echo("Gimbal calibrated.");
-                    break;
-
-                case "gimbal azimuth":
-                    if (args.Length > 1 && double.TryParse(args[1], out var az))
-                    {
-                        _gimbalController.SetAzimuth(az);
-                        Echo($"Gimbal azimuth set to {az:0.##}°");
-                    }
-                    else
-                    {
-                        Echo($"Current gimbal azimuth: {_gimbalController.GetAzimuth():0.##}°");
-                    }
-#endregion
-
-        #region LCD
-
-        private void UpdateLcd()
-        {
-            _lcdPanel ??= GridTerminalSystem?.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
-            if (_lcdPanel == null) return;
-
-            _lcdText.Clear();
-            _lcdText.AppendLine($"Mode: {_config.Mode}");
-            _lcdText.AppendLine($"State: {_state}");
-            _lcdText.AppendLine($"Target: {_currentContact.Name}");
-            _lcdText.AppendLine($"Range: {_currentContact.Range:0.##} m");
-            _lcdText.AppendLine($"Cameras: {_cameraManager.Count()}");
-
-            _lcdPanel.WriteText(_lcdText.ToString(), writePublic: false);
-        }
-
-        #endregion
-
-        #region Configuration Saving
-case "off":
-                    _state = RadarState.IDLE;
-                    _contactTracker.Lose();
-                    _positionPredictor.Reset();
-                    SaveConfig(); // Save config before turning off
-                    Echo("Radar off, target lost.");
-                    break;
-
-        private string SaveConfig()
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"[Radar]");
-            sb.AppendLine($"Mode={_config.Mode}");
-            sb.AppendLine($"MaxRange={_config.MaxRange}");
-            sb.AppendLine($"CameraGroup={_config.CameraGroup}");
-            sb.AppendLine($"CameraPrefix={_config.CameraPrefix}");
-            return sb.ToString();
-        }
-
-        #endregion
-                    break;
-
-                case "gimbal elevation":
-                    if (args.Length > 1 && double.TryParse(args[1], out var el))
-                    {
-                        _gimbalController.SetElevation(el);
-                        Echo($"Gimbal elevation set to {el:0.##}°");
-                    }
-                    else
-                    {
-                        Echo($"Current gimbal elevation: {_gimbalController.GetElevation():0.##}°");
-                    }
-                    break;
-#endregion
-
-        #region Error Handling and Safety
-
-        private void SafeRaycast(IMyCameraBlock camera)
-        {
-            try
-            {
-                if (camera == null) return;
-                camera.EnableRaycast = true;
-            }
-            catch
-            {
-                // Camera may be destroyed or disabled
-                Echo("Camera operation failed (block may be damaged or removed).");
-            }
-        }
-
-        private void SafeLcdWrite()
-        {
-            try
-            {
-                _lcdPanel?.WriteText(_lcdText.ToString(), writePublic: false);
-            }
-            catch
-            {
-                // LCD may be removed or disabled
-            }
-        }
-
-        #endregion
-                    }
-                    else
-                    {
-                        Echo($"Current mode: {_config.Mode}");
-                        Echo($"Gimbal enabled: {_gimbalController.IsEnabled()}");
-                    }
-                    break;
             var args = command.Split(' ');
             var cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "";
 
@@ -255,6 +83,7 @@ case "off":
                 case "off":
                     _state = RadarState.IDLE;
                     _contactTracker.Lose();
+                    SaveConfig();
                     Echo("Radar off, target lost.");
                     break;
 
@@ -263,6 +92,10 @@ case "off":
                     {
                         Echo("Scanning...");
                         _state = RadarState.ACQUIRING;
+                    }
+                    else
+                    {
+                        Echo("No radar cameras found.");
                     }
 #endregion
 
@@ -384,10 +217,6 @@ case "off":
         }
 
         #endregion
-                    else
-                    {
-                        Echo("No radar cameras found.");
-                    }
                     break;
 
                 case "lock":
@@ -404,12 +233,28 @@ case "off":
                 case "mode":
                     if (args.Length > 1)
                     {
-                        _config.Mode = args[1];
-                        Echo($"Mode set to {_config.Mode}");
+                        var mode = args[1].ToLowerInvariant();
+                        if (mode == "fixed")
+                        {
+                            _config.Mode = "Fixed";
+                            _gimbalController.Disable();
+                            Echo($"Mode set to Fixed.");
+                        }
+                        else if (mode == "gimbal")
+                        {
+                            _config.Mode = "Gimbal";
+                            _gimbalController.Enable();
+                            Echo($"Mode set to Gimbal.");
+                        }
+                        else
+                        {
+                            Echo($"Unknown mode: {mode}. Use 'fixed' or 'gimbal'.");
+                        }
                     }
                     else
                     {
                         Echo($"Current mode: {_config.Mode}");
+                        Echo($"Gimbal enabled: {_gimbalController.IsEnabled()}");
                     }
                     break;
 
@@ -428,11 +273,6 @@ case "off":
                 default:
                     Echo($"Unknown command: {cmd}. Type 'help'.");
                     break;
-            }
-        }
-
-        #endregion
-                _cameraManager.DiscoverCameras(GridTerminalSystem);
             }
         }
 
