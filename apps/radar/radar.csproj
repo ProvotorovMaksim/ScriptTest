@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../spaceengineers.props" />
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
@@ -16,8 +17,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../libs/radar-core/radar-core.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+      <Compile Include="Program.cs" />
+      <Compile Include="../../libs/radar-core/CameraManager.cs" />
+      <Compile Include="../../libs/radar-core/ContactObservation.cs" />
+      <Compile Include="../../libs/radar-core/ContactTracker.cs" />
+      <Compile Include="../../libs/radar-core/PositionPredictor.cs" />
+      <Compile Include="../../libs/radar-core/RadarConfig.cs" />
+      <Compile Include="../../libs/radar-core/RadarState.cs" />
+      <Compile Include="../../libs/radar-core/GimbalController.cs" />
+    </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Mal.Mdk2.PbPackager" Version="2.3.1">
