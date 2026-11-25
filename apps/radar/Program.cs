@@ -137,6 +137,48 @@ case "gimbal home":
                     {
                         Echo($"Current gimbal azimuth: {_gimbalController.GetAzimuth():0.##}°");
                     }
+#endregion
+
+        #region LCD
+
+        private void UpdateLcd()
+        {
+            _lcdPanel ??= GridTerminalSystem?.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
+            if (_lcdPanel == null) return;
+
+            _lcdText.Clear();
+            _lcdText.AppendLine($"Mode: {_config.Mode}");
+            _lcdText.AppendLine($"State: {_state}");
+            _lcdText.AppendLine($"Target: {_currentContact.Name}");
+            _lcdText.AppendLine($"Range: {_currentContact.Range:0.##} m");
+            _lcdText.AppendLine($"Cameras: {_cameraManager.Count()}");
+
+            _lcdPanel.WriteText(_lcdText.ToString(), writePublic: false);
+        }
+
+        #endregion
+
+        #region Configuration Saving
+case "off":
+                    _state = RadarState.IDLE;
+                    _contactTracker.Lose();
+                    _positionPredictor.Reset();
+                    SaveConfig(); // Save config before turning off
+                    Echo("Radar off, target lost.");
+                    break;
+
+        private string SaveConfig()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"[Radar]");
+            sb.AppendLine($"Mode={_config.Mode}");
+            sb.AppendLine($"MaxRange={_config.MaxRange}");
+            sb.AppendLine($"CameraGroup={_config.CameraGroup}");
+            sb.AppendLine($"CameraPrefix={_config.CameraPrefix}");
+            return sb.ToString();
+        }
+
+        #endregion
                     break;
 
                 case "gimbal elevation":
