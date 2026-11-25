@@ -30,7 +30,8 @@ Run `gimbal park` to stop scanning and move both axes toward their hardware
 zero angles. If zero is outside an axis's allowed travel, it parks at the
 nearest allowed angle. The display shows `PARKING` during movement and
 `PARKED` once both axes reach their setpoints. Use `off` to stop movement
-or `scan` to resume scanning.
+or `scan` to resume scanning. Parking stops both drives if either axis
+fails to make progress for five seconds.
 
 ## Diagnostics and acceptance
 

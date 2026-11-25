@@ -36,9 +36,9 @@ namespace SpaceEngineers.Apps.Radar
         {
             var now = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(argument))
-                Command(argument.Trim());
+                Command(argument.Trim(), now);
             else if (_parking)
-                Park();
+                Park(now);
             else if (_scanning)
                 Scan(now);
             Render(now);
@@ -52,7 +52,7 @@ namespace SpaceEngineers.Apps.Radar
                 _gimbal.Bind(GridTerminalSystem, Me);
         }
 
-        private void Command(string command)
+        private void Command(string command, DateTime now)
         {
             switch (command.ToLowerInvariant())
             {
@@ -103,7 +103,7 @@ namespace SpaceEngineers.Apps.Radar
                     _parking = true;
                     _contact.Clear();
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
-                    Park();
+                    Park(now);
                     break;
                 case "status":
                     break;
@@ -119,13 +119,23 @@ namespace SpaceEngineers.Apps.Radar
             }
         }
 
-        private void Park()
+        private void Park(DateTime now)
         {
             _scanProblem = _gimbal.GetUnavailableReason();
             if (_scanProblem != null)
+            {
                 StopParking(RadarState.UNAVAILABLE);
-            else if (_gimbal.ParkAtZero())
+                return;
+            }
+
+            bool stalled;
+            if (_gimbal.ParkAtZero(now, out stalled))
                 StopParking(RadarState.PARKED);
+            else if (stalled)
+            {
+                _scanProblem = "Parking stopped: an axis did not move toward its setpoint.";
+                StopParking(RadarState.UNAVAILABLE);
+            }
             else
                 _state = RadarState.PARKING;
         }

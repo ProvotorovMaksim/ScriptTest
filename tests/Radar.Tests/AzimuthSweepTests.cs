@@ -21,6 +21,19 @@ namespace Tests.Radar.Tests
         }
 
         [Test]
+        public void ParkingStopsWhenAnAxisNoLongerMakesProgress()
+        {
+            var progress = new GimbalParkProgress();
+            var start = new DateTime(2026, 1, 1);
+            Assert.That(progress.IsStalled(0.3, start, 0.001), Is.False);
+            Assert.That(progress.IsStalled(0.29, start.AddSeconds(4), 0.001), Is.False);
+            Assert.That(progress.IsStalled(0.29, start.AddSeconds(8), 0.001), Is.False);
+            Assert.That(progress.IsStalled(0.29, start.AddSeconds(9), 0.001), Is.True);
+            Assert.That(progress.IsStalled(0.001, start.AddSeconds(10), 0.001), Is.False);
+            Assert.That(progress.IsStalled(0.03, start.AddSeconds(11), 0.001), Is.False);
+        }
+
+        [Test]
         public void HoldsPositionUntilAdvancedAndReversesAtTravelLimit()
         {
             var sweep = new AzimuthSweep();
