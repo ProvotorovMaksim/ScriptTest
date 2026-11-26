@@ -163,12 +163,8 @@ namespace SpaceEngineers.Apps.ShipLink
             RestoreWeaponProfile(settings);
             foreach (var line in settings)
             {
-                if (!line.StartsWith("PILOT_CONTACT|", StringComparison.Ordinal))
-                    continue;
-                var fields = line.Split('|');
                 long source, entity;
-                if (fields.Length == 3 && long.TryParse(fields[1], out source) && source != 0 &&
-                    long.TryParse(fields[2], out entity) && entity != 0)
+                if (PilotContactSelection.TryRead(line, out source, out entity))
                 {
                     _savedContactSource = source;
                     _savedContactEntity = entity;
@@ -498,9 +494,9 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_trackedContact == null && _savedContactEntity != 0)
             {
                 var keyToRestore = "entity:" + _savedContactEntity.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                var restored = _contacts.Where(mark => !mark.Assistance && !mark.Hazard && mark.Source == _savedContactSource &&
-                    mark.Expires > now && mark.MeasuredTicks > 0 && mark.MeasuredTicks <= now &&
-                    now - mark.MeasuredTicks <= 2 * TimeSpan.TicksPerSecond && JournalKey(mark) == keyToRestore)
+                var restored = _contacts.Where(mark => !mark.Assistance && !mark.Hazard &&
+                    JournalKey(mark) == keyToRestore && PilotContactSelection.IsFreshFrom(
+                        _savedContactSource, mark.Source, mark.MeasuredTicks, mark.Expires, now))
                     .OrderByDescending(mark => mark.MeasuredTicks).FirstOrDefault();
                 if (restored != null)
                 {

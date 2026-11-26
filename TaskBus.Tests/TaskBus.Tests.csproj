@@ -28,6 +28,8 @@
     <Compile Include="DockLeaseTests.cs" />
     <Compile Include="../apps/fcs/ThrustSafety.cs" />
     <Compile Include="ThrustSafetyTests.cs" />
+    <Compile Include="../apps/ship-link/PilotContactSelection.cs" />
+    <Compile Include="PilotContactSelectionTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
