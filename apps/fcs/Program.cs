@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -143,6 +144,12 @@ namespace SpaceEngineers.Apps.FlightControl
                 case "manual": Activate(Mode.Manual); break;
                 case "aimassist": Activate(Mode.AimAssist); break;
                 case "lock": Activate(Mode.Lock); break;
+                case "diagnose":
+                    if (mode == Mode.Off)
+                        status = ReadPassiveDiagnostics();
+                    else
+                        Echo("Turn FCS off before running passive diagnostics.");
+                    break;
                 case "mass":
                     Echo(mode == Mode.Off ? "Engage FCS before requesting mass limits." :
                         flight.AssessMass(cockpit, () => Runtime.CurrentInstructionCount < Runtime.MaxInstructionCount / 2));
@@ -663,6 +670,29 @@ namespace SpaceEngineers.Apps.FlightControl
             }
         }
 
+        private string ReadPassiveDiagnostics()
+        {
+            var candidates = new List<IMyCockpit>();
+            GridTerminalSystem.GetBlocksOfType(candidates, block => block.CubeGrid == Me.CubeGrid &&
+                block.IsWorking && block.CustomName.Contains("[FCS]"));
+            IMyCockpit selected = null;
+            foreach (var candidate in candidates)
+            {
+                if (selected == null || candidate.IsUnderControl)
+                    selected = candidate;
+                if (candidate.IsUnderControl)
+                    break;
+            }
+            if (selected == null)
+                return "FCS passive: need a working cockpit tagged [FCS].";
+
+            var thrusters = new List<IMyThrust>();
+            var gyros = new List<IMyGyro>();
+            GridTerminalSystem.GetBlocksOfType(thrusters, block => block.CubeGrid == selected.CubeGrid);
+            GridTerminalSystem.GetBlocksOfType(gyros, block => block.CubeGrid == selected.CubeGrid);
+            return FlightController.Diagnose(selected, thrusters, gyros);
+        }
+
         private bool Activate(Mode requested, bool uncrewed = false)
         {
             if (droneDock)
@@ -1038,6 +1068,49 @@ namespace SpaceEngineers.Apps.FlightControl
                 return Command(input.X) != 0 || Command(input.Y) != 0 || Command(pilot.RollIndicator) != 0;
             }
 
+            public static string Diagnose(IMyShipController pilot, List<IMyThrust> thrusters, List<IMyGyro> gyros)
+            {
+                var allocator = new ThrustAllocator();
+                var frame = pilot.WorldMatrix;
+                var available = new double[6];
+                allocator.Acquire(thrusters, frame, requireFree: false);
+                var measured = allocator.Measure(frame, pilot.CenterOfMass, available);
+                double mass = pilot.CalculateShipMass().PhysicalMass;
+                var gravity = pilot.GetNaturalGravity();
+                var support = Vector3D.TransformNormal(-gravity * mass, MatrixD.Transpose(frame));
+                bool supported = ThrustSafety.CanSupport(mass, support.X, support.Y, support.Z, available, ThrustReserve);
+                var moment = supported ? allocator.Solve(support, Vector3D.One) : Vector3D.Zero;
+                int workingThrust = 0;
+                int workingGyros = 0;
+                var blockers = new StringBuilder();
+                foreach (var engine in thrusters)
+                {
+                    if (engine.IsWorking && engine.MaxEffectiveThrust > 0)
+                        workingThrust++;
+                    if (engine.ThrustOverridePercentage > 0)
+                        blockers.AppendLine("Thruster override: " + engine.CustomName);
+                }
+                foreach (var gyro in gyros)
+                {
+                    if (gyro.IsWorking)
+                        workingGyros++;
+                    if (gyro.GyroOverride)
+                        blockers.AppendLine("Gyro override: " + gyro.CustomName);
+                }
+                return "FCS passive: " + pilot.CustomName + " | pilot present: " + pilot.IsUnderControl +
+                    "\nFCS owns no actuators | native thrust: " + pilot.ControlThrusters + " | dampeners: " + pilot.DampenersOverride +
+                    "\nMass: " + Math.Round(mass) + " kg | gravity: " + Math.Round(gravity.Length(), 2) + " m/s² " + gravity +
+                    "\nThrusters working: " + workingThrust + "/" + thrusters.Count +
+                    " | gyros working: " + workingGyros + "/" + gyros.Count +
+                    "\nEffective thrust +/- X Y Z: " + Math.Round(available[0]) + "/" + Math.Round(available[1]) + " " +
+                        Math.Round(available[2]) + "/" + Math.Round(available[3]) + " " + Math.Round(available[4]) + "/" + Math.Round(available[5]) + " N" +
+                    "\nPilot XYZ: " + pilot.MoveIndicator +
+                    "\nGravity support XYZ: " + FormatDockForce(support) + " | 10% reserve: " + supported +
+                    "\nMeasured thrust XYZ: " + FormatDockForce(measured) +
+                    "\nModeled support moment: " + (supported ? Math.Round(moment.Length()) + " N m" : "unavailable") +
+                    "\n" + blockers;
+            }
+
             public void CheckTakeoverSupport(IMyShipController pilot)
             {
                 var frame = pilot.WorldMatrix;
@@ -1189,6 +1262,9 @@ namespace SpaceEngineers.Apps.FlightControl
                     "\nMax axis stopping estimate (" + "XYZ"[limitingAxis] + "): " +
                     (double.IsPositiveInfinity(longestStop) ? "unavailable" : Math.Round(longestStop, 1) + " m") +
                     "\nBraking distance budget: " + BrakingDistance + " m per axis" +
+                    "\nPilot XYZ: " + input +
+                    "\nThrust XYZ target: " + FormatDockForce(target) +
+                    "\nThrust XYZ measured: " + FormatDockForce(measuredForce) +
                     "\nResidual thrust moment: " + Math.Round(residualMoment.Length()) + " N m";
             }
 
@@ -1431,11 +1507,12 @@ namespace SpaceEngineers.Apps.FlightControl
 
             private readonly List<Engine>[] groups = new List<Engine>[6];
 
-            public bool Acquire(List<IMyThrust> blocks, MatrixD frame)
+            public bool Acquire(List<IMyThrust> blocks, MatrixD frame, bool requireFree = true)
             {
-                foreach (var block in blocks)
-                    if (block.ThrustOverridePercentage > 0)
-                        return false;
+                if (requireFree)
+                    foreach (var block in blocks)
+                        if (block.ThrustOverridePercentage > 0)
+                            return false;
 
                 for (int i = 0; i < groups.Length; i++)
                     groups[i] = new List<Engine>();

@@ -981,6 +981,12 @@ gravity support on idle axes when its thrust-balance fallback is used.
 Repeat gravity and pilot-input tests on a dedicated test ship before
 using this build on the main ship.
 
+`diagnose` in OFF mode samples a working local `[FCS]` cockpit. It
+reports mass, natural gravity, pilot input, effective thrust, measured
+force, and blocks with active overrides. It does not write actuator or
+cockpit settings. Repeat the command while holding a pilot input to
+compare the passive reading with the active-mode telemetry.
+
 Name an LCD on the FCS block's grid exactly `[FCS STATUS]` and run `status`
 to show live flight status there. The panel refreshes while FCS is active
 and shows the reason when FCS releases control.
