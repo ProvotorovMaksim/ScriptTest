@@ -65,6 +65,16 @@ namespace Tests.Radar.Tests
         }
 
         [Test]
+        public void SearchElevationIsIndependentOfParking()
+        {
+            Assert.IsTrue(RadarConfig.TryParse("[Gimbal]\nSearchElevationDegrees=12.5\nParkElevationDegrees=-8", out var config, out _));
+            Assert.That(config.SearchElevationDegrees, Is.EqualTo(12.5));
+            Assert.That(config.ParkElevationDegrees, Is.EqualTo(-8));
+            Assert.IsTrue(RadarConfig.TryParse("[Gimbal]\nSearchElevationDegrees=NaN", out config, out _));
+            Assert.That(config.SearchElevationDegrees, Is.Zero);
+        }
+
+        [Test]
         public void ParkingAnglesAcceptFiniteValuesAndKeepDefaultsForInvalidInput()
         {
             Assert.IsTrue(RadarConfig.TryParse("[Gimbal]\nParkAzimuthDegrees=135.5\nParkElevationDegrees=-12.25",

@@ -14,7 +14,7 @@ namespace SpaceEngineers.Apps.Radar
 
         private const double ContactTimeoutSeconds = 5;
         private bool _retryContactCenter;
-        private bool _tryFixedAxis;
+        private readonly HashSet<long> _fixedAxisNext = new HashSet<long>();
         private long _lastHitCameraId;
         private IMyCameraBlock _repeatAcquisitionCamera;
         private readonly ContactTracker _contact = new ContactTracker();
@@ -62,6 +62,8 @@ namespace SpaceEngineers.Apps.Radar
         {
             RefreshOwnGrids();
             _cameras.DiscoverCameras(GridTerminalSystem, Me);
+            _fixedAxisNext.Clear();
+            _repeatAcquisitionCamera = null;
             _lcd = GridTerminalSystem.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
             if (IsGimbal)
                 _gimbal.Bind(GridTerminalSystem, Me);
@@ -367,7 +369,7 @@ namespace SpaceEngineers.Apps.Radar
                     axisRange = Math.Min(maxRange, Vector3D.Distance(origin, target) + extent + 2);
                 }
                 bool axis = !pointed || (fixedTracking &&
-                    (repeatAcquisition || _tryFixedAxis || !canPoint) && camera.CanScan(axisRange));
+                    (repeatAcquisition || _fixedAxisNext.Contains(camera.EntityId) || !canPoint) && camera.CanScan(axisRange));
                 if (axis ? axisRange <= 0 || (!fixedTracking && !camera.CanScan(axisRange)) : !canPoint)
                 {
                     _lastRay = camera.CustomName + (range > maxRange ? ": beyond range limit." :
@@ -382,7 +384,12 @@ namespace SpaceEngineers.Apps.Radar
                 {
                     _retryContactCenter = !axis && rayTarget != target;
                     if (fixedTracking)
-                        _tryFixedAxis = !axis;
+                    {
+                        if (axis)
+                            _fixedAxisNext.Remove(camera.EntityId);
+                        else
+                            _fixedAxisNext.Add(camera.EntityId);
+                    }
                 }
                 string rejection = hit.IsEmpty() ? "empty ray" :
                     !ContactTracker.IsShipContact(hit.Type, hit.EntityId, _ownGrids.Contains(hit.EntityId)) ? "rejected " + hit.Type + " #" + hit.EntityId :
@@ -399,8 +406,12 @@ namespace SpaceEngineers.Apps.Radar
                 _cue = null;
                 _retryContactCenter = false;
                 _lastHitCameraId = camera.EntityId;
-                if (!gimbal && axis && !tracking)
-                    _repeatAcquisitionCamera = camera;
+                if (!tracking)
+                {
+                    _fixedAxisNext.Clear();
+                    if (!gimbal && axis)
+                        _repeatAcquisitionCamera = camera;
+                }
                 _contact.Update(hit, Vector3D.Distance(Me.GetPosition(), hit.Position), now);
                 _predictor.UpdateState(_contact.Position, _contact.Velocity);
                 if (_config.ShareContacts && now.Ticks >= _nextJournalPublish)
