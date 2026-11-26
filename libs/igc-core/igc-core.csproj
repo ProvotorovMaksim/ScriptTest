@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <Compile Include="TaskBusProtocol.cs" />
+    <Compile Include="GalnetTopology.cs" />
     <Compile Include="TaskBusIgcHelper.cs" />
   </ItemGroup>
 

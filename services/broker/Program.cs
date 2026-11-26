@@ -1,30 +1,50 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
 using System.Linq;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
-using SpaceEngineers.Libs.TaskBusProducer;
 
 namespace SpaceEngineers.Services.Broker
 {
+    using SpaceEngineers.Libs.IgcCore;
+    using SpaceEngineers.Libs.TaskBusProducer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
+        private const string BackupPanelName = "[TASKBUS BACKUP]";
+        private const string BackupVersion = "TASKBUS-BACKUP-1|";
+        private const string HandoffVersion = "TASKBUS-BACKUP-2|";
+        private const string GalnetRelayName = "[GALNET RELAY]";
+        private readonly Dictionary<long, long> _galnetRoutes = new Dictionary<long, long>();
+        private readonly List<GalnetReply> _galnetReplies = new List<GalnetReply>();
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private const int MaxTasks = 100;
+        private const int RetainedRequestCount = 500;
         private const int LeaseTimeoutTicks = 180;
+        private static readonly long LeaseTimeoutUtc = TimeSpan.FromSeconds(30).Ticks;
         private int _tick;
         private int _sequence;
+        private bool _paused;
+        private bool _retired;
+        private long _handoffTarget;
+        private const string HandoffField = "HANDOFF_TARGET|";
+        private long _resumeAfterUtc;
         private readonly List<TaskRecord> _tasks = new List<TaskRecord>();
-        private readonly HashSet<string> _cancelledRequestIds = new HashSet<string>();
+        private readonly List<string> _cancelledRequestIds = new List<string>();
         private readonly List<string> _completedRequestIds = new List<string>();
         private readonly List<TaskCommit> _commits = new List<TaskCommit>();
         private readonly List<IMyRadioAntenna> _antennas = new List<IMyRadioAntenna>();
         private IMyBroadcastListener _listener;
         private TaskBusProducer _producer;
+
+        private sealed class GalnetReply
+        {
+            public string Command;
+            public long Target;
+            public string AssignmentId;
+            public long Deadline;
+        }
 
         private sealed class TaskRecord
         {
@@ -35,10 +55,28 @@ namespace SpaceEngineers.Services.Broker
             public long WorkerId;
             public string Key;
             public string RequestJson;
+            public bool HasParent;
+            public bool BaseStockConfirmed;
+            public int CompletedMiningPhase;
             public string State;
             public int Attempts;
             public int LastDispatchTick;
+            public long LeaseExpiresUtc;
             public int LeaseEpoch;
+        }
+
+        private const int MaxSharedDeposits = 64;
+        private const double SharedDepositRadius = 5000;
+        private readonly List<string> _sharedDeposits = new List<string>();
+
+        private readonly Dictionary<string, string> _surveyReports = new Dictionary<string, string>();
+
+        private static string ReadSurveyReport(string payload)
+        {
+            string raw;
+            string report;
+            return TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out report) && report.Length <= 320 ? report : null;
         }
 
         private sealed class TaskCommit
@@ -52,15 +90,85 @@ namespace SpaceEngineers.Services.Broker
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
-            _producer = new TaskBusProducer(CommunicationTag, (channel, envelope, targetId) =>
-                IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax));
+            _producer = new TaskBusProducer(CommunicationTag, SendEnvelope);
             LoadQueue();
+            if (!_paused)
+                ExpireConsumerLeases();
+            SaveAfterParentLeaseChange(false);
         }
 
         public void Main(string argument)
         {
-            _tick++;
             var command = argument ?? string.Empty;
+            if (string.Equals(command, "broker pause", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!_paused)
+                {
+                    _paused = true;
+                    // Allow earlier workers time to stop before reopening the queue.
+                    _resumeAfterUtc = _sequence == 0 ? 0 : DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
+                    foreach (var task in _tasks)
+                        _resumeAfterUtc = Math.Max(_resumeAfterUtc, task.LeaseExpiresUtc);
+                    _galnetReplies.Clear();
+                    ExpireConsumerLeases(force: true);
+                    SaveAfterParentLeaseChange(false);
+                    SaveQueue();
+                }
+                ShowStatus();
+                return;
+            }
+            if (_paused)
+            {
+                for (int i = 0; i < 32 && _listener.HasPendingMessage; i++)
+                    _listener.AcceptMessage();
+                if (string.Equals(command, "broker resume", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_retired)
+                    {
+                        Echo("Broker retired after handoff. Resume is disabled.");
+                        return;
+                    }
+                    if (DateTime.UtcNow.Ticks < _resumeAfterUtc)
+                    {
+                        Echo("Broker remains paused until " +
+                            new DateTime(_resumeAfterUtc, DateTimeKind.Utc).ToString("u", System.Globalization.CultureInfo.InvariantCulture));
+                        return;
+                    }
+                    _paused = false;
+                    _resumeAfterUtc = 0;
+                    SaveQueue();
+                    Echo("Broker resumed.");
+                }
+                else if (string.Equals(command, "broker export", StringComparison.OrdinalIgnoreCase))
+                    TransferBackup(import: false);
+                else if (command.StartsWith("broker handoff", StringComparison.OrdinalIgnoreCase))
+                {
+                    const string prefix = "broker handoff ";
+                    long target;
+                    if (!command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                        !long.TryParse(command.Substring(prefix.Length), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out target) ||
+                        target == 0 || target == Me.EntityId)
+                        Echo("Use broker handoff <destination PB ID>.");
+                    else if (_handoffTarget != 0 && _handoffTarget != target)
+                        Echo("This source is already retired for a different destination.");
+                    else
+                        TransferBackup(import: false, retireTo: target);
+                }
+                else if (string.Equals(command, "broker import", StringComparison.OrdinalIgnoreCase))
+                    TransferBackup(import: true);
+                else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
+                    ShowStatus();
+                return;
+            }
+            if (command.StartsWith("galnet recv ", StringComparison.Ordinal))
+            {
+                ExpireConsumerLeases();
+                ReceiveGalnet(command);
+                return;
+            }
+
+            _tick++;
+            FlushGalnetReply();
             if (string.Equals(command, "purge", StringComparison.OrdinalIgnoreCase))
                 PurgeClosedTasks();
             else if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
@@ -82,14 +190,95 @@ namespace SpaceEngineers.Services.Broker
                 if (message.Source == Me.EntityId)
                     continue;
 
-                var json = message.Data as string;
-                string eventType;
-                string payloadJson;
-                if (string.IsNullOrEmpty(json) || !TaskBusIgcHelper.TryParseEnvelope(json, out eventType, out payloadJson))
+                TaskBusEnvelope envelope;
+                if (!TaskBusProtocol.TryParseEnvelope(message.Data as string, out envelope) ||
+                    (envelope.TargetId != 0 && envelope.TargetId != Me.EntityId))
                     continue;
 
-                HandleMessage(message.Source, eventType, payloadJson);
+                HandleMessage(message.Source, envelope.EventType, envelope.PayloadJson);
             }
+        }
+
+        private IMyProgrammableBlock FindGalnetRelay()
+        {
+            var relay = GridTerminalSystem.GetBlockWithName(GalnetRelayName) as IMyProgrammableBlock;
+            return relay != null && relay.EntityId != Me.EntityId && relay.CubeGrid == Me.CubeGrid &&
+                relay.IsWorking ? relay : null;
+        }
+
+        private void ReceiveGalnet(string command)
+        {
+            if (FindGalnetRelay() == null)
+                return;
+
+            var fields = command.Split(new[] { ' ' }, 7, StringSplitOptions.RemoveEmptyEntries);
+            long relayId;
+            long workerId;
+            TaskBusEnvelope envelope;
+            if (fields.Length != 7 || fields[4] != "taskbus" ||
+                !long.TryParse(fields[2], out relayId) || relayId == 0 ||
+                !long.TryParse(fields[5], out workerId) || workerId == 0 || workerId == Me.EntityId ||
+                !TaskBusProtocol.TryParseEnvelope(fields[6], out envelope) || envelope.TargetId != Me.EntityId)
+                return;
+
+            long knownRelay;
+            if (_galnetRoutes.TryGetValue(workerId, out knownRelay))
+            {
+                if (knownRelay != relayId)
+                    return;
+            }
+            else
+            {
+                if (_galnetRoutes.Count >= 128)
+                    return;
+                _galnetRoutes.Add(workerId, relayId);
+            }
+            HandleMessage(workerId, envelope.EventType, envelope.PayloadJson);
+        }
+
+        private void SendEnvelope(string channel, string envelope, long targetId)
+        {
+            long relayId;
+            if (_galnetRoutes.TryGetValue(targetId, out relayId))
+            {
+                var command = "app " + relayId + " taskbus " + Me.EntityId + " " + envelope;
+                var reply = new GalnetReply { Command = command, Target = targetId };
+                TaskBusEnvelope parsed;
+                string rawDeadline;
+                if (TaskBusProtocol.TryParseEnvelope(envelope, out parsed) && parsed.EventType == "TASK_ASSIGN" &&
+                    TaskBusIgcHelper.TryGetJsonProperty(parsed.PayloadJson, "lease_expires_utc_ticks", out rawDeadline) &&
+                    long.TryParse(rawDeadline, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out reply.Deadline))
+                    reply.AssignmentId = parsed.MessageId;
+
+                if (reply.AssignmentId != null)
+                {
+                    int pending = _galnetReplies.FindIndex(entry =>
+                        entry.Target == reply.Target && entry.AssignmentId == reply.AssignmentId);
+                    if (pending >= 0)
+                    {
+                        _galnetReplies[pending] = reply;
+                        return;
+                    }
+                }
+                if (_galnetReplies.Count < 32 && !_galnetReplies.Any(entry => entry.Command == command))
+                    _galnetReplies.Add(reply);
+                return;
+            }
+            IGC.SendBroadcastMessage(channel, envelope, TransmissionDistance.TransmissionDistanceMax);
+        }
+
+        private void FlushGalnetReply()
+        {
+            if (_galnetReplies.Count == 0)
+                return;
+            long now = DateTime.UtcNow.Ticks;
+            _galnetReplies.RemoveAll(entry => entry.Deadline > 0 && entry.Deadline <= now);
+            if (_galnetReplies.Count == 0)
+                return;
+
+            var relay = FindGalnetRelay();
+            if (relay != null && relay.TryRun(_galnetReplies[0].Command))
+                _galnetReplies.RemoveAt(0);
         }
 
         private void HandleMessage(long sourceId, string eventType, string payloadJson)
@@ -103,6 +292,21 @@ namespace SpaceEngineers.Services.Broker
             if (eventType == "TASK_PUBLISH")
             {
                 HandleTaskPublish(sourceId, payloadJson);
+                return;
+            }
+
+            if (eventType == "TASK_QUERY")
+            {
+                string raw;
+                string requestId;
+                if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out requestId) &&
+                    !string.IsNullOrWhiteSpace(requestId))
+                {
+                    RecordBaseStock(sourceId, requestId, payloadJson);
+                    if (!ReportKnownRequest(sourceId, requestId))
+                        SendRequestStatus(sourceId, requestId, "UNKNOWN");
+                }
                 return;
             }
 
@@ -122,58 +326,32 @@ namespace SpaceEngineers.Services.Broker
             int leaseEpoch;
             string epochJson;
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                !int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseEpoch))
                 return;
 
-            var task = _tasks.FirstOrDefault(entry => entry.Id == taskId);
-            if (task == null)
-            {
-                if (eventType == "TASK_DONE")
-                {
-                    var commit = _commits.FirstOrDefault(entry => entry.TaskId == taskId && entry.ConsumerId == sourceId && entry.LeaseEpoch == leaseEpoch);
-                    if (commit != null)
-                        SendTaskDoneAck(commit);
-                }
-                return;
-            }
-            if (task.State == "CLEARED")
-                return;
-            if (task.WorkerId == sourceId && task.LeaseEpoch == leaseEpoch && task.State == "DONE" && eventType == "TASK_DONE")
-            {
-                SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) + ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", sourceId, "done-ack:" + taskId + ":" + leaseEpoch.ToString(CultureInfo.InvariantCulture));
-                return;
-            }
-            if (task.State == "DONE")
-                return;
-            if (task.WorkerId != 0 && task.WorkerId != sourceId)
-                return;
-            if (leaseEpoch != task.LeaseEpoch)
-                return;
-
-            if (eventType == "TASK_RECEIVED")
-            {
-                task.WorkerId = sourceId;
-                task.State = "ACTIVE";
-                task.LastDispatchTick = _tick;
-                Echo("Consumer " + sourceId + " persisted task " + task.Id);
-            }
-            else
-            {
-                AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId));
-                AddTaskCommit(task.Id, sourceId, leaseEpoch);
-                _tasks.Remove(task);
-                Echo("Completed: " + task.Id);
-            }
-            SaveQueue();
             if (eventType == "TASK_DONE")
-                SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = sourceId, LeaseEpoch = leaseEpoch });
+            {
+                MarkTaskDone(sourceId, taskId, leaseEpoch, ReadSurveyReport(payloadJson));
+                return;
+            }
+
+            var task = _tasks.FirstOrDefault(entry => entry.Id == taskId &&
+                entry.WorkerId == sourceId && entry.LeaseEpoch == leaseEpoch);
+            if (task == null || task.State != "LEASED")
+                return;
+
+            // Only renew through TASK_ASSIGN, which tells the worker its new deadline.
+            task.State = "ACTIVE";
+            SaveQueue();
+            Echo("Consumer " + sourceId + " persisted task " + task.Id);
         }
 
         private void HandleTaskPublish(long requesterId, string requestJson)
         {
             string requestIdJson;
             string requestId;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "request_id", out requestIdJson) || !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+            if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "request_id", out requestIdJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId) || string.IsNullOrWhiteSpace(requestId))
                 return;
 
             string keyJson;
@@ -181,27 +359,18 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "key", out keyJson) || !TaskBusIgcHelper.TryReadJsonString(keyJson, out taskKey))
                 taskKey = "";
 
-            var scopedRequestId = GetScopedRequestId(requesterId, requestId);
-            var existing = _tasks.FirstOrDefault(task => task.RequesterId == requesterId && task.RequestId == requestId);
-            if (existing != null)
-            {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(existing.Id) + ",\"state\":" + TaskBusIgcHelper.ToJsonString(existing.State) + "}", requesterId, "ack:" + requestId);
+            if (ReportKnownRequest(requesterId, requestId))
                 return;
-            }
-            if (_completedRequestIds.Contains(scopedRequestId))
+            if (!HasParentLease(requesterId, requestJson))
             {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"state\":\"DONE\"}", requesterId, "ack:" + requestId);
-                return;
-            }
-            if (_cancelledRequestIds.Contains(scopedRequestId))
-            {
-                SendMessage("TASK_PUBLISHED_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"state\":\"CANCELLED\"}", requesterId, "ack:" + requestId);
+                SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) +
+                    ",\"reason\":\"PARENT_LEASE_INVALID\"}", requesterId);
                 return;
             }
             if (_tasks.Count(task => task.State == "QUEUED" || task.State == "LEASED" || task.State == "ACTIVE") >= MaxTasks)
             {
                 SendMessage("TASK_REJECTED", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + ",\"reason\":\"QUEUE_FULL\"}", requesterId);
-                Echo("Queue full. Run 'purge' after closing requests.");
+                Echo("Queue full. Finish or cancel an open task to free capacity.");
                 return;
             }
 
@@ -210,7 +379,7 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(requestJson, "group_id", out groupJson) || !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId))
                 groupId = "default";
 
-            var id = requesterId.ToString(CultureInfo.InvariantCulture) + "-" + (++_sequence).ToString(CultureInfo.InvariantCulture);
+            var id = requesterId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + (++_sequence).ToString(System.Globalization.CultureInfo.InvariantCulture);
             _tasks.Add(new TaskRecord
             {
                 Id = id,
@@ -219,6 +388,7 @@ namespace SpaceEngineers.Services.Broker
                 RequesterId = requesterId,
                 Key = taskKey,
                 RequestJson = requestJson,
+                HasParent = ReferencesParent(requestJson),
                 State = "QUEUED"
             });
             SaveQueue();
@@ -226,23 +396,167 @@ namespace SpaceEngineers.Services.Broker
             Echo("Queued " + id + " (" + taskKey + ")");
         }
 
+        private void RecordBaseStock(long requesterId, string requestId, string payload)
+        {
+            double stock;
+            if (!TaskBusIgcHelper.TryReadFiniteNumber(payload, "stock", out stock))
+                return;
+            var task = _tasks.FirstOrDefault(entry => entry.RequesterId == requesterId &&
+                entry.RequestId == requestId && entry.GroupId == "MiningPoints");
+            double minimum;
+            if (task == null || task.BaseStockConfirmed ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(task.RequestJson, "minimum", out minimum) ||
+                minimum <= 0 || stock < minimum)
+                return;
+
+            task.BaseStockConfirmed = true;
+            SaveQueue();
+        }
+
+        private bool ReportKnownRequest(long requesterId, string requestId)
+        {
+            var existing = _tasks.FirstOrDefault(task => task.RequesterId == requesterId && task.RequestId == requestId);
+            if (existing != null)
+            {
+                SendRequestStatus(requesterId, requestId,
+                    existing.State == "CLEARED" ? "CANCELLED" : existing.State, existing.Id,
+                    miningParent: existing.GroupId == "MiningPoints" ? existing : null);
+                return true;
+            }
+            var scopedId = GetScopedRequestId(requesterId, requestId);
+            var state = _completedRequestIds.Contains(scopedId) ? "DONE" :
+                _cancelledRequestIds.Contains(scopedId) ? "CANCELLED" : null;
+            if (state == null)
+                return false;
+            string report;
+            _surveyReports.TryGetValue(scopedId, out report);
+            SendRequestStatus(requesterId, requestId, state, surveyReport: report);
+            return true;
+        }
+
+        private void SendRequestStatus(long requesterId, string requestId, string state, string taskId = null,
+            string surveyReport = null, TaskRecord miningParent = null)
+        {
+            var payload = "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId);
+            if (taskId != null)
+                payload += ",\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId);
+            if (surveyReport != null)
+                payload += ",\"survey_report\":" + TaskBusIgcHelper.ToJsonString(surveyReport);
+            if (miningParent != null && miningParent.WorkerId != 0 &&
+                (miningParent.State == "LEASED" || miningParent.State == "ACTIVE"))
+                payload += ReadMiningChildStatus(miningParent);
+            payload += ",\"state\":" + TaskBusIgcHelper.ToJsonString(state) + "}";
+            SendMessage("TASK_PUBLISHED_ACK", payload, requesterId, "ack:" + requestId);
+        }
+
+        private string ReadMiningChildStatus(TaskRecord parent)
+        {
+            TaskRecord selected = null;
+            int highestPhase = 0;
+            foreach (var child in _tasks)
+            {
+                if (!child.HasParent || child.RequesterId != parent.WorkerId ||
+                    (child.State != "QUEUED" && child.State != "LEASED" && child.State != "ACTIVE"))
+                    continue;
+                int phase = MiningPhaseForGroup(child.GroupId);
+                string parentId;
+                int epoch;
+                if (phase <= highestPhase || !TryReadParentReference(child.RequestJson, out parentId, out epoch) ||
+                    parentId != parent.Id || epoch != parent.LeaseEpoch)
+                    continue;
+                highestPhase = phase;
+                selected = child;
+            }
+
+            var childState = selected == null ? null : selected.State;
+            if (parent.CompletedMiningPhase > highestPhase)
+            {
+                highestPhase = parent.CompletedMiningPhase;
+                childState = "DONE";
+            }
+            if (highestPhase == 0)
+                return "";
+
+            var name = highestPhase == 3 ? "transport" : highestPhase == 2 ? "mine" : "survey";
+            return ",\"phase\":" + TaskBusIgcHelper.ToJsonString(name) +
+                ",\"child_state\":" + TaskBusIgcHelper.ToJsonString(childState);
+        }
+
+        private static bool TryReadParentReference(string requestJson, out string parentId, out int epoch)
+        {
+            parentId = null;
+            epoch = 0;
+            string parentIdJson;
+            string epochJson;
+            return TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out parentIdJson) &&
+                TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out epochJson) &&
+                TaskBusIgcHelper.TryReadJsonString(parentIdJson, out parentId) &&
+                int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out epoch);
+        }
+
+        private static int MiningPhaseForGroup(string group) =>
+            group == "Haulers" ? 3 : group == "MiningFleet" ? 2 : group == "Scouts" ? 1 : 0;
+
+        private bool HasParentLease(long requesterId, string requestJson) =>
+            !ReferencesParent(requestJson) || FindParentLease(requesterId, requestJson) != null;
+
+        private TaskRecord FindParentLease(long requesterId, string requestJson)
+        {
+            string parentId;
+            int epoch;
+            if (!TryReadParentReference(requestJson, out parentId, out epoch))
+                return null;
+
+            return _tasks.FirstOrDefault(task => task.Id == parentId && task.GroupId == "MiningPoints" && !task.HasParent &&
+                task.WorkerId == requesterId && task.LeaseEpoch == epoch &&
+                (task.State == "LEASED" || task.State == "ACTIVE"));
+        }
+
+        private static bool ReferencesParent(string requestJson)
+        {
+            string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_task_id", out value) ||
+                TaskBusIgcHelper.TryGetJsonProperty(requestJson, "parent_lease_epoch", out value);
+        }
+
+        private void SaveAfterParentLeaseChange(bool notifyWorkers)
+        {
+            var invalid = _tasks.Where(task => task.HasParent &&
+                !HasParentLease(task.RequesterId, task.RequestJson)).ToList();
+            foreach (var child in invalid)
+            {
+                _tasks.Remove(child);
+                AddCancelledRequest(GetScopedRequestId(child.RequesterId, child.RequestId));
+            }
+            if (invalid.Count > 0 || notifyWorkers)
+                SaveQueue();
+            if (!notifyWorkers)
+                return;
+
+            foreach (var child in invalid)
+                if (child.WorkerId != 0)
+                    SendTaskRevoked(child.WorkerId, child.Id, child.LeaseEpoch);
+        }
+
         private void CancelTask(long requesterId, string payloadJson)
         {
             string requestIdJson;
             string requestId;
-            if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) || !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId))
+            if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "request_id", out requestIdJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(requestIdJson, out requestId) || string.IsNullOrWhiteSpace(requestId))
                 return;
 
-            AddCancelledRequest(GetScopedRequestId(requesterId, requestId));
+            var scopedId = GetScopedRequestId(requesterId, requestId);
             var task = _tasks.FirstOrDefault(entry => entry.RequestId == requestId && entry.RequesterId == requesterId);
-            if (task != null && task.State != "DONE")
-            {
-                task.State = "CLEARED";
+            bool cancelled = task != null && task.State != "DONE" && _tasks.Remove(task);
+            bool recorded = !_completedRequestIds.Contains(scopedId) && AddCancelledRequest(scopedId);
+            if (cancelled && task.GroupId == "MiningPoints")
+                SaveAfterParentLeaseChange(true);
+            else if (cancelled || recorded)
                 SaveQueue();
-                if (task.WorkerId != 0)
-                    SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) + ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", task.WorkerId);
-            }
-            SaveQueue();
+            if (cancelled && task.WorkerId != 0)
+                SendMessage("TASK_CANCEL", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
+                    ",\"lease_epoch\":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", task.WorkerId);
             SendMessage("TASK_CANCEL_ACK", "{\"request_id\":" + TaskBusIgcHelper.ToJsonString(requestId) + "}", requesterId, "cancel-ack:" + requestId);
         }
 
@@ -253,6 +567,13 @@ namespace SpaceEngineers.Services.Broker
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "group_id", out groupJson) || !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId))
                 groupId = "default";
 
+            string surveyFlag;
+            bool surveyCapable = groupId == "MiningFleet" &&
+                TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "survey_capable", out surveyFlag) &&
+                surveyFlag == "true";
+            Func<TaskRecord, bool> acceptsGroup = task =>
+                task.GroupId == groupId || (surveyCapable && task.GroupId == "Scouts");
+
             string completedJson;
             string completedId;
             if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "completed_task_id", out completedJson) &&
@@ -261,17 +582,8 @@ namespace SpaceEngineers.Services.Broker
                 string completedEpochJson;
                 int completedEpoch;
                 if (TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out completedEpochJson) &&
-                    int.TryParse(completedEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out completedEpoch))
-                    MarkTaskDone(consumerId, completedId, completedEpoch);
-            }
-
-            var assigned = _tasks.FirstOrDefault(task => task.WorkerId == consumerId &&
-                task.GroupId == groupId && (task.State == "LEASED" || task.State == "ACTIVE"));
-            if (assigned != null)
-            {
-                assigned.LastDispatchTick = _tick;
-                DispatchTask(assigned);
-                SaveQueue();
+                    int.TryParse(completedEpochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out completedEpoch))
+                    MarkTaskDone(consumerId, completedId, completedEpoch, ReadSurveyReport(payloadJson));
                 return;
             }
 
@@ -284,15 +596,28 @@ namespace SpaceEngineers.Services.Broker
                 string activeEpochJson;
                 var activeEpoch = -1;
                 var hasActiveEpoch = TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "active_lease_epoch", out activeEpochJson) &&
-                    int.TryParse(activeEpochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out activeEpoch);
-                if (previous != null && (previous.WorkerId != consumerId || !hasActiveEpoch || previous.LeaseEpoch != activeEpoch))
+                    int.TryParse(activeEpochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out activeEpoch);
+                if (!hasActiveEpoch)
+                    return;
+                if (previous == null || previous.WorkerId != consumerId ||
+                    !acceptsGroup(previous) || previous.LeaseEpoch != activeEpoch ||
+                    (previous.State != "LEASED" && previous.State != "ACTIVE"))
                 {
-                    SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(activeId) + ",\"lease_epoch\":" + previous.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", consumerId);
+                    SendTaskRevoked(consumerId, activeId, activeEpoch);
                     return;
                 }
             }
 
-            var next = _tasks.FirstOrDefault(task => task.State == "QUEUED" && task.GroupId == groupId && task.RequesterId != consumerId);
+            var assigned = _tasks.FirstOrDefault(task => task.WorkerId == consumerId &&
+                acceptsGroup(task) && (task.State == "LEASED" || task.State == "ACTIVE"));
+            if (assigned != null)
+            {
+                RenewLease(assigned);
+                DispatchTask(assigned, payloadJson);
+                return;
+            }
+
+            var next = _tasks.FirstOrDefault(task => task.State == "QUEUED" && acceptsGroup(task) && task.RequesterId != consumerId);
             if (next == null)
             {
                 SendMessage("QUEUE_EMPTY", "null", consumerId);
@@ -302,31 +627,49 @@ namespace SpaceEngineers.Services.Broker
             next.WorkerId = consumerId;
             next.LeaseEpoch++;
             next.State = "LEASED";
-            next.LastDispatchTick = _tick;
-            SaveQueue();
-            DispatchTask(next);
-            SaveQueue();
+            RenewLease(next);
+            DispatchTask(next, payloadJson);
         }
 
-        private void ExpireConsumerLeases()
+        private void RenewLease(TaskRecord task)
+        {
+            task.LastDispatchTick = _tick;
+            long deadline = Math.Max(task.LeaseExpiresUtc + 1, DateTime.UtcNow.Ticks + LeaseTimeoutUtc);
+            var parent = task.HasParent ? FindParentLease(task.RequesterId, task.RequestJson) : null;
+            if (parent != null && parent.LeaseExpiresUtc != 0)
+                deadline = Math.Min(deadline, parent.LeaseExpiresUtc);
+            task.LeaseExpiresUtc = deadline;
+        }
+
+        private void ExpireConsumerLeases(bool force = false)
         {
             var changed = false;
+            var parentChanged = false;
+            long now = DateTime.UtcNow.Ticks;
             foreach (var task in _tasks.Where(entry => entry.State == "LEASED" || entry.State == "ACTIVE"))
             {
-                if (_tick - task.LastDispatchTick <= LeaseTimeoutTicks)
+                bool expired = task.LeaseExpiresUtc == 0
+                    ? _tick - task.LastDispatchTick > LeaseTimeoutTicks
+                    : now >= task.LeaseExpiresUtc;
+                if (!force && !expired)
                     continue;
 
                 task.WorkerId = 0;
+                task.LeaseExpiresUtc = 0;
                 task.State = "QUEUED";
                 task.LeaseEpoch++;
+                task.CompletedMiningPhase = 0;
                 changed = true;
+                parentChanged |= task.GroupId == "MiningPoints";
                 Echo("Lease expired; requeued " + task.Id);
             }
-            if (changed)
+            if (parentChanged && !_paused)
+                SaveAfterParentLeaseChange(true);
+            else if (changed)
                 SaveQueue();
         }
 
-        private void MarkTaskDone(long consumerId, string taskId, int leaseEpoch)
+        private void MarkTaskDone(long consumerId, string taskId, int leaseEpoch, string surveyReport)
         {
             var task = _tasks.FirstOrDefault(entry => entry.Id == taskId && entry.WorkerId == consumerId && entry.LeaseEpoch == leaseEpoch);
             if (task == null)
@@ -334,10 +677,10 @@ namespace SpaceEngineers.Services.Broker
                 var existingCommit = _commits.FirstOrDefault(entry => entry.TaskId == taskId && entry.ConsumerId == consumerId && entry.LeaseEpoch == leaseEpoch);
                 if (existingCommit != null)
                     SendTaskDoneAck(existingCommit);
+                else
+                    SendTaskRevoked(consumerId, taskId, leaseEpoch);
                 return;
             }
-            if (task.State == "CLEARED")
-                return;
 
             if (task.State == "DONE")
             {
@@ -345,12 +688,38 @@ namespace SpaceEngineers.Services.Broker
                 return;
             }
 
-            AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId));
+            if (task.State != "LEASED" && task.State != "ACTIVE")
+            {
+                SendTaskRevoked(consumerId, taskId, leaseEpoch);
+                return;
+            }
+
+            if (task.HasParent)
+            {
+                var parent = FindParentLease(task.RequesterId, task.RequestJson);
+                if (parent != null)
+                {
+                    parent.CompletedMiningPhase = Math.Max(parent.CompletedMiningPhase, MiningPhaseForGroup(task.GroupId));
+                    if (task.GroupId == "MiningFleet")
+                        RememberSharedDeposit(task, parent);
+                }
+            }
+            AddCompletedRequest(GetScopedRequestId(task.RequesterId, task.RequestId),
+                task.HasParent && task.GroupId == "Scouts" ? surveyReport : null);
             AddTaskCommit(taskId, consumerId, leaseEpoch);
             _tasks.Remove(task);
-            SaveQueue();
+            if (task.GroupId == "MiningPoints")
+                SaveAfterParentLeaseChange(true);
+            else
+                SaveQueue();
             SendTaskDoneAck(new TaskCommit { TaskId = taskId, ConsumerId = consumerId, LeaseEpoch = leaseEpoch });
             Echo("Completed: " + task.Id);
+        }
+
+        private void SendTaskRevoked(long consumerId, string taskId, int leaseEpoch)
+        {
+            SendMessage("TASK_REVOKED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
+                ",\"lease_epoch\":" + leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", consumerId);
         }
 
         private void AddTaskCommit(string taskId, long consumerId, int leaseEpoch)
@@ -364,20 +733,78 @@ namespace SpaceEngineers.Services.Broker
 
         private void SendTaskDoneAck(TaskCommit commit)
         {
-            SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(commit.TaskId) + ",\"lease_epoch\":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture) + "}", commit.ConsumerId, "done-ack:" + commit.TaskId + ":" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+            SendMessage("TASK_DONE_ACK", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(commit.TaskId) + ",\"lease_epoch\":" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}", commit.ConsumerId, "done-ack:" + commit.TaskId + ":" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        private void DispatchTask(TaskRecord task)
+        private static string ReadOreName(string request)
         {
+            string raw;
+            string resource;
+            return TaskBusIgcHelper.TryGetJsonProperty(request, "resource", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out resource) &&
+                resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                resource.Length > 4 && resource.Length <= 68 && resource.IndexOf(':') < 0
+                ? resource.Substring(4) : null;
+        }
+
+        private void RememberSharedDeposit(TaskRecord child, TaskRecord parent)
+        {
+            var ore = ReadOreName(child.RequestJson);
+            string position;
+            double x;
+            double y;
+            double z;
+            if (ore == null || !string.Equals(ore, ReadOreName(parent.RequestJson), StringComparison.OrdinalIgnoreCase) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(child.RequestJson, "ore_position", out position) ||
+                !TryReadCoordinates(position, out x, out y, out z))
+                return;
+
+            var gps = "GPS:" + ore + ":" + x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" +
+                y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" + z.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":";
+            _sharedDeposits.Remove(gps);
+            if (_sharedDeposits.Count == MaxSharedDeposits)
+                _sharedDeposits.RemoveAt(0);
+            _sharedDeposits.Add(gps);
+        }
+
+        private static bool TryReadCoordinates(string json, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return TaskBusIgcHelper.TryReadFiniteNumber(json, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(json, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(json, "z", out z);
+        }
+
+        private string FindSharedDeposit(TaskRecord task, string poll)
+        {
+            if (task.GroupId != "MiningPoints" || _sharedDeposits.Count == 0)
+                return null;
+            var ore = ReadOreName(task.RequestJson);
+            string position;
+            double x;
+            double y;
+            double z;
+            return ore != null && TaskBusIgcHelper.TryGetJsonProperty(poll, "point_position", out position) &&
+                TryReadCoordinates(position, out x, out y, out z)
+                ? TaskBusIgcHelper.FindNearestOre(_sharedDeposits, ore, x, y, z, SharedDepositRadius) : null;
+        }
+
+        private void DispatchTask(TaskRecord task, string poll)
+        {
+            var candidate = FindSharedDeposit(task, poll);
             var payload = "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(task.Id) +
                 ",\"request_id\":" + TaskBusIgcHelper.ToJsonString(task.RequestId) +
-                ",\"requester_id\":" + task.RequesterId.ToString(CultureInfo.InvariantCulture) +
+                ",\"requester_id\":" + task.RequesterId.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 ",\"key\":" + TaskBusIgcHelper.ToJsonString(task.Key) +
                 ",\"group_id\":" + TaskBusIgcHelper.ToJsonString(task.GroupId) +
-                ",\"lease_epoch\":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture) +
+                ",\"lease_epoch\":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"lease_expires_utc_ticks\":" + task.LeaseExpiresUtc.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"base_stock_confirmed\":" + (task.BaseStockConfirmed ? "true" : "false") +
+                (candidate == null ? "" : ",\"shared_ore_gps\":" + TaskBusIgcHelper.ToJsonString(candidate)) +
                 ",\"details\":" + task.RequestJson + "}";
-            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
             task.Attempts++;
+            SaveQueue();
+            SendMessage("TASK_ASSIGN", payload, task.WorkerId, "assign:" + task.Id + ":" + task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Echo("Sent " + task.Id + " to PB " + task.WorkerId + " (attempt " + task.Attempts + ")");
         }
 
@@ -393,33 +820,137 @@ namespace SpaceEngineers.Services.Broker
             Echo("Purged " + removed + " terminal records; request dedupe tombstones are retained.");
         }
 
-        private void AddCompletedRequest(string requestId)
+        private void AddCompletedRequest(string requestId, string surveyReport = null)
         {
             if (string.IsNullOrEmpty(requestId) || _completedRequestIds.Contains(requestId))
                 return;
             _completedRequestIds.Add(requestId);
-            while (_completedRequestIds.Count > 500)
+            if (surveyReport != null)
+                _surveyReports[requestId] = surveyReport;
+            while (_completedRequestIds.Count > RetainedRequestCount)
+            {
+                _surveyReports.Remove(_completedRequestIds[0]);
                 _completedRequestIds.RemoveAt(0);
+            }
         }
 
-        private void AddCancelledRequest(string requestId)
+        private bool AddCancelledRequest(string requestId)
         {
-            if (string.IsNullOrEmpty(requestId) || !_cancelledRequestIds.Add(requestId))
-                return;
-            while (_cancelledRequestIds.Count > 500)
-                _cancelledRequestIds.Remove(_cancelledRequestIds.First());
+            if (string.IsNullOrEmpty(requestId) || _cancelledRequestIds.Contains(requestId))
+                return false;
+            _cancelledRequestIds.Add(requestId);
+            while (_cancelledRequestIds.Count > RetainedRequestCount)
+                _cancelledRequestIds.RemoveAt(0);
+            return true;
         }
 
         private string GetScopedRequestId(long producerId, string requestId)
         {
-            return producerId.ToString(CultureInfo.InvariantCulture) + ":" + requestId;
+            return producerId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + requestId;
         }
 
         private void ShowStatus()
         {
-            Echo("Tasks: " + _tasks.Count);
+            Echo("Broker block ID: " + Me.EntityId);
+            Echo((_retired ? "Retired. " : _paused ? "Paused. " : "Active. ") + "Tasks: " + _tasks.Count);
             foreach (var task in _tasks)
                 Echo(task.Id + " " + task.State + " worker=" + task.WorkerId + " " + task.Key);
+        }
+
+        private void TransferBackup(bool import, long retireTo = 0)
+        {
+            var panel = GridTerminalSystem.GetBlockWithName(BackupPanelName) as IMyTextPanel;
+            if (panel == null || !panel.IsWorking || panel.CubeGrid != Me.CubeGrid)
+            {
+                Echo("A working " + BackupPanelName + " text panel is required on this grid.");
+                return;
+            }
+
+            if (!import)
+            {
+                var existing = panel.GetText();
+                if (existing.Length != 0 && !existing.StartsWith(BackupVersion, StringComparison.Ordinal) &&
+                    !existing.StartsWith(HandoffVersion, StringComparison.Ordinal))
+                {
+                    Echo("Backup panel contains unrelated text.");
+                    return;
+                }
+                if (retireTo != 0 && _handoffTarget == 0)
+                {
+                    _retired = true;
+                    _handoffTarget = retireTo;
+                    SaveQueue();
+                }
+
+                var queueText = Storage.Replace("\r\n", "\n").Replace("\nRETIRED|1\n", "\n");
+                var version = _handoffTarget == 0 ? BackupVersion : HandoffVersion;
+                var backup = version + BackupChecksum(queueText) + "\n" + queueText;
+                if (!panel.WriteText(backup, false) || panel.GetText().Replace("\r\n", "\n") != backup)
+                    Echo(_retired ? "Backup write failed. Source remains retired. Retry broker export." :
+                        "Backup write failed verification.");
+                else
+                    Echo(_retired ? "Broker backup exported. Source is retired." : "Broker backup exported.");
+                return;
+            }
+
+            if (_retired || _sequence != 0 || _tasks.Count != 0 || _completedRequestIds.Count != 0 ||
+                _cancelledRequestIds.Count != 0 || _commits.Count != 0 || _sharedDeposits.Count != 0)
+            {
+                Echo("Import requires an empty broker.");
+                return;
+            }
+
+            var snapshot = panel.GetText().Replace("\r\n", "\n");
+            var separator = snapshot.IndexOf('\n');
+            bool targeted = snapshot.StartsWith(HandoffVersion, StringComparison.Ordinal);
+            var header = targeted ? HandoffVersion : BackupVersion;
+            if (separator <= header.Length || !snapshot.StartsWith(header, StringComparison.Ordinal))
+            {
+                Echo("Unrecognized broker backup.");
+                return;
+            }
+            var queue = snapshot.Substring(separator + 1);
+            if (snapshot.Substring(header.Length, separator - header.Length) != BackupChecksum(queue) ||
+                !queue.StartsWith("SEQ|", StringComparison.Ordinal) ||
+                queue.IndexOf("\nPAUSED|1\n", StringComparison.Ordinal) < 0 ||
+                queue.IndexOf("\nRETIRED|1\n", StringComparison.Ordinal) >= 0)
+            {
+                Echo("Broker backup failed verification.");
+                return;
+            }
+
+            int targetStart = queue.IndexOf("\n" + HandoffField, StringComparison.Ordinal);
+            if (targeted != (targetStart >= 0))
+            {
+                Echo("Backup format does not match the handoff destination field.");
+                return;
+            }
+            if (targeted)
+            {
+                int valueStart = targetStart + 1 + HandoffField.Length;
+                int targetEnd = queue.IndexOf('\n', valueStart);
+                long target;
+                if (targetEnd != queue.Length - 1 || !long.TryParse(queue.Substring(valueStart, targetEnd - valueStart),
+                    System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out target) || target != Me.EntityId)
+                {
+                    Echo("This broker is not the handoff destination.");
+                    return;
+                }
+                queue = queue.Substring(0, targetStart + 1);
+            }
+
+            Storage = queue;
+            LoadQueue();
+            SaveAfterParentLeaseChange(false);
+            Echo("Broker backup imported. Broker remains paused.");
+        }
+
+        private static string BackupChecksum(string value)
+        {
+            uint hash = 2166136261;
+            foreach (var character in value)
+                hash = unchecked((hash ^ character) * 16777619);
+            return hash.ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private void LoadQueue()
@@ -427,14 +958,44 @@ namespace SpaceEngineers.Services.Broker
             _tasks.Clear();
             _cancelledRequestIds.Clear();
             _completedRequestIds.Clear();
+            _surveyReports.Clear();
+            _sharedDeposits.Clear();
             _commits.Clear();
             _sequence = 0;
+            _paused = false;
+            _retired = false;
+            _handoffTarget = 0;
+            _resumeAfterUtc = -1;
             if (string.IsNullOrWhiteSpace(Storage))
                 return;
 
             foreach (var line in Storage.Split('\n'))
             {
                 var parts = line.Split('|');
+                if (parts.Length == 2 && parts[0] == "PAUSED")
+                {
+                    _paused = parts[1].Trim() == "1";
+                    continue;
+                }
+                if (line.StartsWith(HandoffField, StringComparison.Ordinal))
+                {
+                    long.TryParse(line.Substring(HandoffField.Length), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out _handoffTarget);
+                    continue;
+                }
+                if (parts.Length == 2 && parts[0] == "RETIRED")
+                {
+                    _retired = parts[1].Trim() == "1";
+                    continue;
+                }
+                if (parts.Length == 2 && parts[0] == "RESUME_AFTER_UTC")
+                {
+                    long deadline;
+                    if (long.TryParse(parts[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out deadline) &&
+                        deadline >= 0 && deadline <= DateTime.MaxValue.Ticks)
+                        _resumeAfterUtc = deadline;
+                    continue;
+                }
                 if (parts.Length == 2 && parts[0] == "SEQ")
                 {
                     int.TryParse(parts[1], out _sequence);
@@ -446,9 +1007,16 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts.Length == 2 && parts[0] == "COMPLETE")
+                if (parts.Length == 2 && parts[0] == "DEPOSIT" && _sharedDeposits.Count < MaxSharedDeposits)
                 {
-                    try { AddCompletedRequest(TaskBusIgcHelper.DecodeStorage(parts[1])); }
+                    try { _sharedDeposits.Add(TaskBusIgcHelper.DecodeStorage(parts[1].Trim())); }
+                    catch (FormatException) { }
+                    continue;
+                }
+                if ((parts.Length == 2 || parts.Length == 3) && parts[0] == "COMPLETE")
+                {
+                    try { AddCompletedRequest(TaskBusIgcHelper.DecodeStorage(parts[1]),
+                        parts.Length == 3 ? TaskBusIgcHelper.DecodeStorage(parts[2]) : null); }
                     catch (FormatException) { }
                     continue;
                 }
@@ -464,7 +1032,8 @@ namespace SpaceEngineers.Services.Broker
                     catch (FormatException) { }
                     continue;
                 }
-                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12))
+                if (parts[0] != "TASK" || (parts.Length != 9 && parts.Length != 12 && parts.Length != 13 &&
+                    parts.Length != 14 && parts.Length != 15))
                     continue;
 
                 try
@@ -479,7 +1048,7 @@ namespace SpaceEngineers.Services.Broker
                     string requestJson;
                     string state;
                     string id;
-                    if (parts.Length == 12)
+                    if (parts.Length >= 12)
                     {
                         id = parts[1];
                         requestId = TaskBusIgcHelper.DecodeStorage(parts[2]);
@@ -501,6 +1070,14 @@ namespace SpaceEngineers.Services.Broker
                         requestJson = TaskBusIgcHelper.DecodeStorage(parts[5]);
                         state = parts[6];
                     }
+                    long leaseExpiry = 0;
+                    if (parts.Length >= 14)
+                        long.TryParse(parts[12], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseExpiry);
+                    int completedPhase = 0;
+                    if (parts.Length == 15 &&
+                        (!int.TryParse(parts[14], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out completedPhase) ||
+                            completedPhase < 0 || completedPhase > 3))
+                        completedPhase = 0;
                     _tasks.Add(new TaskRecord
                     {
                         Id = id,
@@ -510,10 +1087,14 @@ namespace SpaceEngineers.Services.Broker
                         WorkerId = workerId,
                         Key = resource,
                         RequestJson = requestJson,
+                        HasParent = ReferencesParent(requestJson),
                         State = state,
                         Attempts = attempts,
                         LastDispatchTick = 0,
-                        LeaseEpoch = leaseEpoch
+                        LeaseEpoch = leaseEpoch,
+                        LeaseExpiresUtc = leaseExpiry,
+                        BaseStockConfirmed = parts.Length >= 13 && parts[Math.Min(13, parts.Length - 1)].Trim() == "1",
+                        CompletedMiningPhase = completedPhase
                     });
                 }
                 catch (FormatException)
@@ -521,36 +1102,61 @@ namespace SpaceEngineers.Services.Broker
                     continue;
                 }
             }
+            _retired |= _handoffTarget != 0;
+            _paused |= _retired;
+            if (_paused && _resumeAfterUtc < 0)
+                _resumeAfterUtc = DateTime.UtcNow.Ticks + LeaseTimeoutUtc;
         }
 
         private void SaveQueue()
         {
             var storage = new StringBuilder();
-            storage.AppendLine("SEQ|" + _sequence.ToString(CultureInfo.InvariantCulture));
+            storage.AppendLine("SEQ|" + _sequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (_paused)
+            {
+                storage.AppendLine("PAUSED|1");
+                storage.AppendLine("RESUME_AFTER_UTC|" + _resumeAfterUtc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            if (_retired)
+                storage.AppendLine("RETIRED|1");
+            foreach (var deposit in _sharedDeposits)
+                storage.AppendLine("DEPOSIT|" + TaskBusIgcHelper.EncodeStorage(deposit));
             foreach (var requestId in _cancelledRequestIds)
                 storage.AppendLine("CANCEL|" + TaskBusIgcHelper.EncodeStorage(requestId));
             foreach (var requestId in _completedRequestIds)
-                storage.AppendLine("COMPLETE|" + TaskBusIgcHelper.EncodeStorage(requestId));
+            {
+                storage.Append("COMPLETE|").Append(TaskBusIgcHelper.EncodeStorage(requestId));
+                string report;
+                if (_surveyReports.TryGetValue(requestId, out report))
+                    storage.Append('|').Append(TaskBusIgcHelper.EncodeStorage(report));
+                storage.AppendLine();
+            }
             foreach (var commit in _commits)
-                storage.AppendLine("COMMIT|" + TaskBusIgcHelper.EncodeStorage(commit.TaskId) + "|" + commit.ConsumerId.ToString(CultureInfo.InvariantCulture) + "|" + commit.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+                storage.AppendLine("COMMIT|" + TaskBusIgcHelper.EncodeStorage(commit.TaskId) + "|" + commit.ConsumerId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + commit.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
             foreach (var task in _tasks)
             {
                 storage.Append("TASK|").Append(task.Id).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.RequestId)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.GroupId)).Append('|')
-                    .Append(task.RequesterId.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.WorkerId.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.RequesterId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.WorkerId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.Key)).Append('|')
                     .Append(TaskBusIgcHelper.EncodeStorage(task.RequestJson)).Append('|')
                     .Append(task.State).Append('|')
-                    .Append(task.Attempts.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .Append(task.LastDispatchTick.ToString(CultureInfo.InvariantCulture)).Append('|')
-                    .AppendLine(task.LeaseEpoch.ToString(CultureInfo.InvariantCulture));
+                    .Append(task.Attempts.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LastDispatchTick.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LeaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.LeaseExpiresUtc.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                    .Append(task.BaseStockConfirmed ? "1" : "0");
+                if (task.CompletedMiningPhase != 0)
+                    storage.Append('|').Append(task.CompletedMiningPhase.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                storage.AppendLine();
             }
+            if (_retired && _handoffTarget != 0)
+                storage.AppendLine(HandoffField + _handoffTarget.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Storage = storage.ToString();
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

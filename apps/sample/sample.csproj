@@ -12,10 +12,21 @@
     <AssemblyName>SampleMain</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="../../libs/igc-core/Autopilot.cs" />
-    <Compile Include="../../libs/igc-core/Logger.cs" />
+    <Compile Include="../../libs/igc-core/**/*.cs" Exclude="../../libs/igc-core/obj/**;../../libs/igc-core/bin/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mal.Mdk2.PbPackager" Version="2.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

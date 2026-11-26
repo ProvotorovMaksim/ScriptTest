@@ -11,7 +11,25 @@
 
   <ItemGroup>
     <Compile Include="../libs/igc-core/TaskBusProtocol.cs" />
+    <Compile Include="../libs/igc-core/TaskBusIgcHelper.cs" />
+    <Compile Include="../libs/taskbus-consumer/TaskBusConsumer.cs" />
+    <Compile Include="../libs/taskbus-consumer/GalnetWorkerBridge.cs" />
+    <Compile Include="../libs/taskbus-producer/TaskBusProducer.cs" />
+    <Compile Include="../services/broker/Program.cs" />
+    <Compile Include="../libs/igc-core/GalnetTopology.cs" />
+    <Compile Include="GalnetTopologyTests.cs" />
+    <Compile Include="../services/galnet/Program.cs" />
+    <Compile Include="GalnetRelayTests.cs" />
+    <Compile Include="BrokerGameApiStub.cs" />
+    <Compile Include="TaskBusDeliveryTests.cs" />
     <Compile Include="TaskBusProtocolTests.cs" />
+    <Compile Include="TaskBusConsumerTests.cs" />
+    <Compile Include="../apps/fcs/DockLease.cs" />
+    <Compile Include="DockLeaseTests.cs" />
+    <Compile Include="../apps/fcs/ThrustSafety.cs" />
+    <Compile Include="ThrustSafetyTests.cs" />
+    <Compile Include="../apps/ship-link/PilotContactSelection.cs" />
+    <Compile Include="PilotContactSelectionTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

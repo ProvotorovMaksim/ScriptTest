@@ -8,6 +8,37 @@ namespace TaskBus.Tests
 {
     public class TaskBusProtocolTests
     {
+        [Theory]
+        [InlineData("GPS:Iron:1234.5:-6789:0:#FF00FF00:")]
+        [InlineData("GPS:Iron:1234.5:-6789:0:\r")]
+        public void OreGpsParsesSurveyCoordinates(string row)
+        {
+            Assert.True(TaskBusIgcHelper.TryReadOreGps(row, out var ore, out var x, out var y, out var z));
+            Assert.Equal("Iron", ore);
+            Assert.Equal(1234.5, x);
+            Assert.Equal(-6789, y);
+            Assert.Equal(0, z);
+        }
+
+        [Theory]
+        [InlineData("GPS:Iron:NaN:0:2:")]
+        [InlineData("GPS::1:0:2:")]
+        [InlineData("GPS:Iron:1:0:2")]
+        public void OreGpsRejectsMalformedRows(string row)
+        {
+            Assert.False(TaskBusIgcHelper.TryReadOreGps(row, out _, out _, out _, out _));
+        }
+
+        [Fact]
+        public void NearestOreUsesResourceAndRadiusWithDeterministicTies()
+        {
+            var reports = new[] { "GPS:Iron:13:0:0:", "GPS:Nickel:10:0:0:",
+                "GPS:Iron:7:0:0:", "GPS:Iron:10:0:5:", "invalid" };
+            Assert.Equal("GPS:Iron:13:0:0:",
+                TaskBusIgcHelper.FindNearestOre(reports, "iron", 10, 0, 0, 3));
+            Assert.Null(TaskBusIgcHelper.FindNearestOre(reports, "Iron", 10, 0, 0, 2));
+        }
+
         [Fact]
         public void CreateEnvelope_Basic_ReturnsValidJson()
         {

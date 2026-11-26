@@ -1,17 +1,17 @@
-﻿#region Prelude
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
 using System.Linq;
 using VRageMath;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Apps.Sample
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
         private int _tickCount = 0;
         private Autopilot _autopilot;
@@ -75,7 +75,6 @@ namespace SpaceEngineers.Apps.Sample
             Echo($"Sent: {payload}");
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

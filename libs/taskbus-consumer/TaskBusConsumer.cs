@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text;
-using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.TaskBusConsumer
 {
+    using SpaceEngineers.Libs.IgcCore;
+
     /// <summary>
     /// Callback for sending a pre-built JSON IGC envelope from the consumer.
     /// </summary>
@@ -32,8 +31,8 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
     public sealed class TaskBusConsumer
     {
         private const int DefaultPollIntervalTicks = 30;
+        private const int LeaseConfirmationTimeoutTicks = 120;
 
-        private readonly string _communicationTag;
         private readonly int _pollIntervalTicks;
         private readonly ConsumerSendDelegate _send;
         private readonly ConsumerGetStorageDelegate _getStorage;
@@ -42,48 +41,90 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         private readonly long _entityId;
         private readonly string _gridName;
 
-        private IMyBroadcastListener _listener;
+        private long _brokerId;
+        private bool _autoPoint;
+        private string _completedChildRequest;
+        private int _surveyAttempt;
+        private string _childSurveyReport;
+        private string _pendingSurveyReport;
+        private string _childState;
+        private string _oreSite;
+        private string _oreApproach;
+        private const int MaxKnownSites = 32;
+        private readonly List<KnownSite> _knownSites = new List<KnownSite>();
 
+        private sealed class KnownSite
+        {
+            public string Resource;
+            public string Ore;
+            public string Approach;
+        }
+        private bool _baseStockConfirmed;
+        private readonly bool _miningPlatform;
         private string _consumerGroup = "default";
         private string _activeTaskId;
         private string _activeTaskJson;
         private readonly List<string> _stages = new List<string>();
         private int _stageIndex;
         private string _lastRevokedTaskId;
+        private int _lastRevokedEpoch = -1;
         private string _pendingCompletedTaskId;
         private int _leaseEpoch;
         private int _pendingCompletedEpoch;
         private int _tick;
+        private int? _lastLeaseConfirmationTick;
+        private long _leaseExpiresUtc;
+        private long _leaseConfirmationSource;
 
+
+        private readonly Func<string> _getGridPositionJson;
+        private readonly double _knownSiteRadiusSquared;
+        private readonly bool _autoAcceptSurvey;
+        private readonly Func<string, double?> _readHaulerCargo;
+        private double? _pickupCargo;
+        private double _haulerDelivered;
+        private readonly long _gridId;
+        private readonly Func<long> _readDockedGrid;
+        private readonly bool _autoHauler;
+        private readonly Func<long, string, double, double> _unloadHaulerCargo;
+        private readonly Action<long, string, double> _loadHaulerCargo;
+        private readonly Func<string, double?> _readMiningBuffer;
 
         public TaskBusConsumer(
-            string communicationTag,
             ConsumerSendDelegate send,
             ConsumerGetStorageDelegate getStorage,
             ConsumerSetStorageDelegate setStorage,
             ConsumerEchoDelegate echo,
             long entityId,
             string gridName,
-            int pollIntervalTicks = DefaultPollIntervalTicks)
+            int pollIntervalTicks = DefaultPollIntervalTicks, bool miningPlatform = false, Func<string> getGridPositionJson = null,
+            Func<string, double?> readHaulerCargo = null, long gridId = 0, Func<long> readDockedGrid = null, bool autoHauler = false,
+            Func<long, string, double, double> unloadHaulerCargo = null, Action<long, string, double> loadHaulerCargo = null,
+            Func<string, double?> readMiningBuffer = null, double? knownSiteRadius = null, bool autoAcceptSurvey = false)
         {
-            _communicationTag = communicationTag ?? throw new ArgumentNullException(nameof(communicationTag));
-            _send = send ?? throw new ArgumentNullException(nameof(send));
-            _getStorage = getStorage ?? throw new ArgumentNullException(nameof(getStorage));
-            _setStorage = setStorage ?? throw new ArgumentNullException(nameof(setStorage));
-            _echo = echo ?? throw new ArgumentNullException(nameof(echo));
+            if (send == null) throw new ArgumentNullException(nameof(send));
+            _send = send;
+            if (getStorage == null) throw new ArgumentNullException(nameof(getStorage));
+            _getStorage = getStorage;
+            if (setStorage == null) throw new ArgumentNullException(nameof(setStorage));
+            _setStorage = setStorage;
+            if (echo == null) throw new ArgumentNullException(nameof(echo));
+            _echo = echo;
             _entityId = entityId;
             _gridName = gridName ?? string.Empty;
             _pollIntervalTicks = pollIntervalTicks > 0 ? pollIntervalTicks : DefaultPollIntervalTicks;
-        }
-
-        /// <summary>
-        /// Initializes the consumer: registers the IGC listener, creates the producer
-        /// and loads durable state from Storage. Call once from the PB Program constructor.
-        /// </summary>
-        /// <param name="registerListener">Callback that registers an IGC broadcast listener.</param>
-        public void Initialize(Func<string, IMyBroadcastListener> registerListener)
-        {
-            _listener = registerListener(_communicationTag);
+            _miningPlatform = miningPlatform;
+            _getGridPositionJson = getGridPositionJson;
+            _autoAcceptSurvey = autoAcceptSurvey;
+            _knownSiteRadiusSquared = knownSiteRadius.HasValue
+                ? knownSiteRadius.Value * knownSiteRadius.Value : double.PositiveInfinity;
+            _readHaulerCargo = readHaulerCargo;
+            _gridId = gridId;
+            _readDockedGrid = readDockedGrid;
+            _unloadHaulerCargo = unloadHaulerCargo;
+            _loadHaulerCargo = loadHaulerCargo;
+            _readMiningBuffer = readMiningBuffer;
+            _autoHauler = autoHauler && _readDockedGrid != null && _readHaulerCargo != null;
             LoadState();
         }
 
@@ -92,7 +133,7 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// </summary>
         public bool ProcessIncomingMessage(long sourceId, string json)
         {
-            if (string.IsNullOrEmpty(json))
+            if ((_brokerId != 0 && sourceId != _brokerId) || string.IsNullOrEmpty(json))
                 return false;
 
             string eventType;
@@ -103,14 +144,16 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             long targetId;
             string targetJson;
             if (TaskBusIgcHelper.TryGetJsonProperty(json, "target_id", out targetJson) &&
-                long.TryParse(targetJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetId) &&
+                long.TryParse(targetJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out targetId) &&
                 targetId != 0 && targetId != _entityId)
                 return false;
 
             switch (eventType)
             {
+                case "TASK_PUBLISHED_ACK":
+                    return HandleChildAcknowledgement(payloadJson);
                 case "TASK_ASSIGN":
-                    ReceiveTask(payloadJson);
+                    ReceiveTask(sourceId, payloadJson);
                     return true;
                 case "QUEUE_EMPTY":
                     HandleEmptyQueue();
@@ -138,9 +181,77 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 ShowStatus();
                 return;
             }
+            if (cmd == "point auto" || cmd == "point manual")
+            {
+                if (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId))
+                    _echo("Change point mode only while idle.");
+                else
+                {
+                    _autoPoint = cmd == "point auto";
+                    SaveState();
+                }
+                return;
+            }
+            if (cmd.StartsWith("broker ", StringComparison.OrdinalIgnoreCase))
+            {
+                const string restoredCommand = "broker restored ";
+                bool restored = cmd.StartsWith(restoredCommand, StringComparison.OrdinalIgnoreCase);
+                long brokerId;
+                if (!long.TryParse(cmd.Substring(restored ? restoredCommand.Length : 7).Trim(), out brokerId) ||
+                    brokerId < 0 || (restored && brokerId == 0))
+                    _echo("Usage: broker <block ID>, broker 0, or broker restored <block ID>.");
+                else if (!restored && (HasActiveTask || !string.IsNullOrEmpty(_pendingCompletedTaskId)))
+                    _echo("Resolve current work first, or use broker restored for a restored queue.");
+                else if (_brokerId != brokerId)
+                {
+                    _brokerId = brokerId;
+                    _lastLeaseConfirmationTick = null;
+                    if (!restored)
+                    {
+                        _lastRevokedTaskId = null;
+                        _lastRevokedEpoch = -1;
+                    }
+                    SaveState();
+                    if (restored)
+                        PollBroker();
+                }
+                return;
+            }
             if (cmd.StartsWith("group ", StringComparison.OrdinalIgnoreCase))
             {
                 SetConsumerGroup(cmd.Substring(6).Trim());
+                return;
+            }
+            if (string.Equals(cmd, "survey retry", StringComparison.OrdinalIgnoreCase))
+            {
+                RetrySurvey();
+                return;
+            }
+            if (string.Equals(cmd, "site report", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cmd, "approach report", StringComparison.OrdinalIgnoreCase))
+            {
+                SetWaypointFromSurveyReport(cmd.StartsWith("approach", StringComparison.OrdinalIgnoreCase));
+                return;
+            }
+            if (cmd == "site remember")
+            {
+                RememberSurveySite();
+                return;
+            }
+            if (cmd.StartsWith("site add ", StringComparison.OrdinalIgnoreCase))
+            {
+                AddKnownSite(cmd.Substring(9));
+                return;
+            }
+            if (cmd.StartsWith("site forget ", StringComparison.OrdinalIgnoreCase))
+            {
+                ForgetKnownSite(cmd.Substring(12).Trim());
+                return;
+            }
+            if (cmd.StartsWith("site ", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("approach ", StringComparison.OrdinalIgnoreCase))
+            {
+                SetSurveyWaypoint(cmd);
                 return;
             }
             if (cmd.StartsWith("stage ", StringComparison.OrdinalIgnoreCase))
@@ -153,11 +264,37 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// <summary>
         /// Called every tick. Increments the internal tick and polls the broker when due.
         /// </summary>
-        public void Tick()
+        public void Tick(bool canPoll = true)
         {
             _tick++;
+            if (!canPoll)
+            {
+                _lastLeaseConfirmationTick = null;
+                return;
+            }
             if (_tick % _pollIntervalTicks == 0 || !string.IsNullOrEmpty(_pendingCompletedTaskId))
                 PollBroker();
+            if (_tick % _pollIntervalTicks == 0 && IsAutomaticPoint && HasRecentLeaseConfirmation)
+            {
+                if (_autoAcceptSurvey && CurrentStage() == "survey" && _completedChildRequest == CurrentChildRequestId() &&
+                    TryAcceptSurveyCoordinates())
+                    AdvanceStage("survey", automatic: true);
+                else if (CurrentStage() == "transport" && _completedChildRequest == CurrentChildRequestId() &&
+                    _baseStockConfirmed && AssignmentRequires("receipt_required"))
+                    AdvanceStage("transport");
+                else if (CurrentStage() == "mine" && _readMiningBuffer != null &&
+                    _completedChildRequest == CurrentChildRequestId())
+                    AdvanceStage("mine", automatic: true);
+                else
+                    PublishCurrentChild();
+            }
+            if (_autoHauler && _consumerGroup == "Haulers" && HasActiveTask &&
+                HasRecentLeaseConfirmation && _tick % _pollIntervalTicks == 0)
+            {
+                var stage = CurrentStage();
+                if (stage == "pickup" || (stage == "deliver" && _pickupCargo.HasValue))
+                    AdvanceStage(stage, automatic: true);
+            }
         }
 
         /// <summary>
@@ -167,14 +304,34 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             var sb = new StringBuilder();
             sb.AppendLine("Consumer: " + _gridName);
-            sb.AppendLine("Group: " + _consumerGroup);
+            sb.AppendLine("Group: " + (_miningPlatform ? "MiningFleet + Scouts" : _consumerGroup));
+            sb.AppendLine("Broker: " + (_brokerId == 0 ? "broadcast" : _brokerId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             sb.AppendLine("Active task: " + (_activeTaskId ?? "none"));
             sb.AppendLine("Stage: " + (string.IsNullOrEmpty(_activeTaskId) ? "idle" : CurrentStage()));
+            if (IsAutomaticPoint)
+            {
+                sb.AppendLine("Child request: " + CurrentChildRequestId());
+                sb.AppendLine("Child status: " + (_completedChildRequest == CurrentChildRequestId() ?
+                    "DONE" : (_childState ?? "awaiting broker")));
+                if (CurrentStage() == "survey" && _childSurveyReport != null)
+                    sb.AppendLine("Survey report: " + _childSurveyReport);
+                if (CurrentStage() == "transport" && AssignmentRequires("receipt_required"))
+                    sb.AppendLine(_baseStockConfirmed ? "Base stock confirmed" : "Waiting for base stock confirmation");
+                if (_completedChildRequest == CurrentChildRequestId())
+                    sb.AppendLine(CurrentStage() == "transport" && AssignmentRequires("receipt_required")
+                        ? "Hauler task complete."
+                        : CurrentStage() == "mine" && _readMiningBuffer != null
+                            ? "Mining child complete. Checking buffer before dispatch."
+                            : "Child task complete. Confirm stage.");
+            }
             sb.AppendLine("Pending completion: " + (_pendingCompletedTaskId ?? "none"));
             sb.AppendLine("Last revoked: " + (_lastRevokedTaskId ?? "none"));
             sb.AppendLine("Lease epoch: " + _leaseEpoch);
             if (!string.IsNullOrEmpty(_activeTaskId))
+            {
+                sb.AppendLine(HasRecentLeaseConfirmation ? "Lease confirmed" : "Waiting for lease confirmation");
                 sb.AppendLine(GetActiveTaskSummary());
+            }
             return sb.ToString().TrimEnd();
         }
 
@@ -183,19 +340,136 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         /// </summary>
         public bool HasActiveTask => !string.IsNullOrEmpty(_activeTaskId);
 
+        public bool TryGetSurveyLease(out string lease, out string ore)
+        {
+            lease = null;
+            ore = null;
+            if (!_miningPlatform || !HasActiveTask || CurrentStage() != "survey" || !HasRecentLeaseConfirmation)
+                return false;
+
+            var resource = GetRequestedResource();
+            if (string.IsNullOrEmpty(resource) || !resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(resource.Substring(4)) || resource.Length > 68)
+                return false;
+
+            ore = resource.Substring(4);
+            lease = _leaseConfirmationSource.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" +
+                _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + _activeTaskId;
+            return true;
+        }
+
+        public bool TryGetSurveyCandidate(out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            string lease;
+            string ore;
+            string details;
+            string raw;
+            string gps;
+            string name;
+            return TryGetSurveyLease(out lease, out ore) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out gps) &&
+                TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) &&
+                string.Equals(name, ore, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public bool TryGetMiningPoint(out long grid)
+        {
+            grid = 0;
+            string details;
+            string value;
+            return _miningPlatform && HasActiveTask && CurrentStage() == "mine" && HasRecentLeaseConfirmation &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "mining_point_grid_id", out value) &&
+                long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out grid) && grid != 0;
+        }
+
+        public bool TryGetMiningCargoTarget(out string resource, out double amount)
+        {
+            resource = null;
+            amount = 0;
+            if (!_miningPlatform || !HasActiveTask || CurrentStage() != "mine" || !HasRecentLeaseConfirmation)
+                return false;
+
+            string details;
+            resource = GetRequestedResource();
+            return !string.IsNullOrEmpty(resource) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) && amount > 0;
+        }
+
+        public bool TryGetMiningApproach(out string taskId, out double x, out double y, out double z)
+        {
+            taskId = null;
+            x = y = z = 0;
+            if ((!_miningPlatform && _consumerGroup != "MiningFleet") || !HasActiveTask || CurrentStage() != "mine" ||
+                !HasRecentLeaseConfirmation)
+                return false;
+
+            if (!TryReadMiningPosition("approach_position", out x, out y, out z))
+                return false;
+            taskId = _activeTaskId;
+            return true;
+        }
+
+        public bool TryGetMiningOrePosition(out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return _miningPlatform && HasActiveTask && CurrentStage() == "mine" && HasRecentLeaseConfirmation &&
+                TryReadMiningPosition("ore_position", out x, out y, out z);
+        }
+
+        private bool TryReadMiningPosition(string field, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            string details;
+            string position;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out position) &&
+                TryReadPosition(position, out x, out y, out z);
+        }
+
+        private static bool TryReadPosition(string position, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            return TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z);
+        }
+
+        private bool HasRecentLeaseConfirmation => _lastLeaseConfirmationTick.HasValue &&
+            _tick - _lastLeaseConfirmationTick.Value < LeaseConfirmationTimeoutTicks &&
+            (_leaseExpiresUtc == 0 || DateTime.UtcNow.Ticks < _leaseExpiresUtc);
+
         private void PollBroker()
         {
-            var payload = "{\"group_id\":" + TaskBusIgcHelper.ToJsonString(_consumerGroup) +
+            var pointPosition = IsConfiguredAutomaticPoint && _getGridPositionJson != null
+                ? _getGridPositionJson() : null;
+            var payload = "{\"group_id\":" + TaskBusIgcHelper.ToJsonString(_miningPlatform ? "MiningFleet" : _consumerGroup) +
+                (pointPosition == null ? "" : ",\"point_position\":" + pointPosition) +
+                (_miningPlatform ? ",\"survey_capable\":true" : "") +
                 ",\"consumer_grid\":" + TaskBusIgcHelper.ToJsonString(_gridName) +
                 ",\"active_task_id\":" + (string.IsNullOrEmpty(_activeTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_activeTaskId)) +
-                ",\"active_lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) +
+                ",\"active_lease_epoch\":" + _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 ",\"completed_task_id\":" + (string.IsNullOrEmpty(_pendingCompletedTaskId) ? "null" : TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId)) +
-                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) + "}";
+                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + SurveyReportField() + "}";
             SendMessage("TASK_POLL", payload);
         }
 
-        private void ReceiveTask(string taskJson)
+        private void ReceiveTask(long sourceId, string taskJson)
         {
+            if (_miningPlatform)
+            {
+                string groupJson;
+                string groupId;
+                if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "group_id", out groupJson) ||
+                    !TaskBusIgcHelper.TryReadJsonString(groupJson, out groupId) ||
+                    (groupId != "MiningFleet" && groupId != "Scouts"))
+                    return;
+            }
+
             string taskIdJson;
             string taskId;
             if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "task_id", out taskIdJson) ||
@@ -205,20 +479,34 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             string epochJson;
             int leaseEpoch;
             if (!TaskBusIgcHelper.TryGetJsonProperty(taskJson, "lease_epoch", out epochJson) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                !int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseEpoch))
+                return;
+
+            string deadline;
+            long expires = 0;
+            if (TaskBusIgcHelper.TryGetJsonProperty(taskJson, "lease_expires_utc_ticks", out deadline) &&
+                (!long.TryParse(deadline, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out expires) ||
+                    expires <= DateTime.UtcNow.Ticks || expires > DateTime.MaxValue.Ticks))
+                return;
+            if (taskId == _activeTaskId && leaseEpoch == _leaseEpoch && sourceId == _leaseConfirmationSource &&
+                _leaseExpiresUtc != 0 && expires <= _leaseExpiresUtc)
+                return;
+
+            if (taskId == _lastRevokedTaskId && leaseEpoch <= _lastRevokedEpoch)
                 return;
 
             if (!string.IsNullOrEmpty(_pendingCompletedTaskId))
             {
                 if (_pendingCompletedTaskId == taskId && _pendingCompletedEpoch == leaseEpoch)
                 {
-                    SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
-                        ",\"lease_epoch\":" + leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
-                    return;
+                    SendPendingCompletion();
                 }
+                return;
             }
 
-            if (_activeTaskId != taskId)
+            bool newTask = _activeTaskId != taskId;
+            bool changedLease = newTask || leaseEpoch > _leaseEpoch;
+            if (newTask)
             {
                 if (!string.IsNullOrEmpty(_activeTaskId))
                 {
@@ -227,32 +515,438 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 }
 
                 _activeTaskId = taskId;
+                _completedChildRequest = null;
+                _surveyAttempt = 0;
+                _childSurveyReport = null;
+                _childState = null;
+                _pickupCargo = null;
+                _haulerDelivered = 0;
+                _oreSite = null;
+                _oreApproach = null;
                 _activeTaskJson = taskJson;
                 LoadWorkflowStages(taskJson);
                 _stageIndex = 0;
                 _leaseEpoch = leaseEpoch;
-                _lastRevokedTaskId = null;
-                SaveState();
-                _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
+                ReuseKnownSite();
             }
             else if (leaseEpoch > _leaseEpoch)
             {
                 _leaseEpoch = leaseEpoch;
+                _completedChildRequest = null;
+                _surveyAttempt = 0;
+                _childSurveyReport = null;
+                _childState = null;
                 _activeTaskJson = taskJson;
-                SaveState();
             }
             else if (leaseEpoch < _leaseEpoch)
                 return;
 
+            string confirmation;
+            _baseStockConfirmed = TaskBusIgcHelper.TryGetJsonProperty(taskJson, "base_stock_confirmed", out confirmation) &&
+                confirmation == "true";
+            _leaseExpiresUtc = expires;
+            _leaseConfirmationSource = sourceId;
+            _lastLeaseConfirmationTick = _tick;
+            if (changedLease || expires != 0)
+                SaveState();
+            if (newTask)
+                _echo("Durably received " + taskId + ". Run stage: " + CurrentStage());
             SendMessage("TASK_RECEIVED", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(taskId) +
-                ",\"lease_epoch\":" + _leaseEpoch.ToString(CultureInfo.InvariantCulture) + "}");
+                ",\"lease_epoch\":" + _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
         }
 
-        private void AdvanceStage(string completedStage)
+        private bool IsAutomaticPoint => IsConfiguredAutomaticPoint && HasActiveTask;
+
+        private bool IsConfiguredAutomaticPoint => !_miningPlatform && _autoPoint && _consumerGroup == "MiningPoints";
+
+        private string CurrentChildRequestId() => _activeTaskId + ":" +
+            _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + _stageIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+            (CurrentStage() == "survey" && _surveyAttempt > 0 ?
+                ":retry:" + _surveyAttempt.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
+
+        private void RetrySurvey()
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId() || _surveyAttempt == int.MaxValue)
+            {
+                _echo("A completed survey under the current lease is required to retry.");
+                return;
+            }
+
+            _surveyAttempt++;
+            _completedChildRequest = null;
+            _childSurveyReport = null;
+            _childState = null;
+            _oreSite = null;
+            _oreApproach = null;
+            SaveState();
+            PublishCurrentChild();
+            _echo("Survey retry requested.");
+        }
+
+        private string GetRequestedResource()
+        {
+            string details;
+            string raw;
+            string resource;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out raw) &&
+                TaskBusIgcHelper.TryReadJsonString(raw, out resource) ? resource : null;
+        }
+
+        private void RememberSurveySite()
+        {
+            var resource = GetRequestedResource();
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId() || _oreSite == null || _oreApproach == null ||
+                string.IsNullOrEmpty(resource) || !resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase))
+            {
+                _echo("A completed survey and two selected waypoints are required.");
+                return;
+            }
+            SaveKnownSite(resource, _oreSite, _oreApproach);
+        }
+
+        private void AddKnownSite(string argument)
+        {
+            var fields = argument.Split('|');
+            string oreName;
+            string ignored;
+            string site;
+            string approach;
+            if (!IsConfiguredAutomaticPoint || fields.Length != 2 ||
+                !TryReadSurveyWaypoint(fields[0], out oreName, out site) ||
+                !TryReadSurveyWaypoint(fields[1], out ignored, out approach) || site == approach)
+            {
+                _echo("On an automatic mining point, use site add GPS:Ore:X:Y:Z: | GPS:Entry:X:Y:Z: with distinct waypoints.");
+                return;
+            }
+            SaveKnownSite("Ore/" + oreName, site, approach);
+        }
+
+        private void SaveKnownSite(string resource, string site, string approach)
+        {
+            if (!AddOrUpdateKnownSite(resource, site, approach))
+            {
+                _echo("Known-site catalog is full.");
+                return;
+            }
+            SaveState();
+            _echo("Remembered site for " + resource + ".");
+        }
+
+        private bool AddOrUpdateKnownSite(string resource, string site, string approach)
+        {
+            foreach (var known in _knownSites)
+            {
+                if (string.Equals(resource, known.Resource, StringComparison.OrdinalIgnoreCase) && site == known.Ore)
+                {
+                    known.Approach = approach;
+                    return true;
+                }
+            }
+            if (_knownSites.Count >= MaxKnownSites)
+                return false;
+            _knownSites.Add(new KnownSite { Resource = resource, Ore = site, Approach = approach });
+            return true;
+        }
+
+        private void ForgetKnownSite(string argument)
+        {
+            string ore = null;
+            var resource = argument;
+            if (argument.StartsWith("GPS:", StringComparison.Ordinal))
+            {
+                string name;
+                if (!TryReadSurveyWaypoint(argument, out name, out ore))
+                {
+                    _echo("Use site forget Ore/Iron or site forget GPS:Iron:X:Y:Z:.");
+                    return;
+                }
+                resource = "Ore/" + name;
+            }
+            if (_knownSites.RemoveAll(site => string.Equals(site.Resource, resource, StringComparison.OrdinalIgnoreCase) &&
+                (ore == null || site.Ore == ore)) != 0)
+                SaveState();
+        }
+
+        private void ReuseKnownSite()
+        {
+            if (!IsAutomaticPoint || _stages.Count < 2 || _stages[0] != "survey" || _stages[1] != "mine")
+                return;
+            var resource = GetRequestedResource();
+            if (resource == null)
+                return;
+
+            double pointX;
+            double pointY;
+            double pointZ;
+            var position = _getGridPositionJson == null ? null : _getGridPositionJson();
+            bool hasPosition = TryReadPosition(position, out pointX, out pointY, out pointZ);
+            if (!hasPosition && !double.IsPositiveInfinity(_knownSiteRadiusSquared))
+                return;
+            KnownSite selected = null;
+            double bestDistance = double.PositiveInfinity;
+            foreach (var site in _knownSites)
+            {
+                if (!string.Equals(resource, site.Resource, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                double x;
+                double y;
+                double z;
+                if (!TryReadPosition(site.Approach, out x, out y, out z))
+                    continue;
+                double dx = pointX - x;
+                double dy = pointY - y;
+                double dz = pointZ - z;
+                double distance = hasPosition ? dx * dx + dy * dy + dz * dz : 0;
+                if (distance > _knownSiteRadiusSquared || (selected != null && distance >= bestDistance))
+                    continue;
+                selected = site;
+                bestDistance = distance;
+            }
+            if (selected == null)
+                return;
+            _oreSite = selected.Ore;
+            _oreApproach = selected.Approach;
+            _stageIndex = 1;
+            _echo("Using known site for " + resource + ".");
+        }
+
+        private bool TryAcceptSurveyCoordinates()
+        {
+            if (_oreSite != null || _oreApproach != null)
+                return false;
+
+            string siteGps;
+            string entryGps;
+            GetSurveyReportCoordinates(out siteGps, out entryGps);
+            string name;
+            string entryName;
+            string site;
+            string entry;
+            if (!TryReadSurveyWaypoint(siteGps, out name, out site) ||
+                !TryReadSurveyWaypoint(entryGps, out entryName, out entry) ||
+                !string.Equals(entryName, "Observation", StringComparison.Ordinal) ||
+                site == entry || !string.Equals("Ore/" + name, GetRequestedResource(), StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            _oreSite = site;
+            _oreApproach = entry;
+            _echo("Accepted ore and observation coordinates from the completed survey.");
+            return true;
+        }
+
+        private void GetSurveyReportCoordinates(out string site, out string entry)
+        {
+            var report = _childSurveyReport ?? "";
+            int separator = report.IndexOf(" | GPS:Observation:", StringComparison.Ordinal);
+            entry = separator < 0 ? null : report.Substring(separator + 3);
+            var oreReport = separator < 0 ? report : report.Substring(0, separator);
+            int marker = oreReport.LastIndexOf(" GPS:", StringComparison.Ordinal);
+            site = marker < 0 ? null : oreReport.Substring(marker + 1);
+        }
+
+        private void SetWaypointFromSurveyReport(bool approach)
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation ||
+                _completedChildRequest != CurrentChildRequestId())
+            {
+                _echo("A completed survey under the current lease is required.");
+                return;
+            }
+
+            string site;
+            string entry;
+            GetSurveyReportCoordinates(out site, out entry);
+            var waypoint = approach ? entry : site;
+            if (waypoint == null)
+                _echo(approach ? "The survey report has no observation position." : "The survey report has no ore GPS.");
+            else
+                SetSurveyWaypoint((approach ? "approach " : "site ") + waypoint);
+        }
+
+        private static bool TryReadSurveyWaypoint(string gps, out string name, out string position)
+        {
+            position = null;
+            double x;
+            double y;
+            double z;
+            if (!TaskBusIgcHelper.TryReadOreGps(gps, out name, out x, out y, out z) || name.Length > 64)
+                return false;
+
+            position = "{\"x\":" + x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"y\":" + y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"z\":" + z.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}";
+            return true;
+        }
+
+        private void SetSurveyWaypoint(string command)
+        {
+            if (!IsAutomaticPoint || CurrentStage() != "survey" || !HasRecentLeaseConfirmation)
+            {
+                _echo("Set a waypoint during the confirmed survey stage.");
+                return;
+            }
+
+            int separator = command.IndexOf(' ');
+            var gps = command.Substring(separator + 1).Trim();
+            string name;
+            string position;
+            if (!TryReadSurveyWaypoint(gps, out name, out position))
+            {
+                _echo("Use site GPS:Ore:X:Y:Z: or approach GPS:Name:X:Y:Z:.");
+                return;
+            }
+
+            bool isSite = separator == 4;
+            if (isSite)
+            {
+                string details;
+                string raw;
+                string resource;
+                if (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                    TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out raw) &&
+                    TaskBusIgcHelper.TryReadJsonString(raw, out resource) &&
+                    resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(name, resource.Substring(4), StringComparison.OrdinalIgnoreCase))
+                {
+                    _echo("The selected deposit does not match the requested ore.");
+                    return;
+                }
+            }
+            if (position == (isSite ? _oreApproach : _oreSite))
+            {
+                _echo("Choose distinct ore and approach positions.");
+                return;
+            }
+            if (isSite)
+                _oreSite = position;
+            else
+                _oreApproach = position;
+            SaveState();
+        }
+
+        private void PublishCurrentChild()
+        {
+            string group;
+            string childStage;
+            switch (CurrentStage())
+            {
+                case "survey": group = "Scouts"; childStage = "survey"; break;
+                case "mine": group = "MiningFleet"; childStage = "mine"; break;
+                case "transport": group = "Haulers"; childStage = "deliver"; break;
+                default: return;
+            }
+
+            var requestId = CurrentChildRequestId();
+            if (_completedChildRequest == requestId)
+                return;
+
+            string details;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details))
+                return;
+
+            var payload = new StringBuilder("{\"request_id\":");
+            payload.Append(TaskBusIgcHelper.ToJsonString(requestId))
+                .Append(",\"group_id\":").Append(TaskBusIgcHelper.ToJsonString(group))
+                .Append(",\"parent_task_id\":").Append(TaskBusIgcHelper.ToJsonString(_activeTaskId))
+                .Append(",\"parent_lease_epoch\":").Append(_leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append(",\"steps\":[");
+            if (group == "Haulers")
+                payload.Append("\"pickup\",");
+            payload.Append(TaskBusIgcHelper.ToJsonString(childStage)).Append(']');
+            foreach (var field in new[] { "key", "resource", "amount", "base_grid_id", "base_grid_name", "base_position" })
+            {
+                string value;
+                if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out value))
+                    payload.Append(',').Append(TaskBusIgcHelper.ToJsonString(field)).Append(':').Append(value);
+            }
+            string candidate;
+            if (childStage == "survey" &&
+                (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "shared_ore_gps", out candidate) ||
+                    TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidate)))
+                payload.Append(",\"ore_candidate_gps\":").Append(candidate);
+            if (CurrentStage() == "mine" && _oreSite != null && _oreApproach != null)
+                payload.Append(",\"ore_position\":").Append(_oreSite)
+                    .Append(",\"approach_position\":").Append(_oreApproach);
+            if (childStage == "deliver" && _getGridPositionJson != null)
+                payload.Append(",\"pickup_position\":").Append(_getGridPositionJson())
+                    .Append(",\"pickup_name\":").Append(TaskBusIgcHelper.ToJsonString(_gridName));
+            if (childStage == "mine" && _gridId != 0)
+                payload.Append(",\"mining_point_grid_id\":").Append(_gridId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (childStage == "deliver" && _gridId != 0)
+                payload.Append(",\"pickup_grid_id\":").Append(_gridId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SendMessage("TASK_PUBLISH", payload.Append('}').ToString());
+        }
+
+        private bool HandleChildAcknowledgement(string payload)
+        {
+            string value;
+            string request;
+            string state;
+            if (!IsAutomaticPoint ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "request_id", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out request) || request != CurrentChildRequestId() ||
+                !TaskBusIgcHelper.TryGetJsonProperty(payload, "state", out value) ||
+                !TaskBusIgcHelper.TryReadJsonString(value, out state))
+                return false;
+
+            if (state != "DONE")
+            {
+                if (_completedChildRequest != request)
+                    _childState = state;
+                return true;
+            }
+
+            bool changed = _completedChildRequest != request;
+            _childState = state;
+            _completedChildRequest = request;
+            string report;
+            if (CurrentStage() == "survey" && TaskBusIgcHelper.TryGetJsonProperty(payload, "survey_report", out value) &&
+                TaskBusIgcHelper.TryReadJsonString(value, out report) && report.Length <= 320 && report != _childSurveyReport)
+            {
+                _childSurveyReport = report;
+                changed = true;
+            }
+            if (changed)
+                SaveState();
+            return true;
+        }
+
+        public void CompleteSurvey(string report)
+        {
+            string lease;
+            string ore;
+            if (TryGetSurveyLease(out lease, out ore) && !string.IsNullOrWhiteSpace(report) && report.Length <= 320)
+                AdvanceStage("survey", report);
+        }
+
+        private string SurveyReportField()
+        {
+            return _pendingSurveyReport == null ? "" :
+                ",\"survey_report\":" + TaskBusIgcHelper.ToJsonString(_pendingSurveyReport);
+        }
+
+        private void SendPendingCompletion()
+        {
+            SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId) +
+                ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                SurveyReportField() + "}");
+        }
+
+        private void AdvanceStage(string completedStage, string surveyReport = null, bool automatic = false)
         {
             if (string.IsNullOrEmpty(_activeTaskId))
             {
                 _echo("No active task. Waiting for broker poll.");
+                return;
+            }
+
+            if (!HasRecentLeaseConfirmation)
+            {
+                _echo("Waiting for lease confirmation from the broker. Stage was not advanced.");
                 return;
             }
 
@@ -263,18 +957,65 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 return;
             }
 
+            if (_consumerGroup == "Haulers" && _readDockedGrid != null &&
+                (expected == "pickup" || expected == "deliver") && !CheckHaulerDock(expected == "pickup", automatic))
+                return;
+
+            if (_consumerGroup == "Haulers" &&
+                ((expected == "pickup" && _readHaulerCargo != null) || (expected == "deliver" && _pickupCargo.HasValue)) &&
+                !CheckHaulerCargo(expected == "pickup", automatic))
+                return;
+
+            if (IsAutomaticPoint && _completedChildRequest != CurrentChildRequestId())
+            {
+                _echo("Waiting for the broker to confirm the child task is complete.");
+                return;
+            }
+
+            if (IsAutomaticPoint && expected == "mine" && _readMiningBuffer != null && !MiningBufferReady())
+            {
+                if (!automatic)
+                    _echo("Waiting for the requested quantity in the configured mining buffer.");
+                return;
+            }
+
+            if (IsAutomaticPoint && expected == "transport" && AssignmentRequires("receipt_required") && !_baseStockConfirmed)
+            {
+                _echo("Waiting for stock confirmation from the requesting base.");
+                return;
+            }
+
+            if (IsAutomaticPoint && expected == "survey" && AssignmentRequires("site_required") &&
+                (_oreSite == null || _oreApproach == null))
+            {
+                _echo("Save both the ore site and an approach point before confirming survey.");
+                return;
+            }
+
+            if (IsAutomaticPoint && expected == "mine" && _readMiningBuffer != null &&
+                _oreSite != null && _oreApproach != null)
+            {
+                var resource = GetRequestedResource();
+                if (resource != null && resource.StartsWith("Ore/", StringComparison.OrdinalIgnoreCase) &&
+                    !AddOrUpdateKnownSite(resource, _oreSite, _oreApproach))
+                    _echo("Known-site catalog is full. Completed mining will still advance.");
+            }
+
             _stageIndex++;
+            _childState = null;
+            _completedChildRequest = null;
+            _childSurveyReport = null;
             if (_stageIndex >= _stages.Count)
             {
                 _pendingCompletedTaskId = _activeTaskId;
                 _pendingCompletedEpoch = _leaseEpoch;
+                _pendingSurveyReport = surveyReport;
                 _activeTaskId = null;
                 _activeTaskJson = null;
                 _stages.Clear();
                 _stageIndex = 0;
                 SaveState();
-                SendMessage("TASK_DONE", "{\"task_id\":" + TaskBusIgcHelper.ToJsonString(_pendingCompletedTaskId) +
-                    ",\"lease_epoch\":" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture) + "}");
+                SendPendingCompletion();
                 _echo("Workflow complete; waiting for broker commit ACK.");
             }
             else
@@ -282,6 +1023,203 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 SaveState();
                 _echo("Stage saved. Next stage: " + CurrentStage());
             }
+        }
+
+        private string _miningDepositLease;
+        private double _miningDeposited;
+
+        public double MiningDeposited
+        {
+            get
+            {
+                return _miningDepositLease != null && _miningDepositLease == ConfirmedLeaseIdentity ? _miningDeposited : 0;
+            }
+        }
+
+        public void RecordMiningDeposit(double transferred)
+        {
+            string resource;
+            double target;
+            if (!(transferred > 0) || double.IsInfinity(transferred) || !TryGetMiningCargoTarget(out resource, out target))
+                return;
+            _miningDeposited = Math.Min(target, MiningDeposited + transferred);
+            _miningDepositLease = ConfirmedLeaseIdentity;
+            SaveState();
+        }
+
+        public bool TryCompleteMiningDeposit()
+        {
+            string resource;
+            double target;
+            if (!TryGetMiningCargoTarget(out resource, out target) || MiningDeposited + 0.0000001 < target)
+                return false;
+            AdvanceStage("mine");
+            return true;
+        }
+
+        public long SupervisedCruiseRemote { get; private set; }
+
+        public void SetSupervisedCruiseRemote(long remoteId)
+        {
+            if (SupervisedCruiseRemote == remoteId)
+                return;
+            SupervisedCruiseRemote = remoteId;
+            SaveState();
+        }
+
+        public long ConfirmedLeaseDeadlineUtc => HasActiveTask && HasRecentLeaseConfirmation ? _leaseExpiresUtc : 0;
+
+        public string ConfirmedLeaseIdentity => HasActiveTask && HasRecentLeaseConfirmation
+            ? _leaseConfirmationSource.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" +
+                _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + _activeTaskId
+            : null;
+
+        public bool TryGetHaulerDestination(out string taskId, out bool pickup, out long grid)
+        {
+            taskId = null;
+            grid = 0;
+            pickup = CurrentStage() == "pickup";
+            if (_consumerGroup != "Haulers" || !HasActiveTask || !HasRecentLeaseConfirmation ||
+                (!pickup && CurrentStage() != "deliver") || !TryReadHaulerGrid(pickup, out grid))
+                return false;
+
+            taskId = _activeTaskId;
+            return true;
+        }
+
+        private bool MiningBufferReady()
+        {
+            string details;
+            double target;
+            var resource = GetRequestedResource();
+            return !string.IsNullOrEmpty(resource) &&
+                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out target) && target > 0 &&
+                _readMiningBuffer(resource) >= target;
+        }
+
+        public bool CanDepartHaulerPickup()
+        {
+            long pickupGrid;
+            return _consumerGroup == "Haulers" && HasActiveTask && HasRecentLeaseConfirmation &&
+                CurrentStage() == "deliver" && _stageIndex > 0 && _stages[_stageIndex - 1] == "pickup" &&
+                _readDockedGrid != null && TryReadHaulerGrid(true, out pickupGrid) &&
+                _readDockedGrid() == pickupGrid;
+        }
+
+        public bool CanDepartHaulerBase()
+        {
+            string taskId;
+            bool pickup;
+            long pickupGrid;
+            long baseGrid;
+            return _readDockedGrid != null && TryGetHaulerDestination(out taskId, out pickup, out pickupGrid) &&
+                pickup && TryReadHaulerGrid(false, out baseGrid) && baseGrid != pickupGrid &&
+                _readDockedGrid() == baseGrid;
+        }
+
+        private bool TryReadHaulerGrid(bool pickup, out long grid)
+        {
+            grid = 0;
+            string field = pickup ? "pickup_grid_id" : "base_grid_id";
+            string details;
+            string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) &&
+                long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out grid) && grid != 0;
+        }
+
+        private bool CheckHaulerDock(bool pickup, bool automatic)
+        {
+            long grid;
+            if (!TryReadHaulerGrid(pickup, out grid))
+            {
+                if (!automatic)
+                    _echo("The assignment has no " + (pickup ? "pickup" : "delivery") + " grid ID to verify.");
+                return false;
+            }
+
+            if (_readDockedGrid() == grid)
+                return true;
+
+            if (!automatic)
+                _echo("Dock at the assigned " + (pickup ? "mining point" : "delivery base") + " before confirming.");
+            return false;
+        }
+
+        private bool CheckHaulerCargo(bool pickup, bool automatic)
+        {
+            string details;
+            double amount;
+            var resource = GetRequestedResource();
+            if (string.IsNullOrEmpty(resource) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
+            {
+                if (!automatic)
+                    _echo("The transport assignment has no valid resource amount.");
+                return false;
+            }
+
+            if (!pickup && _autoHauler && _unloadHaulerCargo != null)
+            {
+                double remaining = amount - _haulerDelivered;
+                if (remaining <= 0.0000001)
+                    return true;
+                if (automatic)
+                {
+                    double received = _unloadHaulerCargo(_readDockedGrid(), resource, remaining);
+                    if (received > 0 && received <= remaining)
+                    {
+                        _haulerDelivered += received;
+                        SaveState();
+                    }
+                }
+                else
+                    _echo("Wait for the automatic unload to confirm delivery at the assigned base.");
+                return false;
+            }
+
+            double? loaded = _readHaulerCargo == null ? null : _readHaulerCargo(resource);
+            if (!loaded.HasValue || !(loaded.Value >= 0) || double.IsInfinity(loaded.Value))
+            {
+                if (!automatic)
+                    _echo("Cargo measurement unavailable. Check the configured hauler container.");
+                return false;
+            }
+
+            if (pickup)
+            {
+                if (loaded.Value < amount)
+                {
+                    if (automatic && _loadHaulerCargo != null)
+                        _loadHaulerCargo(_readDockedGrid(), resource, amount - loaded.Value);
+                    else if (!automatic)
+                        _echo("Load at least " + amount.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + " of " + resource + ".");
+                    return false;
+                }
+                _pickupCargo = loaded.Value;
+            }
+            else
+            {
+                double unloaded = _pickupCargo.Value - loaded.Value;
+                if (unloaded + 0.0000001 < amount)
+                {
+                    if (!automatic)
+                        _echo("Unload at least " + amount.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + " of " + resource +
+                            ". Measured decrease: " + unloaded.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private bool AssignmentRequires(string field)
+        {
+            string details;
+            string value;
+            return TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details) &&
+                TaskBusIgcHelper.TryGetJsonProperty(details, field, out value) && value == "true";
         }
 
         private string CurrentStage()
@@ -305,6 +1243,12 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
         private void SetConsumerGroup(string group)
         {
+            if (_miningPlatform)
+            {
+                _echo("Mining platforms accept both mining and survey assignments.");
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(group) || !string.IsNullOrEmpty(_activeTaskId))
             {
                 _echo("Set group only while idle: group <name>");
@@ -330,13 +1274,14 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                 !TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "task_id", out taskIdJson) ||
                 !TaskBusIgcHelper.TryReadJsonString(taskIdJson, out taskId) ||
                 !TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
-                !int.TryParse(epochJson, NumberStyles.Integer, CultureInfo.InvariantCulture, out leaseEpoch))
+                !int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseEpoch))
                 return;
 
             if (taskId == _pendingCompletedTaskId && leaseEpoch == _pendingCompletedEpoch)
             {
                 _pendingCompletedTaskId = null;
                 _pendingCompletedEpoch = 0;
+                _pendingSurveyReport = null;
                 SaveState();
                 _echo("Broker committed " + taskId);
             }
@@ -346,12 +1291,32 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
         {
             string taskIdJson;
             string taskId;
+            string epochJson;
+            int leaseEpoch;
             if (!TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "task_id", out taskIdJson) ||
                 !TaskBusIgcHelper.TryReadJsonString(taskIdJson, out taskId) ||
-                taskId != _activeTaskId)
+                !TaskBusIgcHelper.TryGetJsonProperty(payloadJson, "lease_epoch", out epochJson) ||
+                !int.TryParse(epochJson, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out leaseEpoch))
+                return;
+
+            if (!string.IsNullOrEmpty(_pendingCompletedTaskId) &&
+                taskId == _pendingCompletedTaskId && leaseEpoch == _pendingCompletedEpoch)
+            {
+                _pendingCompletedTaskId = null;
+                _pendingCompletedEpoch = 0;
+                _pendingSurveyReport = null;
+                _lastRevokedTaskId = taskId;
+                _lastRevokedEpoch = leaseEpoch;
+                SaveState();
+                _echo("Broker revoked the completion lease for " + taskId);
+                return;
+            }
+
+            if (taskId != _activeTaskId || leaseEpoch != _leaseEpoch)
                 return;
 
             _lastRevokedTaskId = taskId;
+            _lastRevokedEpoch = leaseEpoch;
             _activeTaskId = null;
             _activeTaskJson = null;
             _leaseEpoch = 0;
@@ -366,13 +1331,63 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
 
             string keyJson;
             string key;
-            string amountJson;
-            if (TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "key", out keyJson) &&
-                TaskBusIgcHelper.TryReadJsonString(keyJson, out key) &&
-                TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out amountJson))
-                return key + " details=" + amountJson;
+            string details;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "key", out keyJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(keyJson, out key) ||
+                !TaskBusIgcHelper.TryGetJsonProperty(_activeTaskJson, "details", out details))
+                return _activeTaskJson;
 
-            return _activeTaskJson;
+            string resourceJson;
+            string resource;
+            double amount;
+            if (!TaskBusIgcHelper.TryGetJsonProperty(details, "resource", out resourceJson) ||
+                !TaskBusIgcHelper.TryReadJsonString(resourceJson, out resource) ||
+                !TaskBusIgcHelper.TryReadFiniteNumber(details, "amount", out amount) || amount <= 0)
+                return key + " details=" + details;
+
+            var summary = new StringBuilder();
+            summary.AppendLine("Resource: " + resource);
+            summary.Append("Requested amount: " + amount.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+
+            string baseNameJson;
+            string baseName;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "base_grid_name", out baseNameJson) &&
+                TaskBusIgcHelper.TryReadJsonString(baseNameJson, out baseName))
+                summary.Append("\nDelivery base: " + baseName);
+
+            string candidateJson;
+            string candidate;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "ore_candidate_gps", out candidateJson) &&
+                TaskBusIgcHelper.TryReadJsonString(candidateJson, out candidate))
+                summary.Append("\nOre candidate to verify: " + candidate);
+
+            string pickupNameJson;
+            string pickupName;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, "pickup_name", out pickupNameJson) &&
+                TaskBusIgcHelper.TryReadJsonString(pickupNameJson, out pickupName))
+                summary.Append("\nPickup point: " + pickupName);
+            AppendPosition(summary, details, "pickup_position", "Pickup at dispatch time");
+            AppendPosition(summary, details, "base_position", "Base at request time");
+            AppendPosition(summary, details, "approach_position", "Mining approach");
+            AppendPosition(summary, details, "ore_position", "Ore deposit");
+            return summary.ToString();
+        }
+
+        private static void AppendPosition(StringBuilder summary, string details, string field, string label)
+        {
+            string position;
+            double x;
+            double y;
+            double z;
+            if (TaskBusIgcHelper.TryGetJsonProperty(details, field, out position) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "x", out x) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "y", out y) &&
+                TaskBusIgcHelper.TryReadFiniteNumber(position, "z", out z))
+            {
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                summary.Append("\n" + label + " (X, Y, Z): " +
+                    x.ToString("0.##", culture) + ", " + y.ToString("0.##", culture) + ", " + z.ToString("0.##", culture));
+            }
         }
 
         private void ShowStatus()
@@ -403,22 +1418,85 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
                     continue;
 
                 var key = line.Substring(0, separator);
-                var value = line.Substring(separator + 1);
+                var value = line.Substring(separator + 1).TrimEnd('\r');
                 try
                 {
                     if (key == "ACTIVE_ID") _activeTaskId = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "ACTIVE_JSON") _activeTaskJson = TaskBusIgcHelper.DecodeStorage(value);
-                    else if (key == "STAGE_INDEX") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _stageIndex);
+                    else if (key == "SURVEY_ATTEMPT")
+                        int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _surveyAttempt);
+                    else if (key == "STAGE_INDEX") int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _stageIndex);
                     else if (key == "STAGES")
                     {
-                        if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out var stages))
+                        List<string> stages;
+                        if (TaskBusProtocol.TryReadStringArray(TaskBusIgcHelper.DecodeStorage(value), out stages))
                             _stages.AddRange(stages);
                     }
+                    else if (key == "KNOWN_SITE")
+                    {
+                        var fields = value.Split('|');
+                        if (fields.Length == 2)
+                        {
+                            var resource = TaskBusIgcHelper.DecodeStorage(fields[0]);
+                            var points = TaskBusIgcHelper.DecodeStorage(fields[1]).Split(';');
+                            if (points.Length == 2)
+                                AddOrUpdateKnownSite(resource, points[0], points[1]);
+                        }
+                    }
+                    else if (key == "PICKUP_CARGO")
+                    {
+                        double cargo;
+                        if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out cargo) &&
+                            cargo >= 0 && !double.IsInfinity(cargo))
+                            _pickupCargo = cargo;
+                    }
+                    else if (key == "HAULER_DELIVERED")
+                    {
+                        double delivered;
+                        if (double.TryParse(value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out delivered) &&
+                            delivered > 0 && !double.IsInfinity(delivered))
+                            _haulerDelivered = delivered;
+                    }
+                    else if (key == "MINING_DEPOSIT")
+                    {
+                        var fields = value.Split('|');
+                        double deposited;
+                        if (fields.Length == 2 && double.TryParse(fields[1], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out deposited) && deposited > 0 && !double.IsInfinity(deposited))
+                        {
+                            _miningDepositLease = TaskBusIgcHelper.DecodeStorage(fields[0]);
+                            _miningDeposited = deposited;
+                        }
+                    }
+                    else if (key == "CRUISE_REMOTE")
+                    {
+                        long remoteId;
+                        if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out remoteId))
+                            SupervisedCruiseRemote = remoteId;
+                    }
+                    else if (key == "ORE_SITE") _oreSite = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "ORE_APPROACH") _oreApproach = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "POINT_AUTO") _autoPoint = value.Trim() == "1";
+                    else if (key == "BROKER") long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _brokerId);
                     else if (key == "GROUP") _consumerGroup = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "REVOKED_EPOCH")
+                    {
+                        int revokedEpoch;
+                        if (int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out revokedEpoch))
+                            _lastRevokedEpoch = revokedEpoch;
+                    }
                     else if (key == "REVOKED") _lastRevokedTaskId = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "SURVEY_RESULT") _pendingSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "CHILD_COMPLETED") _completedChildRequest = TaskBusIgcHelper.DecodeStorage(value);
+                    else if (key == "CHILD_SURVEY_RESULT") _childSurveyReport = TaskBusIgcHelper.DecodeStorage(value);
                     else if (key == "COMPLETED") _pendingCompletedTaskId = TaskBusIgcHelper.DecodeStorage(value);
-                    else if (key == "LEASE_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _leaseEpoch);
-                    else if (key == "COMPLETED_EPOCH") int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _pendingCompletedEpoch);
+                    else if (key == "LEASE_DEADLINE")
+                        long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _leaseExpiresUtc);
+                    else if (key == "LEASE_SOURCE")
+                        long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _leaseConfirmationSource);
+                    else if (key == "LEASE_EPOCH") int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _leaseEpoch);
+                    else if (key == "COMPLETED_EPOCH") int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _pendingCompletedEpoch);
                 }
                 catch (FormatException)
                 {
@@ -440,41 +1518,56 @@ namespace SpaceEngineers.Libs.TaskBusConsumer
             {
                 storage.AppendLine("ACTIVE_ID|" + TaskBusIgcHelper.EncodeStorage(_activeTaskId));
                 storage.AppendLine("ACTIVE_JSON|" + TaskBusIgcHelper.EncodeStorage(_activeTaskJson ?? string.Empty));
-                storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(CultureInfo.InvariantCulture));
+                if (_surveyAttempt > 0)
+                    storage.AppendLine("SURVEY_ATTEMPT|" + _surveyAttempt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                storage.AppendLine("STAGE_INDEX|" + _stageIndex.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 var stagesJson = "[" + string.Join(",", _stages.Select(TaskBusIgcHelper.ToJsonString).ToArray()) + "]";
                 storage.AppendLine("STAGES|" + TaskBusIgcHelper.EncodeStorage(stagesJson));
-                storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(CultureInfo.InvariantCulture));
+                if (_completedChildRequest != null) storage.AppendLine("CHILD_COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_completedChildRequest));
+                if (_childSurveyReport != null) storage.AppendLine("CHILD_SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_childSurveyReport));
+                if (_pickupCargo.HasValue)
+                    storage.AppendLine("PICKUP_CARGO|" + _pickupCargo.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                if (_haulerDelivered > 0)
+                    storage.AppendLine("HAULER_DELIVERED|" + _haulerDelivered.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                if (_oreSite != null) storage.AppendLine("ORE_SITE|" + TaskBusIgcHelper.EncodeStorage(_oreSite));
+                if (_oreApproach != null) storage.AppendLine("ORE_APPROACH|" + TaskBusIgcHelper.EncodeStorage(_oreApproach));
+                storage.AppendLine("LEASE_EPOCH|" + _leaseEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                if (_leaseExpiresUtc != 0)
+                {
+                    storage.AppendLine("LEASE_DEADLINE|" + _leaseExpiresUtc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    storage.AppendLine("LEASE_SOURCE|" + _leaseConfirmationSource.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
             }
+            foreach (var site in _knownSites)
+                storage.AppendLine("KNOWN_SITE|" + TaskBusIgcHelper.EncodeStorage(site.Resource) +
+                    "|" + TaskBusIgcHelper.EncodeStorage(site.Ore + ";" + site.Approach));
+            if (_miningDepositLease != null)
+                storage.AppendLine("MINING_DEPOSIT|" + TaskBusIgcHelper.EncodeStorage(_miningDepositLease) +
+                    "|" + _miningDeposited.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            if (SupervisedCruiseRemote != 0)
+                storage.AppendLine("CRUISE_REMOTE|" + SupervisedCruiseRemote.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (_autoPoint) storage.AppendLine("POINT_AUTO|1");
+            storage.AppendLine("BROKER|" + _brokerId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             storage.AppendLine("GROUP|" + TaskBusIgcHelper.EncodeStorage(_consumerGroup ?? "default"));
             if (!string.IsNullOrEmpty(_lastRevokedTaskId))
+            {
                 storage.AppendLine("REVOKED|" + TaskBusIgcHelper.EncodeStorage(_lastRevokedTaskId));
+                storage.AppendLine("REVOKED_EPOCH|" + _lastRevokedEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
             if (!string.IsNullOrEmpty(_pendingCompletedTaskId))
             {
                 storage.AppendLine("COMPLETED|" + TaskBusIgcHelper.EncodeStorage(_pendingCompletedTaskId));
-                storage.AppendLine("COMPLETED_EPOCH|" + _pendingCompletedEpoch.ToString(CultureInfo.InvariantCulture));
+                if (_pendingSurveyReport != null) storage.AppendLine("SURVEY_RESULT|" + TaskBusIgcHelper.EncodeStorage(_pendingSurveyReport));
+                storage.AppendLine("COMPLETED_EPOCH|" + _pendingCompletedEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
             _setStorage(storage.ToString());
         }
 
-        private void SendMessage(string eventType, string payloadJson, long targetId = 0, string messageId = null)
+        private void SendMessage(string eventType, string payloadJson)
         {
-            var envelope = TaskBusProtocol.CreateEnvelope(eventType, payloadJson, messageId, targetId);
-            _send(envelope, targetId);
+            var envelope = TaskBusProtocol.CreateEnvelope(eventType, payloadJson, targetId: _brokerId);
+            _send(envelope, _brokerId);
         }
 
-        /// <summary>
-        /// Pumps all pending IGC messages through the consumer. Call from Program.Main each tick.
-        /// </summary>
-        public void PumpMessages()
-        {
-            while (_listener.HasPendingMessage)
-            {
-                var message = _listener.AcceptMessage();
-                if (message.Source == _entityId)
-                    continue;
-                var json = message.Data as string;
-                ProcessIncomingMessage(message.Source, json);
-            }
-        }
     }
 }

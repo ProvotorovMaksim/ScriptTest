@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../spaceengineers.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>SpaceEngineers.Libs.RadarCore</RootNamespace>
+    <AssemblyName>RadarCore</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="CameraManager.cs" />
+    <Compile Include="ContactObservation.cs" />
+    <Compile Include="ContactTracker.cs" />
+    <Compile Include="PositionPredictor.cs" />
+    <Compile Include="RadarConfig.cs" />
+    <Compile Include="RadarState.cs" />
+    <Compile Include="GimbalController.cs" />
+  </ItemGroup>
+
+</Project>

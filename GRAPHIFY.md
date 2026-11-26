@@ -2,6 +2,20 @@
 
 This document provides a structured, graph-oriented representation of the TaskBus repository for use with Graphify (AI/neural network code understanding tool).
 
+## Техническое задание ScriptTest
+
+[ТЗ по AMN, FCS, боевой поддержке и Галнету](docs/ScriptTest-Spec.md) содержит
+целевую схему программируемых блоков, требования к системе и пять этапов
+приёмки. Заключительный абзац ТЗ фиксирует состояние системы на момент
+составления. Команды и текущее поведение описаны в [TaskBus.md](TaskBus.md).
+
+## Продолжение работ
+
+- [Прогресс и покрытие сквозных сценариев](docs/Progress.md)
+- Локальные результаты: `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md`, `graphify-out/graph.json`
+- Из корня проекта: `graphify query "AMN TaskBusConsumer MiningRouteLoader FCS"`
+- Обновление кода графа: `graphify update .`
+
 ## Repository Overview
 
 - **Name**: TaskBus
@@ -10,7 +24,6 @@ This document provides a structured, graph-oriented representation of the TaskBu
 - **Language**: C# (.NET 8)
 - **Target Platform**: Space Engineers Programmable Blocks (PB)
 - **Git Remote**: https://github.com/ProvotorovMaksim/ScriptTest.git
-- **Latest Commit**: 9db7f6752fc863c1db4328e844ad4087c84c7081
 - **Version**: v2.0.4 (from 14.10.2026)
 
 ## Repository Structure (Graph Nodes)

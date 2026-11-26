@@ -39,3 +39,6 @@ x86/
 *.temp
 venv/
 .env
+
+## MDK2 machine-specific configuration (do not commit)
+mdk.local.ini

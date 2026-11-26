@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <Compile Include="TaskBusConsumer.cs" />
+    <Compile Include="GalnetWorkerBridge.cs" />
+    <Compile Include="MiningRouteLoader.cs" />
   </ItemGroup>
 
   <ItemGroup>

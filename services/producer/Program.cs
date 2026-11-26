@@ -1,15 +1,14 @@
-#region Prelude
 using System.Collections.Generic;
 using Sandbox.ModAPI.Ingame;
 using System;
-using System.Globalization;
-using SpaceEngineers.Libs.TaskBusProducer;
 
 namespace SpaceEngineers.Services.Producer
 {
+    using SpaceEngineers.Libs.TaskBusProducer;
+
     public sealed class Program : MyGridProgram
     {
-        #endregion
+        // PB BODY START
         private const string CommunicationTag = "SE1-SHIP-LINK";
 
         private readonly TaskBusProducer _producer;
@@ -53,7 +52,7 @@ namespace SpaceEngineers.Services.Producer
 
         private void PublishTask(string requestJson)
         {
-            var requestId = "req-" + (++_sequence).ToString(CultureInfo.InvariantCulture);
+            var requestId = "req-" + (++_sequence).ToString(System.Globalization.CultureInfo.InvariantCulture);
             var payload = "{\"request_id\":" + Quote(requestId) + ",\"payload\":" + requestJson + "}";
             var envelope = _producer.Publish("TASK_PUBLISH", payload, requestId);
             Echo("Published " + requestId + ": " + envelope);
@@ -70,7 +69,6 @@ namespace SpaceEngineers.Services.Producer
             Echo("Messages published: " + _sequence);
         }
 
-        #region PreludeFooter
+        // PB BODY END
     }
 }
-#endregion

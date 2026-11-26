@@ -9,6 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  taskbus-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Test TaskBus protocol and worker state
+        run: dotnet test TaskBus.Tests/TaskBus.Tests.csproj -c Release --nologo
+
   build:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -64,6 +79,9 @@ jobs:
           }
           "SPACE_ENGINEERS_BIN64=$bin" >> $env:GITHUB_ENV
 
+      - name: Test Radar against game assemblies
+        run: dotnet test tests/Radar.Tests/Radar.Tests.csproj -c Release --nologo --results-directory build/test-results --logger "trx;LogFileName=Radar.Tests.trx"
+
       - name: Build and test
         shell: bash
         run: |
@@ -71,8 +89,7 @@ jobs:
           dotnet --info | tee build/logs/dotnet.log
           bash build.sh 2>&1 | tee build/logs/build.log
 
-      - name: Upload build logs and results
-        if: always()
+      - name: Upload validated build and results
         uses: actions/upload-artifact@v4
         with:
           name: taskbus-build
@@ -86,6 +103,18 @@ jobs:
             build/output/services/consumer/consumer/TaskConsumer.dll
             build/output/services/producer/producer/TaskProducer.dll
             build/output/apps/amn/amn/AMN.Base.dll
+            build/output/apps/fcs/fcs/FlightControl.dll
+            build/mdk-scripts/*/script.cs
             build/output/apps/sample/sample/SampleMain.dll
             build/output/apps/ship-link/ship-link/ShipLink.dll
             build/output/TaskBus.Tests/TaskBus.Tests/TaskBus.Tests.dll
+            build/output/apps/radar/radar/Radar.dll
+
+      - name: Upload failed build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbus-build-diagnostics
+          path: |
+            build/logs/
+            build/test-results/*.trx

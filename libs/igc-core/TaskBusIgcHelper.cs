@@ -1,7 +1,6 @@
 using System;
-using System.Globalization;
+using System.Collections.Generic;
 using System.Text;
-using SpaceEngineers.Libs.IgcCore;
 
 namespace SpaceEngineers.Libs.IgcCore
 {
@@ -15,7 +14,8 @@ namespace SpaceEngineers.Libs.IgcCore
         /// <summary>Parses a TaskBus JSON envelope into event type and payload.</summary>
         public static bool TryParseEnvelope(string json, out string eventType, out string payloadJson)
         {
-            if (TaskBusProtocol.TryParseEnvelope(json, out var envelope))
+            TaskBusEnvelope envelope;
+            if (TaskBusProtocol.TryParseEnvelope(json, out envelope))
             {
                 eventType = envelope.EventType;
                 payloadJson = envelope.PayloadJson;
@@ -57,5 +57,71 @@ namespace SpaceEngineers.Libs.IgcCore
                 return string.Empty;
             return Encoding.UTF8.GetString(Convert.FromBase64String(value));
         }
+
+        public static bool TryReadFiniteNumber(string json, string key, out double value)
+        {
+            value = 0;
+            string raw;
+            return TryGetJsonProperty(json, key, out raw) &&
+                TryParseFiniteNumber(raw, out value);
+        }
+        /// <summary>Reads a GPS survey report from an ore detector adapter.</summary>
+        public static string FindNearestOre(IEnumerable<string> observations, string ore,
+            double originX, double originY, double originZ, double radius)
+        {
+            string best = null;
+            double bestDistanceSquared = radius * radius;
+            foreach (var report in observations)
+            {
+                string name;
+                double x;
+                double y;
+                double z;
+                if (!TryReadOreGps(report, out name, out x, out y, out z) ||
+                    !string.Equals(name, ore, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                double dx = x - originX;
+                double dy = y - originY;
+                double dz = z - originZ;
+                double distanceSquared = dx * dx + dy * dy + dz * dz;
+                if (distanceSquared < bestDistanceSquared ||
+                    (distanceSquared == bestDistanceSquared && (best == null || string.CompareOrdinal(report, best) < 0)))
+                {
+                    best = report;
+                    bestDistanceSquared = distanceSquared;
+                }
+            }
+            return best;
+        }
+
+        public static bool TryReadOreGps(string report, out string ore, out double x, out double y, out double z)
+        {
+            ore = null;
+            x = y = z = 0;
+            if (string.IsNullOrWhiteSpace(report))
+                return false;
+
+            var fields = report.Trim().Split(':');
+            double parsedX;
+            double parsedY;
+            double parsedZ;
+            if (fields.Length < 6 || fields[0] != "GPS" || fields[fields.Length - 1] != "" ||
+                string.IsNullOrWhiteSpace(fields[1]) ||
+                !TryParseFiniteNumber(fields[2], out parsedX) ||
+                !TryParseFiniteNumber(fields[3], out parsedY) ||
+                !TryParseFiniteNumber(fields[4], out parsedZ))
+                return false;
+
+            ore = fields[1].Trim();
+            x = parsedX;
+            y = parsedY;
+            z = parsedZ;
+            return true;
+        }
+
+        private static bool TryParseFiniteNumber(string value, out double result) =>
+            double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result) &&
+            !double.IsNaN(result) && !double.IsInfinity(result);
     }
 }
