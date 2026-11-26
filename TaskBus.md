@@ -859,6 +859,15 @@ identify in the broker output.
 
 ### Worker display
 
+### ShipLink cockpit journal
+
+Set `PilotCockpit=<exact local cockpit name>` and `PilotSurface=<zero-based
+screen index>` in ShipLink Custom Data. The reserved cockpit surface uses
+the same sprite journal as `[SHIPLINK PILOT]`. Other cockpit surfaces retain
+their existing status behavior. An applied selection with a stable Entity ID
+returns only after a fresh observation of the same entity from the saved
+source. ShipLink stores no position for restoring that selection.
+
 To show a worker's TaskBus assignments on a ShipLink cockpit display, run
 `worker <consumer programmable block ID>` on ShipLink. Use the consumer block's
 entity ID shown as `Worker block ID` in the consumer output. Send `worker 0`

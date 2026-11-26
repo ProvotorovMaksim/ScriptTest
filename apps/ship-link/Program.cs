@@ -89,6 +89,11 @@ namespace SpaceEngineers.Apps.ShipLink
         private readonly List<FleetContact> _contacts = new List<FleetContact>();
         private readonly Dictionary<string, long> _withdrawnMarks = new Dictionary<string, long>();
         private FleetContact _trackedContact;
+        private long _savedContactSource;
+        private long _savedContactEntity;
+        private string _pilotCockpitName;
+        private int _pilotSurfaceIndex = -1;
+        private IMyTextSurface _pilotSurface;
         private long _trackedAssistanceRelay;
 
         private string _fleetName;
@@ -130,6 +135,14 @@ namespace SpaceEngineers.Apps.ShipLink
             const string heartbeatSetting = "GalnetFleetPeer=";
             foreach (var line in Me.CustomData.Split('\n'))
             {
+                if (line.StartsWith("PilotCockpit=", StringComparison.OrdinalIgnoreCase))
+                    _pilotCockpitName = line.Substring(13).Trim();
+                if (line.StartsWith("PilotSurface=", StringComparison.OrdinalIgnoreCase))
+                {
+                    int surfaceIndex;
+                    if (int.TryParse(line.Substring(13), out surfaceIndex) && surfaceIndex >= 0)
+                        _pilotSurfaceIndex = surfaceIndex;
+                }
                 const string profileSetting = "WeaponProfile=";
                 if (line.StartsWith(profileSetting, StringComparison.OrdinalIgnoreCase))
                     ReadWeaponProfile(line.Substring(profileSetting.Length));
@@ -148,6 +161,19 @@ namespace SpaceEngineers.Apps.ShipLink
                     _heartbeatRelays.Add(peer);
             }
             RestoreWeaponProfile(settings);
+            foreach (var line in settings)
+            {
+                if (!line.StartsWith("PILOT_CONTACT|", StringComparison.Ordinal))
+                    continue;
+                var fields = line.Split('|');
+                long source, entity;
+                if (fields.Length == 3 && long.TryParse(fields[1], out source) && source != 0 &&
+                    long.TryParse(fields[2], out entity) && entity != 0)
+                {
+                    _savedContactSource = source;
+                    _savedContactEntity = entity;
+                }
+            }
             _listener = IGC.RegisterBroadcastListener(CommunicationTag);
             _fleetListener = IGC.RegisterBroadcastListener(FleetTag);
         }
@@ -192,9 +218,8 @@ namespace SpaceEngineers.Apps.ShipLink
                 _journalSelection = null;
                 _pendingObservations.Clear();
                 _aiDetections.Clear();
-                _trackedContact = null;
+                SetTrackedContact(null);
                 _trackedAssistanceRelay = 0;
-                SaveSettings();
             }
 
             else if (command.StartsWith("worker ", StringComparison.OrdinalIgnoreCase))
@@ -282,7 +307,7 @@ namespace SpaceEngineers.Apps.ShipLink
             else if (string.Equals(command, "contact untrack", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(command, "assist untrack", StringComparison.OrdinalIgnoreCase))
             {
-                _trackedContact = null;
+                SetTrackedContact(null);
                 _trackedAssistanceRelay = 0;
                 _displayTick = DisplayUpdateIntervalTicks;
             }
@@ -296,6 +321,7 @@ namespace SpaceEngineers.Apps.ShipLink
             // Scan cockpits and collect text surfaces
             _cockpits.Clear();
             _surfaces.Clear();
+            _pilotSurface = null;
             GridTerminalSystem.GetBlocksOfType(_cockpits, cockpit => cockpit.IsFunctional);
             if (command.Length == 0)
                 SampleCockpit();
@@ -304,11 +330,13 @@ namespace SpaceEngineers.Apps.ShipLink
                 for (int i = 0; i < cockpit.SurfaceCount; i++)
                 {
                     var surface = cockpit.GetSurface(i);
-                    if (surface.ContentType == ContentType.TEXT_AND_IMAGE ||
-                        surface.ContentType == ContentType.TEXT_AND_IMAGE)
+                    if (cockpit.CubeGrid == Me.CubeGrid && _pilotCockpitName == cockpit.CustomName && i == _pilotSurfaceIndex)
                     {
-                        _surfaces.Add(surface);
+                        if (_pilotSurface == null)
+                            _pilotSurface = surface;
                     }
+                    else if (surface.ContentType == ContentType.TEXT_AND_IMAGE)
+                        _surfaces.Add(surface);
                 }
             }
 
@@ -379,7 +407,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
-            _trackedContact = mark;
+            SetTrackedContact(mark);
             _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
         }
@@ -454,8 +482,32 @@ namespace SpaceEngineers.Apps.ShipLink
                 MarkKey(mark.Source, "contact", mark.Name);
         }
 
+        private void SetTrackedContact(FleetContact mark)
+        {
+            _trackedContact = mark;
+            long entity = 0;
+            bool stable = mark != null && !mark.Assistance && !mark.Hazard &&
+                TryReadSensedEntityId(mark.Name, out entity);
+            _savedContactSource = stable ? mark.Source : 0;
+            _savedContactEntity = stable ? entity : 0;
+            SaveSettings();
+        }
+
         private FleetContact FindLiveTrackedMark(long now)
         {
+            if (_trackedContact == null && _savedContactEntity != 0)
+            {
+                var keyToRestore = "entity:" + _savedContactEntity.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var restored = _contacts.Where(mark => !mark.Assistance && !mark.Hazard && mark.Source == _savedContactSource &&
+                    mark.Expires > now && mark.MeasuredTicks > 0 && mark.MeasuredTicks <= now &&
+                    now - mark.MeasuredTicks <= 2 * TimeSpan.TicksPerSecond && JournalKey(mark) == keyToRestore)
+                    .OrderByDescending(mark => mark.MeasuredTicks).FirstOrDefault();
+                if (restored != null)
+                {
+                    _trackedContact = restored;
+                    _journalSelection = keyToRestore;
+                }
+            }
             var selected = _trackedContact;
             if (selected == null || selected.Assistance || selected.Hazard)
                 return null;
@@ -487,7 +539,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 Echo("Select a current contact with up or down first.");
                 return;
             }
-            _trackedContact = selected;
+            SetTrackedContact(selected);
             _trackedAssistanceRelay = 0;
             _displayTick = DisplayUpdateIntervalTicks;
         }
@@ -1123,7 +1175,7 @@ namespace SpaceEngineers.Apps.ShipLink
                 return;
             }
 
-            _trackedContact = null;
+            SetTrackedContact(null);
             _trackedAssistanceRelay = relay;
             _displayTick = DisplayUpdateIntervalTicks;
         }
@@ -1279,6 +1331,8 @@ namespace SpaceEngineers.Apps.ShipLink
             if (_weaponSelected >= 0)
                 saved.Append("\nWEAPON_PROFILE|")
                     .Append(TaskBusIgcHelper.EncodeStorage(_weaponProfiles[_weaponSelected].Name));
+            if (_savedContactSource != 0 && _savedContactEntity != 0)
+                saved.Append("\nPILOT_CONTACT|").Append(_savedContactSource).Append('|').Append(_savedContactEntity);
             Storage = saved.ToString();
         }
 
@@ -1389,13 +1443,15 @@ namespace SpaceEngineers.Apps.ShipLink
                 PilotText(ref frame, origin, scale, string.IsNullOrEmpty(_fleetName) ? "LOCAL" : ClipPilotLabel(_fleetName, 15),
                     489, 14, 0.76f, accent, TextAlignment.RIGHT);
 
-                string target = chosen == null ? "No active contact" : ClipPilotLabel((active ?? chosen).Name, 30);
+                string target = chosen == null ? (_savedContactEntity != 0 ? "Waiting for saved contact" : "No active contact") :
+                    ClipPilotLabel((active ?? chosen).Name, 34);
                 bool fresh = active != null && active.MeasuredTicks > 0 &&
                     now - active.MeasuredTicks <= 2 * TimeSpan.TicksPerSecond;
                 PilotText(ref frame, origin, scale, target, 20, 61, 0.86f, white);
-                PilotText(ref frame, origin, scale, chosen == null ? "SELECT A CONTACT" : fresh ? "FRESH" : "NO FRESH FIX",
-                    489, 64, 0.68f, fresh ? accent : warning, TextAlignment.RIGHT);
-                PilotText(ref frame, origin, scale, "Profile: " + ClipPilotLabel(profile, 32), 20, 88, 0.7f, muted);
+                if (chosen != null)
+                    PilotText(ref frame, origin, scale, fresh ? "FRESH" : "NO FRESH FIX",
+                        489, 88, 0.68f, fresh ? accent : warning, TextAlignment.RIGHT);
+                PilotText(ref frame, origin, scale, "Profile: " + ClipPilotLabel(profile, 22), 20, 88, 0.7f, muted);
 
                 var entries = _showWeaponSettings ? null : JournalEntries(now);
                 int count = _showWeaponSettings ? _weaponProfiles.Count : entries.Length;
@@ -1423,10 +1479,10 @@ namespace SpaceEngineers.Apps.ShipLink
                 if (count == 0)
                     PilotText(ref frame, origin, scale, _showWeaponSettings ? "No configured profiles" : "Waiting for observations",
                         24, 128, 0.8f, muted);
-                PilotText(ref frame, origin, scale, "UP / DOWN    APPLY    SETTINGS", 20, 287, 0.68f, muted);
+                PilotText(ref frame, origin, scale, "UP / DOWN   APPLY   SETTINGS", 20, 294, 0.59f, muted);
                 if (count > 0)
                     PilotText(ref frame, origin, scale, (first + 1) + "-" + end + " / " + count,
-                        489, 287, 0.68f, muted, TextAlignment.RIGHT);
+                        489, 294, 0.59f, muted, TextAlignment.RIGHT);
             }
             finally
             {
@@ -1451,6 +1507,8 @@ namespace SpaceEngineers.Apps.ShipLink
             if (panel != null && panel.IsWorking && panel.CubeGrid == Me.CubeGrid)
                 DrawPilotDisplay(panel, DateTime.UtcNow.Ticks);
 
+            if (_pilotSurface != null)
+                DrawPilotDisplay(_pilotSurface, DateTime.UtcNow.Ticks);
             if (_surfaces.Count == 0)
                 return;
 
