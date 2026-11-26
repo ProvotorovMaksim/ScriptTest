@@ -973,6 +973,14 @@ engaging. The controller starts off after compilation or reload.
   control while the PB is running. If an actuator is unavailable during
   release, FCS attempts the remaining settings and reports a warning.
 
+Before taking control, FCS checks effective thrust along the local
+gravity-support axes, with 10% reserve, and estimates the residual
+moment of the support command. In flight and during docking, loss
+of the gravity-support reserve releases FCS control. Manual retains
+gravity support on idle axes when its thrust-balance fallback is used.
+Repeat gravity and pilot-input tests on a dedicated test ship before
+using this build on the main ship.
+
 Name an LCD on the FCS block's grid exactly `[FCS STATUS]` and run `status`
 to show live flight status there. The panel refreshes while FCS is active
 and shows the reason when FCS releases control.

@@ -737,6 +737,7 @@ namespace SpaceEngineers.Apps.FlightControl
             mode = requested;
             try
             {
+                flight.CheckTakeoverSupport(cockpit);
                 cockpit.ControlThrusters = false;
                 cockpit.DampenersOverride = false;
                 Runtime.UpdateFrequency = dockCharging ? UpdateFrequency.Update1 | UpdateFrequency.Update10 : UpdateFrequency.Update1;
@@ -744,6 +745,7 @@ namespace SpaceEngineers.Apps.FlightControl
             catch (Exception error)
             {
                 Release("FCS off: engagement failed. " + error.Message);
+                return false;
             }
             return true;
         }
@@ -1036,6 +1038,23 @@ namespace SpaceEngineers.Apps.FlightControl
                 return Command(input.X) != 0 || Command(input.Y) != 0 || Command(pilot.RollIndicator) != 0;
             }
 
+            public void CheckTakeoverSupport(IMyShipController pilot)
+            {
+                var frame = pilot.WorldMatrix;
+                thrust.Measure(frame, pilot.CenterOfMass, capacity);
+                var support = RequireGravitySupport(pilot.GetNaturalGravity(), pilot.CalculateShipMass().PhysicalMass, frame);
+                if (!HasBalancedThrust(support, Vector3D.One))
+                    throw new InvalidOperationException("insufficient moment compensation to support gravity");
+            }
+
+            private Vector3D RequireGravitySupport(Vector3D gravity, double mass, MatrixD frame)
+            {
+                var support = Vector3D.TransformNormal(-gravity * mass, MatrixD.Transpose(frame));
+                if (!ThrustSafety.CanSupport(mass, support.X, support.Y, support.Z, capacity, ThrustReserve))
+                    throw new InvalidOperationException("invalid flight data or insufficient thrust reserve to support gravity");
+                return support;
+            }
+
             public string Update(IMyShipController pilot, Mode mode, double dt, Func<bool> hasInstructionBudget,
                 Vector3D aimCorrection)
             {
@@ -1048,19 +1067,20 @@ namespace SpaceEngineers.Apps.FlightControl
                 var gravity = pilot.GetNaturalGravity();
                 var center = pilot.CenterOfMass;
                 var measuredForce = thrust.Measure(frame, center, capacity);
+                var gravitySupport = RequireGravitySupport(gravity, mass, frame);
                 UpdateDisturbance(velocity.LinearVelocity, gravity,
                     Vector3D.TransformNormal(measuredForce / mass, frame), dt,
                     EstimateAerodynamics && velocity.LinearVelocity.LengthSquared() > 4, 4);
 
                 var worldToLocal = MatrixD.Transpose(frame);
                 var localVelocity = Vector3D.TransformNormal(velocity.LinearVelocity, worldToLocal);
-                var hold = Vector3D.TransformNormal(-(gravity + disturbance) * mass, worldToLocal);
+                var hold = gravitySupport - Vector3D.TransformNormal(disturbance * mass, worldToLocal);
                 var input = pilot.MoveIndicator;
                 var rotation = pilot.RotationIndicator;
                 var turn = HasPilotRotation(pilot) ? new Vector3D(rotation.X, rotation.Y, pilot.RollIndicator) : aimCorrection;
                 var request = new Vector3D(Command(input.X), Command(input.Y), Command(input.Z));
                 var target = Vector3D.Zero;
-                var pilotOnly = Vector3D.Zero;
+                var manualFallback = Vector3D.Zero;
                 var stabilization = Vector3D.Zero;
                 bool risk = false;
                 bool saturated = false;
@@ -1100,7 +1120,7 @@ namespace SpaceEngineers.Apps.FlightControl
                         // On an active axis, assistance can add force only along the input.
                         double physicalLimit = command > 0 ? forward : reverse;
                         double pilotForce = Math.Min(1, Math.Abs(axisInput)) * physicalLimit;
-                        pilotOnly.SetDim(axis, Math.Sign(command) * pilotForce);
+                        manualFallback.SetDim(axis, Math.Sign(command) * pilotForce);
                         double alignedHelp = Math.Max(0, Math.Sign(command) * support);
                         force = Math.Sign(command) * Math.Min(physicalLimit, pilotForce + alignedHelp);
                         saturated |= pilotForce + alignedHelp > physicalLimit || physicalLimit <= 0;
@@ -1129,6 +1149,8 @@ namespace SpaceEngineers.Apps.FlightControl
                             force = Clamp(support, -reverse, forward);
                         saturated |= Math.Abs(desired - force) > 1;
                     }
+                    if (mode == Mode.Manual && command == 0)
+                        manualFallback.SetDim(axis, Clamp(gravitySupport.GetDim(axis), -reverse, forward));
                     target.SetDim(axis, force);
                     double dampedSupport = support - speed * mass * 0.6;
                     stabilization.SetDim(axis, overspeed ? force : Clamp(dampedSupport, -reverse, forward));
@@ -1141,7 +1163,7 @@ namespace SpaceEngineers.Apps.FlightControl
                 bool balanceChecked = hasInstructionBudget();
                 bool balanceRisk = balanceChecked && !HasBalancedThrust(target, gyroMask);
                 if (mode == Mode.Manual && balanceRisk && request.LengthSquared() > 0)
-                    target = pilotOnly;
+                    target = manualFallback;
                 if (mode == Mode.Normal && (risk || turnRisk || balanceRisk || !balanceChecked))
                 {
                     target = stabilization;
@@ -1230,6 +1252,7 @@ namespace SpaceEngineers.Apps.FlightControl
 
                 dockMeasuredForce = thrust.Measure(frame, pilot.CenterOfMass, capacity);
                 var gravity = pilot.GetNaturalGravity();
+                RequireGravitySupport(gravity, mass, frame);
                 UpdateDisturbance(velocity, gravity,
                     Vector3D.TransformNormal(dockMeasuredForce / mass, frame), dt, EstimateDockDisturbance, 0.5);
                 var acceleration = (desiredVelocity - velocity) * 1.5;

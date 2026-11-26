@@ -20,6 +20,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="DockLease.cs" />
+    <Compile Include="ThrustSafety.cs" />
   </ItemGroup>
 
   <ItemGroup>
