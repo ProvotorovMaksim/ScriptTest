@@ -12,6 +12,7 @@ namespace SpaceEngineers.Apps.Radar
         // PB BODY START
 
         private const double ContactTimeoutSeconds = 5;
+        private bool _retryContactCenter;
         private readonly ContactTracker _contact = new ContactTracker();
         private readonly PositionPredictor _predictor = new PositionPredictor();
         private readonly RadarConfig _config;
@@ -298,17 +299,36 @@ namespace SpaceEngineers.Apps.Radar
 
                 double maxRange = camera.RaycastDistanceLimit > 0
                     ? Math.Min(_config.MaxRange, camera.RaycastDistanceLimit) : _config.MaxRange;
-                double range = pointed ? Vector3D.Distance(camera.GetPosition(), target) : maxRange;
-                if (range <= 0 || range > maxRange || (pointed ? !camera.CanScan(target) : !camera.CanScan(range)))
+                var rayTarget = target;
+                var origin = camera.GetPosition();
+                if (tracking && _contact.HitPosition.HasValue && !_retryContactCenter)
+                {
+                    var surface = target + (_contact.HitPosition.Value - _contact.Position);
+                    var direction = surface - origin;
+                    double distance = direction.Length();
+                    if (distance > 0 && distance <= maxRange)
+                    {
+                        var beyondSurface = surface + direction * (Math.Min(1.0, maxRange - distance) / distance);
+                        if (camera.CanScan(beyondSurface))
+                            rayTarget = beyondSurface;
+                    }
+                }
+
+                double range = pointed ? Vector3D.Distance(origin, rayTarget) : maxRange;
+                if (range <= 0 || range > maxRange + 0.000001 ||
+                    (pointed ? !camera.CanScan(rayTarget) : !camera.CanScan(range)))
                     continue;
 
                 rays++;
-                var hit = pointed ? camera.Raycast(target) : camera.Raycast(range);
+                var hit = pointed ? camera.Raycast(rayTarget) : camera.Raycast(range);
+                if (tracking)
+                    _retryContactCenter = rayTarget != target;
                 if (hit.IsEmpty() || (tracking && hit.EntityId != _contact.EntityId) ||
                     (cue != null && !cue.Matches(hit.EntityId)))
                     continue;
 
                 _cue = null;
+                _retryContactCenter = false;
                 _contact.Update(hit, Vector3D.Distance(Me.GetPosition(), hit.Position), now);
                 _predictor.UpdateState(_contact.Position, _contact.Velocity);
                 if (_config.ShareContacts && now.Ticks >= _nextJournalPublish)
@@ -325,6 +345,13 @@ namespace SpaceEngineers.Apps.Radar
             }
             if (gimbal && !pointed && rays > 0)
                 _gimbal.AdvanceSweep();
+            if (tracking)
+            {
+                _scanProblem = rays == 0 ? "Tracking: no camera could scan the predicted point." :
+                    "Tracking: raycast did not confirm the locked entity.";
+                if (rays == 0)
+                    _retryContactCenter = false;
+            }
             _state = tracking ? RadarState.COASTING :
                 rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
         }
