@@ -995,6 +995,12 @@ reports mass, natural gravity, pilot input, effective thrust, measured
 force, and blocks with active overrides. It does not write actuator or
 cockpit settings. Repeat the command while holding a pilot input to
 compare the passive reading with the active-mode telemetry.
+While FCS owns thrust, a cockpit request to re-enable native thrust or
+dampeners releases FCS, as does losing all working owned gyroscopes.
+Status retains the last release reason for this PB session. A PB that is
+disabled, loses power, or terminates before running its release path
+cannot guarantee cleanup. Use a separate emergency release procedure on
+the test craft and verify cockpit controls and overrides before flight.
 
 Name an LCD on the FCS block's grid exactly `[FCS STATUS]` and run `status`
 to show live flight status there. The panel refreshes while FCS is active

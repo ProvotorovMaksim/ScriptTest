@@ -61,6 +61,7 @@ namespace SpaceEngineers.Apps.FlightControl
         private Vector3D aimPosition;
         private Vector3D aimVelocity;
         private double aimSpeed;
+        private string lastRelease;
         private string status = "FCS off. Commands: normal, manual, off, status.";
 
         public Program()
@@ -235,6 +236,10 @@ namespace SpaceEngineers.Apps.FlightControl
                         Release("FCS off: pilot absent.");
                     else if (RemoteAutopilotEnabled())
                         Release("FCS off: remote autopilot took control.");
+                    else if (cockpit.ControlThrusters || cockpit.DampenersOverride)
+                        Release("FCS off: native thrust or dampeners requested during override.");
+                    else if (!flight.HasWorkingGyro())
+                        Release("FCS off: no working owned gyroscope.");
                     else if (mode == Mode.Dock)
                         UpdateDockApproach();
                     else
@@ -267,6 +272,8 @@ namespace SpaceEngineers.Apps.FlightControl
                 CheckDockPower();
 
             var displayStatus = showDockGuide ? status + GetDockStatus() : status;
+            if (lastRelease != null && status != lastRelease)
+                displayStatus += "\nLast release: " + lastRelease;
             if ((mode == Mode.Manual && aimSpeed > 0) || mode == Mode.AimAssist || mode == Mode.Lock)
                 displayStatus += GetAimGuide(DateTime.UtcNow.Ticks);
             Echo(displayStatus);
@@ -818,6 +825,7 @@ namespace SpaceEngineers.Apps.FlightControl
 
             if (failures > 0)
                 status += "\nCould not restore " + failures + " actuator or cockpit settings.";
+            lastRelease = status;
             if (signalDroneResult)
             {
                 bool ready = dockingSucceeded && failures == 0;
@@ -1060,6 +1068,14 @@ namespace SpaceEngineers.Apps.FlightControl
 
                 gyros.AddRange(availableGyros);
                 return true;
+            }
+
+            public bool HasWorkingGyro()
+            {
+                foreach (var gyro in gyros)
+                    if (gyro.IsWorking)
+                        return true;
+                return false;
             }
 
             public static bool HasPilotRotation(IMyShipController pilot)
