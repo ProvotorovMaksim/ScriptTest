@@ -17,6 +17,7 @@ namespace SpaceEngineers.Apps.Radar
         private readonly HashSet<long> _fixedAxisNext = new HashSet<long>();
         private long _lastHitCameraId;
         private IMyCameraBlock _repeatAcquisitionCamera;
+        private IMyCameraBlock _gimbalAimCamera;
         private readonly ContactTracker _contact = new ContactTracker();
         private readonly PositionPredictor _predictor = new PositionPredictor();
         private readonly RadarConfig _config;
@@ -64,6 +65,7 @@ namespace SpaceEngineers.Apps.Radar
             _cameras.DiscoverCameras(GridTerminalSystem, Me);
             _fixedAxisNext.Clear();
             _repeatAcquisitionCamera = null;
+            _gimbalAimCamera = null;
             _lcd = GridTerminalSystem.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
             if (IsGimbal)
                 _gimbal.Bind(GridTerminalSystem, Me);
@@ -321,7 +323,12 @@ namespace SpaceEngineers.Apps.Radar
                 if (gimbal && !gimbalDriven)
                 {
                     if (pointed)
-                        _gimbal.Aim(camera, target);
+                    {
+                        if (_gimbalAimCamera == null || !_gimbalAimCamera.IsWorking ||
+                            !_gimbalAimCamera.IsSameConstructAs(Me) || !_gimbal.HasCamera(_gimbalAimCamera))
+                            _gimbalAimCamera = camera;
+                        _gimbal.Aim(_gimbalAimCamera, target);
+                    }
                     else
                     {
                         bool stalled;

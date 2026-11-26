@@ -182,6 +182,7 @@ loss timeout. The status also shows the last ray result and last loss.
 In Gimbal, set `SearchElevationDegrees=0` (default) or the desired
 search elevation. Search waits for the hinge to settle at that angle
 within its travel limits before stepping the azimuth. Parking uses its
-own angles. Repeat the 60-second Fixed test with nine cameras, target
+own angles. Tracking retains a single healthy hinge camera as its
+pointing reference while other cameras continue contributing rays. Repeat the 60-second Fixed test with nine cameras, target
 at 80 m, and scan limit 150 m. For Gimbal also check return to search
 elevation, tracking a separate ship, and stopping both axes on hardware loss.
