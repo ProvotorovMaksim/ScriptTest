@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using VRageMath;
 using Sandbox.ModAPI.Ingame;
 using VRage.Game.GUI.TextPanel;
@@ -27,6 +28,13 @@ namespace SpaceEngineers.Apps.Radar
         private RadarCue _cue;
         private long _nextJournalPublish;
         private string _scanProblem;
+        private string _lastLoss;
+        private string _lastRay = "No rays yet.";
+        private int _misses;
+        private int _availableCameras;
+        private double _scanCharge;
+        private readonly HashSet<long> _ownGrids = new HashSet<long>();
+        private readonly List<IMyMechanicalConnectionBlock> _connections = new List<IMyMechanicalConnectionBlock>();
         private RadarState _state = RadarState.IDLE;
 
         public Program()
@@ -52,10 +60,25 @@ namespace SpaceEngineers.Apps.Radar
 
         private void Discover()
         {
+            RefreshOwnGrids();
             _cameras.DiscoverCameras(GridTerminalSystem, Me);
             _lcd = GridTerminalSystem.GetBlockWithName("[RADAR LCD]") as IMyTextPanel;
             if (IsGimbal)
                 _gimbal.Bind(GridTerminalSystem, Me);
+        }
+
+        private void RefreshOwnGrids()
+        {
+            _ownGrids.Clear();
+            _ownGrids.Add(Me.CubeGrid.EntityId);
+            _connections.Clear();
+            GridTerminalSystem.GetBlocksOfType(_connections, block => block.IsSameConstructAs(Me));
+            foreach (var connection in _connections)
+            {
+                _ownGrids.Add(connection.CubeGrid.EntityId);
+                if (connection.TopGrid != null)
+                    _ownGrids.Add(connection.TopGrid.EntityId);
+            }
         }
 
         private void Command(string command, DateTime now)
@@ -147,6 +170,11 @@ namespace SpaceEngineers.Apps.Radar
             }
 
             Discover();
+            if (_ownGrids.Contains(cue.EntityId))
+            {
+                Echo("Acquisition cue refers to the radar construct.");
+                return;
+            }
             _contact.Lose();
             _scanProblem = null;
             _parking = false;
@@ -254,6 +282,7 @@ namespace SpaceEngineers.Apps.Radar
             {
                 _contact.Lose();
                 _gimbal.Stop();
+                _lastLoss = "Confirmation timed out. " + _lastRay;
                 _state = RadarState.LOST;
                 return;
             }
@@ -271,6 +300,8 @@ namespace SpaceEngineers.Apps.Radar
             bool gimbalDriven = false;
             bool gimbalReadyToScan = true;
             int rays = 0;
+            _availableCameras = 0;
+            _scanCharge = 0;
             var acquisitionCamera = tracking && !gimbal ? _repeatAcquisitionCamera : null;
             _repeatAcquisitionCamera = null;
             int cameraAttempts = _cameras.Count() + (acquisitionCamera == null ? 0 : 1);
@@ -310,6 +341,7 @@ namespace SpaceEngineers.Apps.Radar
                     ? Math.Min(_config.MaxRange, camera.RaycastDistanceLimit) : _config.MaxRange;
                 var rayTarget = target;
                 var origin = camera.GetPosition();
+                _scanCharge = Math.Max(_scanCharge, camera.AvailableScanRange);
                 if (tracking && _contact.HitPosition.HasValue && !_retryContactCenter &&
                     (gimbal || camera.EntityId == _lastHitCameraId))
                 {
@@ -327,22 +359,42 @@ namespace SpaceEngineers.Apps.Radar
                 double range = pointed ? Vector3D.Distance(origin, rayTarget) : maxRange;
                 bool canPoint = pointed && range > 0 && range <= maxRange + 0.000001 && camera.CanScan(rayTarget);
                 bool fixedTracking = tracking && !gimbal;
+                double axisRange = maxRange;
+                if (fixedTracking)
+                {
+                    double extent = _contact.BoundingBox.HasValue
+                        ? (_contact.BoundingBox.Value.Max - _contact.BoundingBox.Value.Min).Length() * 0.5 : 0;
+                    axisRange = Math.Min(maxRange, Vector3D.Distance(origin, target) + extent + 2);
+                }
                 bool axis = !pointed || (fixedTracking &&
-                    (repeatAcquisition || _tryFixedAxis || !canPoint) && camera.CanScan(maxRange));
-                if (axis ? maxRange <= 0 || (!fixedTracking && !camera.CanScan(maxRange)) : !canPoint)
+                    (repeatAcquisition || _tryFixedAxis || !canPoint) && camera.CanScan(axisRange));
+                if (axis ? axisRange <= 0 || (!fixedTracking && !camera.CanScan(axisRange)) : !canPoint)
+                {
+                    _lastRay = camera.CustomName + (range > maxRange ? ": beyond range limit." :
+                        !camera.CanScan(range) ? ": insufficient scan charge." : ": scan point unavailable (angle or range).");
                     continue;
+                }
 
+                _availableCameras++;
                 rays++;
-                var hit = axis ? camera.Raycast(maxRange) : camera.Raycast(rayTarget);
+                var hit = axis ? camera.Raycast(axisRange) : camera.Raycast(rayTarget);
                 if (tracking)
                 {
                     _retryContactCenter = !axis && rayTarget != target;
                     if (fixedTracking)
                         _tryFixedAxis = !axis;
                 }
-                if (hit.IsEmpty() || (tracking && hit.EntityId != _contact.EntityId) ||
-                    (cue != null && !cue.Matches(hit.EntityId)))
+                string rejection = hit.IsEmpty() ? "empty ray" :
+                    !ContactTracker.IsShipContact(hit.Type, hit.EntityId, _ownGrids.Contains(hit.EntityId)) ? "rejected " + hit.Type + " #" + hit.EntityId :
+                    tracking && hit.EntityId != _contact.EntityId || cue != null && !cue.Matches(hit.EntityId) ? "different entity #" + hit.EntityId : null;
+                if (rejection != null)
+                {
+                    _misses++;
+                    _lastRay = camera.CustomName + ": " + rejection;
                     continue;
+                }
+                _misses = 0;
+                _lastRay = camera.CustomName + ": confirmed #" + hit.EntityId;
 
                 _cue = null;
                 _retryContactCenter = false;
@@ -372,7 +424,7 @@ namespace SpaceEngineers.Apps.Radar
                 if (rays == 0)
                     _retryContactCenter = false;
             }
-            _state = tracking ? RadarState.COASTING :
+            _state = tracking ? (age <= 1 ? RadarState.LOCKED : RadarState.COASTING) :
                 rays == 0 && gimbalReadyToScan ? RadarState.CHARGING : RadarState.ACQUIRING;
         }
 
@@ -389,6 +441,7 @@ namespace SpaceEngineers.Apps.Radar
             _contact.Lose();
             _gimbal.Stop();
             _scanProblem = problem;
+            _lastLoss = problem;
             _state = RadarState.UNAVAILABLE;
         }
 
@@ -397,6 +450,10 @@ namespace SpaceEngineers.Apps.Radar
         private void Render(DateTime now)
         {
             var status = "Radar " + _config.Mode + " | " + _state + "\nCameras: " + _cameras.Count();
+            status += "\nScan limit: " + Math.Round(_config.MaxRange, 1) + " m | ready this pass: " + _availableCameras +
+                " | max observed charge: " + Math.Round(_scanCharge, 1) + " m\n" + _lastRay + " | missed rays: " + _misses;
+            if (_lastLoss != null)
+                status += "\nLast loss: " + _lastLoss;
             string problem = _scanProblem ?? (IsGimbal ? _gimbal.GetUnavailableReason() : null);
             if (problem != null)
                 status += "\n" + problem;
@@ -409,8 +466,9 @@ namespace SpaceEngineers.Apps.Radar
                     _contact.Name + " [" + _contact.EntityId + "]\n" +
                     _contact.Type + " | " + _contact.Relationship + "\n" +
                     "Last measurement: " + _contact.AgeSecondsAt(now).ToString("0.0", culture) +
-                    " s ago | " + _contact.Range.ToString("0", culture) + " m | " +
-                    _contact.Velocity.Length().ToString("0.0", culture) + " m/s\n" +
+                    " s ago | " + _contact.Range.ToString("0", culture) + " m to center" +
+                    (_contact.HitPosition.HasValue ? " | " + Vector3D.Distance(Me.GetPosition(), _contact.HitPosition.Value).ToString("0.0", culture) + " m to hit" : "") +
+                    " | " + _contact.Velocity.Length().ToString("0.0", culture) + " m/s\n" +
                     _contact.FormatGps("Radar last fix");
             }
             Echo(status);

@@ -18,6 +18,10 @@ namespace SpaceEngineers.Libs.RadarCore
         public DateTime LastSeen { get; private set; }
         public bool IsActive { get; private set; }
 
+        public static bool IsShipContact(MyDetectedEntityType type, long entityId, bool ownConstruct) =>
+            entityId != 0 && !ownConstruct &&
+            (type == MyDetectedEntityType.SmallGrid || type == MyDetectedEntityType.LargeGrid);
+
         public void Update(MyDetectedEntityInfo info, double range, DateTime now)
         {
             EntityId = info.EntityId;

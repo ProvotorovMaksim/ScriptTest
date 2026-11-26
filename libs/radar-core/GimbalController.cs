@@ -10,6 +10,7 @@ namespace SpaceEngineers.Libs.RadarCore
         private IMyMotorStator _azimuth;
         private IMyMotorStator _elevation;
         private readonly AzimuthSweep _sweep = new AzimuthSweep();
+        private readonly GimbalAxisProgress _searchElevationProgress = new GimbalAxisProgress();
         private readonly GimbalAxisProgress _sweepProgress = new GimbalAxisProgress();
         private readonly GimbalAxisProgress _azimuthPark = new GimbalAxisProgress();
         private readonly GimbalAxisProgress _elevationPark = new GimbalAxisProgress();
@@ -56,6 +57,7 @@ namespace SpaceEngineers.Libs.RadarCore
         {
             _sweep.Reset();
             _sweepProgress.Reset();
+            _searchElevationProgress.Reset();
             var forward = camera.WorldMatrix.Forward;
             var direction = target - camera.GetPosition();
             Drive(_azimuth, forward, direction, _config.InvertAzimuth,
@@ -85,8 +87,18 @@ namespace SpaceEngineers.Libs.RadarCore
             double lower = LowerLimit(_azimuth, _config.PlatformAzimuthMin);
             double upper = UpperLimit(_azimuth, _config.PlatformAzimuthMax);
             double angle = GimbalAngles.InTravelFrame(_azimuth.Angle, lower, upper);
-            _elevation.TargetVelocityRad = 0;
             stalled = false;
+            double elevationError = ParkAxis(_elevation, _config.PlatformElevationMin,
+                _config.PlatformElevationMax, _config.SearchElevationDegrees);
+            if (!AzimuthSweep.IsAtGoal(0, elevationError))
+            {
+                _azimuth.TargetVelocityRad = 0;
+                stalled = _searchElevationProgress.IsStalled(elevationError, now, ProgressStep);
+                if (stalled)
+                    _elevation.TargetVelocityRad = 0;
+                return false;
+            }
+            _searchElevationProgress.Reset();
             if (lower > upper)
             {
                 _azimuth.TargetVelocityRad = 0;
@@ -180,6 +192,7 @@ namespace SpaceEngineers.Libs.RadarCore
             _sweepProgress.Reset();
             _azimuthPark.Reset();
             _elevationPark.Reset();
+            _searchElevationProgress.Reset();
             if (_azimuth != null)
                 _azimuth.TargetVelocityRad = 0;
             if (_elevation != null)

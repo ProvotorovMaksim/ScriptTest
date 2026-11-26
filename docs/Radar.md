@@ -167,3 +167,21 @@ each axis while the pilot leaves the rotation controls neutral.
 `lock` turns toward the lead point until the pilot rotates the ship,
 which returns FCS to `manual`. Both commands use normal-mode thrust
 and turn support checks. An expired measurement removes the correction.
+
+
+### Radar acceptance fixes
+
+Fixed and Gimbal accept separate small and large grids, including friendly
+grids. Planet, Asteroid and grids on the radar's mechanical construct
+are rejected. Reacquisition still requires confirmation of the expected
+entity. The display distinguishes scan limit, center distance and distance
+to the hit position. LOCKED means the last confirming ray is at most
+one second old. COASTING is an older retained track within the existing
+loss timeout. The status also shows the last ray result and last loss.
+
+In Gimbal, set `SearchElevationDegrees=0` (default) or the desired
+search elevation. Search waits for the hinge to settle at that angle
+within its travel limits before stepping the azimuth. Parking uses its
+own angles. Repeat the 60-second Fixed test with nine cameras, target
+at 80 m, and scan limit 150 m. For Gimbal also check return to search
+elevation, tracking a separate ship, and stopping both axes on hardware loss.

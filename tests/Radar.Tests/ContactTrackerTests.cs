@@ -10,6 +10,18 @@ namespace Tests.Radar.Tests
     [TestFixture]
     public class ContactTrackerTests
     {
+        [TestCase(MyDetectedEntityType.Planet, 1L, false, false)]
+        [TestCase(MyDetectedEntityType.Asteroid, 1L, false, false)]
+        [TestCase(MyDetectedEntityType.SmallGrid, 0L, false, false)]
+        [TestCase(MyDetectedEntityType.SmallGrid, 1L, true, false)]
+        [TestCase(MyDetectedEntityType.LargeGrid, 1L, true, false)]
+        [TestCase(MyDetectedEntityType.SmallGrid, 1L, false, true)]
+        [TestCase(MyDetectedEntityType.LargeGrid, 1L, false, true)]
+        public void AcceptsOnlySeparateShipGrids(MyDetectedEntityType type, long id, bool own, bool expected)
+        {
+            Assert.That(ContactTracker.IsShipContact(type, id, own), Is.EqualTo(expected));
+        }
+
         [Test]
         public void TrackerAgesAndRetainsLastMeasurementUntilExplicitlyCleared()
         {

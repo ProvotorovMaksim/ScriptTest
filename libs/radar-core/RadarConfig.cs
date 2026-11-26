@@ -18,6 +18,7 @@ namespace SpaceEngineers.Libs.RadarCore
         public string ElevationBlock = "[RADAR ELEVATION]";
         public double ParkAzimuthDegrees;
         public double ParkElevationDegrees;
+        public double SearchElevationDegrees;
         public bool InvertAzimuth = false;
         public bool InvertElevation = false;
         public double PlatformSpeedLimitDegreesPerSecond = 10.0;
@@ -127,6 +128,8 @@ namespace SpaceEngineers.Libs.RadarCore
             {
                 ParseParkAngle(value, ref config.ParkAzimuthDegrees);
             }
+            else if (string.Equals(key, "SearchElevationDegrees", StringComparison.OrdinalIgnoreCase))
+                ParseParkAngle(value, ref config.SearchElevationDegrees);
             else if (string.Equals(key, "ParkElevationDegrees", StringComparison.OrdinalIgnoreCase))
             {
                 ParseParkAngle(value, ref config.ParkElevationDegrees);
